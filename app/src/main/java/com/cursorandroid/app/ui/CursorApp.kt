@@ -23,12 +23,15 @@ import androidx.window.core.layout.WindowSizeClass
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.LaunchRequest
 import com.cursorandroid.app.data.notify.RunWatchScheduler
+import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.Attachments
+import com.cursorandroid.app.data.repo.AutoUpdateScheduler
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
+import com.cursorandroid.app.ui.settings.AutoUpdatePrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
@@ -72,6 +75,22 @@ private fun CursorAppContent(
     onAppearanceChanged: () -> Unit,
 ) {
     var signedIn by rememberSaveable { mutableStateOf(container.store.hasKey()) }
+    var askedAutoUpdate by rememberSaveable { mutableStateOf(container.store.autoUpdateAsked) }
+    val context = LocalContext.current
+    if (!askedAutoUpdate) {
+        AutoUpdatePrompt { enabled ->
+            container.store.autoUpdate = enabled
+            container.store.autoUpdateAsked = true
+            askedAutoUpdate = true
+            if (enabled) {
+                if (!AppUpdate.canInstall(context)) {
+                    AppUpdate.requestInstallPermission(context)
+                }
+                AutoUpdateScheduler.sync(context.applicationContext, true)
+            }
+        }
+        return
+    }
     if (!signedIn) {
         SignInScreen(
             container = container,
@@ -90,10 +109,9 @@ private fun CursorAppContent(
     var composeEnvType by rememberSaveable { mutableStateOf("cloud") }
     var composeEnvName by rememberSaveable { mutableStateOf<String?>(null) }
     var composeTick by rememberSaveable { mutableStateOf(0) }
-    val context = LocalContext.current
-
     LaunchedEffect(signedIn) {
         if (signedIn) RunWatchScheduler.resume(context.applicationContext)
+        AutoUpdateScheduler.sync(context.applicationContext, container.store.autoUpdate)
     }
 
     LaunchedEffect(launch.nonce) {
