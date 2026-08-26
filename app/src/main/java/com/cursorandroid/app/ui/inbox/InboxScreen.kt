@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,10 +25,12 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -53,12 +56,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.activeEnvs
+import com.cursorandroid.app.data.api.isArchived
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.api.mergeInboxAgents
@@ -98,7 +105,7 @@ fun InboxScreen(
     val hiddenIds = metas.filter { it.value.hidden }.keys
     var nextCursor by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<AgentSummary?>(null) }
-    var deleting by remember { mutableStateOf<AgentSummary?>(null) }
+    var deleteIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     val tabs = remember(showEnvs, showRemote) { InboxTabs.visible(showEnvs, showRemote) }
@@ -112,8 +119,8 @@ fun InboxScreen(
             if (showSpinner) refreshing = true
             error = null
             try {
-                val page = container.repo.listAllAgents(includeArchived = true)
-                val agents = page.entries().sortedByDescending { it.sortKey() }
+                val page = container.repo.listInboxAgents()
+                val agents = page.entries()
                 items = agents
                 nextCursor = page.nextCursor
                 container.catalog.saveAgents(agents)
@@ -141,10 +148,16 @@ fun InboxScreen(
         }
     }
 
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifeState by lifecycle.currentStateAsState()
     LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
+    }
+    LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
+        if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
         while (true) {
-            delay(3_000)
+            delay(15_000)
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
             try {
                 val page = container.repo.listAgentsPage(includeArchived = true)
                 val agents = mergeInboxAgents(items, page.entries())
@@ -259,6 +272,10 @@ fun InboxScreen(
                             container.chats.toggleFavorite(id)
                             metas = container.chats.snapshot()
                         },
+                        onFavoriteIds = { ids, favorite ->
+                            ids.forEach { container.chats.setFavorite(it, favorite) }
+                            metas = container.chats.snapshot()
+                        },
                         onRename = { renaming = it },
                         onHide = { agent ->
                             container.chats.setHidden(agent.id, true)
@@ -268,19 +285,47 @@ fun InboxScreen(
                             container.chats.setHidden(agent.id, false)
                             metas = container.chats.snapshot()
                         },
+                        onHideIds = { ids, hidden ->
+                            ids.forEach { container.chats.setHidden(it, hidden) }
+                            metas = container.chats.snapshot()
+                        },
                         onArchive = { agent ->
                             scope.launch {
                                 runCatching { container.repo.archive(agent.id) }
-                                reload()
+                                items = items.map {
+                                    if (it.id == agent.id) it.copy(archived = true, status = "ARCHIVED") else it
+                                }
+                                container.catalog.saveAgents(items)
                             }
                         },
                         onUnarchive = { agent ->
                             scope.launch {
                                 runCatching { container.repo.unarchive(agent.id) }
-                                reload()
+                                items = items.map {
+                                    if (it.id == agent.id) it.copy(archived = false) else it
+                                }
+                                container.catalog.saveAgents(items)
                             }
                         },
-                        onDelete = { deleting = it },
+                        onArchiveIds = { ids, archive ->
+                            scope.launch {
+                                ids.forEach { id ->
+                                    runCatching {
+                                        if (archive) container.repo.archive(id) else container.repo.unarchive(id)
+                                    }
+                                }
+                                items = items.map { agent ->
+                                    if (agent.id in ids) {
+                                        agent.copy(archived = archive, status = if (archive) "ARCHIVED" else agent.status)
+                                    } else {
+                                        agent
+                                    }
+                                }
+                                container.catalog.saveAgents(items)
+                            }
+                        },
+                        onDelete = { deleteIds = listOf(it.id) },
+                        onDeleteIds = { deleteIds = it.toList() },
                     )
                 } else if (tab == InboxTab.Envs) {
                     EnvList(
@@ -314,26 +359,30 @@ fun InboxScreen(
             },
         )
     }
-    deleting?.let { agent ->
+    if (deleteIds.isNotEmpty()) {
+        val count = deleteIds.size
         AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("Delete chat") },
-            text = { Text("Permanently delete this agent on Cursor. This cannot be undone.") },
+            onDismissRequest = { deleteIds = emptyList() },
+            title = { Text(if (count == 1) "Delete chat" else "Delete $count chats") },
+            text = { Text("Permanently delete on Cursor. This cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val id = agent.id
-                        deleting = null
+                        val ids = deleteIds
+                        deleteIds = emptyList()
                         scope.launch {
-                            val ok = runCatching { container.repo.deleteAgent(id) }.isSuccess
-                            if (ok) container.forgetLocal(id)
-                            reload()
+                            ids.forEach { id ->
+                                val ok = runCatching { container.repo.deleteAgent(id) }.isSuccess
+                                if (ok) container.forgetLocal(id)
+                            }
+                            items = items.filter { it.id !in ids }
+                            container.catalog.saveAgents(items)
                         }
                     },
                 ) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text("Cancel") }
+                TextButton(onClick = { deleteIds = emptyList() }) { Text("Cancel") }
             },
         )
     }
@@ -414,13 +463,38 @@ private fun AgentList(
     refreshing: Boolean,
     onSelect: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onFavoriteIds: (Collection<String>, Boolean) -> Unit,
     onRename: (AgentSummary) -> Unit,
     onHide: (AgentSummary) -> Unit,
     onUnhide: (AgentSummary) -> Unit,
+    onHideIds: (Collection<String>, Boolean) -> Unit,
     onArchive: (AgentSummary) -> Unit,
     onUnarchive: (AgentSummary) -> Unit,
+    onArchiveIds: (Collection<String>, Boolean) -> Unit,
     onDelete: (AgentSummary) -> Unit,
+    onDeleteIds: (Collection<String>) -> Unit,
 ) {
+    var selecting by remember { mutableStateOf(false) }
+    var checkedIds by remember { mutableStateOf(setOf<String>()) }
+    var bulkMenu by remember { mutableStateOf(false) }
+    if (selecting) {
+        BackHandler {
+            selecting = false
+            checkedIds = emptySet()
+        }
+    }
+    fun toggleChecked(id: String) {
+        checkedIds = if (id in checkedIds) checkedIds - id else checkedIds + id
+    }
+    fun startSelecting(id: String) {
+        selecting = true
+        checkedIds = setOf(id)
+    }
+    fun stopSelecting() {
+        selecting = false
+        checkedIds = emptySet()
+        bulkMenu = false
+    }
     val needle = query.trim()
     val favoriteIds = metas.filter { it.value.favorite }.keys
     val newest = items
@@ -465,33 +539,123 @@ private fun AgentList(
                 contentPadding = PaddingValues(bottom = 88.dp),
             ) {
                 item(key = "search") {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        OutlinedTextField(
-                            value = query,
-                            onValueChange = onQueryChange,
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Search chats") },
-                            singleLine = true,
-                        )
-                        Row(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            FilterChip(
-                                selected = workingOnly,
-                                onClick = { onWorkingOnly(!workingOnly) },
-                                label = { Text("Working") },
+                    Box(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = onQueryChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Search chats") },
+                                singleLine = true,
                             )
-                            FilterChip(
-                                selected = showArchived,
-                                onClick = { onShowArchived(!showArchived) },
-                                label = { Text("Archived") },
-                            )
-                            FilterChip(
-                                selected = showHidden,
-                                onClick = { onShowHidden(!showHidden) },
-                                label = { Text("Hidden") },
-                            )
+                            Row(
+                                modifier = Modifier.padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                FilterChip(
+                                    selected = workingOnly,
+                                    onClick = { onWorkingOnly(!workingOnly) },
+                                    label = { Text("Working") },
+                                )
+                                FilterChip(
+                                    selected = showArchived,
+                                    onClick = { onShowArchived(!showArchived) },
+                                    label = { Text("Archived") },
+                                )
+                                FilterChip(
+                                    selected = showHidden,
+                                    onClick = { onShowHidden(!showHidden) },
+                                    label = { Text("Hidden") },
+                                )
+                            }
+                        }
+                        if (selecting) {
+                            Surface(
+                                modifier = Modifier.matchParentSize(),
+                                color = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 6.dp,
+                                shadowElevation = 6.dp,
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(onClick = { stopSelecting() }) {
+                                        Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
+                                    }
+                                    Text(
+                                        if (checkedIds.isEmpty()) "Select chats" else "${checkedIds.size} selected",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Box {
+                                        TextButton(
+                                            onClick = { bulkMenu = true },
+                                            enabled = checkedIds.isNotEmpty(),
+                                        ) { Text("Bulk actions") }
+                                        DropdownMenu(expanded = bulkMenu, onDismissRequest = { bulkMenu = false }) {
+                                            DropdownMenuItem(
+                                                text = { Text("Favorite") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onFavoriteIds(checkedIds, true)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Unfavorite") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onFavoriteIds(checkedIds, false)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Hide") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onHideIds(checkedIds, true)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Unhide") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onHideIds(checkedIds, false)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Archive") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onArchiveIds(checkedIds, true)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Unarchive") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onArchiveIds(checkedIds, false)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Delete") },
+                                                onClick = {
+                                                    bulkMenu = false
+                                                    onDeleteIds(checkedIds)
+                                                    stopSelecting()
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -507,7 +671,12 @@ private fun AgentList(
                             selected = agent.id == selectedId,
                             favorite = true,
                             hidden = metas[agent.id]?.hidden == true,
-                            onClick = { onSelect(agent.id) },
+                            selecting = selecting,
+                            checked = agent.id in checkedIds,
+                            onClick = {
+                                if (selecting) toggleChecked(agent.id) else onSelect(agent.id)
+                            },
+                            onLongClick = { startSelecting(agent.id) },
                             onToggleFavorite = { onToggleFavorite(agent.id) },
                             onRename = { onRename(agent) },
                             onHide = { onHide(agent) },
@@ -530,7 +699,12 @@ private fun AgentList(
                         selected = agent.id == selectedId,
                         favorite = false,
                         hidden = metas[agent.id]?.hidden == true,
-                        onClick = { onSelect(agent.id) },
+                        selecting = selecting,
+                        checked = agent.id in checkedIds,
+                        onClick = {
+                            if (selecting) toggleChecked(agent.id) else onSelect(agent.id)
+                        },
+                        onLongClick = { startSelecting(agent.id) },
                         onToggleFavorite = { onToggleFavorite(agent.id) },
                         onRename = { onRename(agent) },
                         onHide = { onHide(agent) },
@@ -705,7 +879,10 @@ private fun AgentRow(
     selected: Boolean,
     favorite: Boolean,
     hidden: Boolean,
+    selecting: Boolean,
+    checked: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRename: () -> Unit,
     onHide: () -> Unit,
@@ -719,15 +896,18 @@ private fun AgentRow(
     var menu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val gitLine = git?.line().orEmpty()
-    val archived = agent.archived == true
+    val archived = agent.isArchived()
     Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
-                .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(start = if (selecting) 4.dp else 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (selecting) {
+                Checkbox(checked = checked, onCheckedChange = null)
+            }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     name,

@@ -101,7 +101,7 @@ class LocalChatStore(context: Context) {
         }
 
     var inboxShowArchived: Boolean
-        get() = durable.getBoolean(INBOX_ARCHIVED, true)
+        get() = durable.getBoolean(INBOX_ARCHIVED, false)
         set(value) {
             durable.edit { putBoolean(INBOX_ARCHIVED, value) }
         }
@@ -146,7 +146,7 @@ class LocalChatStore(context: Context) {
         private const val ALL = "meta"
         private const val MIRROR = "chat_meta"
         private const val INBOX_WORKING = "inbox_working_only"
-        private const val INBOX_ARCHIVED = "inbox_show_archived"
+        private const val INBOX_ARCHIVED = "inbox_archived_view"
         private const val INBOX_HIDDEN = "inbox_show_hidden"
     }
 }

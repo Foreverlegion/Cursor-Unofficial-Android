@@ -23,6 +23,8 @@ import com.cursorandroid.app.data.api.StreamEvent
 import com.cursorandroid.app.data.api.foldAgentPages
 import com.cursorandroid.app.data.api.gitHost
 import com.cursorandroid.app.data.api.gitPath
+import com.cursorandroid.app.data.api.markCloudArchived
+import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -80,6 +82,14 @@ class AgentRepository(
             cursor = next
         }
         return foldAgentPages(pages, MAX_PAGES)
+    }
+
+    suspend fun listInboxAgents(): AgentListResponse {
+        val all = listAllAgents(includeArchived = true)
+        val active = listAllAgents(includeArchived = false)
+        val marked = markCloudArchived(all.entries(), active.entries())
+            .sortedByDescending { it.sortKey() }
+        return AgentListResponse(items = marked, nextCursor = all.nextCursor)
     }
 
     suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
