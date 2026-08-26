@@ -355,6 +355,21 @@ fun markCloudArchived(
     }
 }
 
+fun AgentSummary.withDetail(detail: AgentDetail): AgentSummary {
+    return copy(
+        name = detail.name ?: name,
+        status = detail.status ?: status,
+        env = detail.env ?: env,
+        updatedAt = detail.updatedAt ?: updatedAt,
+        latestRunId = detail.latestRunId ?: latestRunId,
+        archived = when {
+            detail.archived == true -> true
+            detail.status.equals("ARCHIVED", ignoreCase = true) -> true
+            else -> archived
+        },
+    )
+}
+
 fun reconcileAgent(existing: AgentSummary?, incoming: AgentSummary): AgentSummary {
     if (existing == null) return incoming
     val archived = incoming.isArchived() || existing.isArchived()

@@ -22,6 +22,22 @@ class InboxAgentsTest {
     }
 
     @Test
+    fun mergeReplacesStaleIdleWithActive() {
+        val stale = agent("a", status = "IDLE")
+        val fresh = agent("a", status = "ACTIVE")
+        val merged = mergeInboxAgents(listOf(stale), listOf(fresh))
+        assertEquals("ACTIVE", merged.single().status)
+    }
+
+    @Test
+    fun withDetailReplacesStaleIdle() {
+        val stale = agent("a", status = "IDLE")
+        val detail = AgentDetail(id = "a", name = "a", status = "ACTIVE", latestRunId = "run-1")
+        assertEquals("ACTIVE", stale.withDetail(detail).status)
+        assertEquals("run-1", stale.withDetail(detail).latestRunId)
+    }
+
+    @Test
     fun visibleInboxShowsArchivedOnlyWhenSelected() {
         val live = agent("live", archived = false)
         val archived = agent("archived", archived = true)
