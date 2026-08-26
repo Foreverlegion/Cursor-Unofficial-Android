@@ -109,6 +109,12 @@ class ApiKeyStore(context: Context) {
             notifyPrefs.edit { putBoolean(AUTO_UPDATE_ASKED, value) }
         }
 
+    var batteryAsked: Boolean
+        get() = notifyPrefs.getBoolean(BATTERY_ASKED, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(BATTERY_ASKED, value) }
+        }
+
     var githubToken: String?
         get() = readSecret(GITHUB)
         set(value) {
@@ -207,6 +213,7 @@ class ApiKeyStore(context: Context) {
         private const val SHOW_INBOX_REMOTE = "show_inbox_remote"
         private const val AUTO_UPDATE = "auto_update"
         private const val AUTO_UPDATE_ASKED = "auto_update_asked"
+        private const val BATTERY_ASKED = "battery_asked"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.window.core.layout.WindowSizeClass
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.LaunchRequest
+import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.Attachments
@@ -32,6 +33,7 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
 import com.cursorandroid.app.ui.settings.AutoUpdatePrompt
+import com.cursorandroid.app.ui.settings.BatteryPrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
@@ -76,16 +78,31 @@ private fun CursorAppContent(
 ) {
     var signedIn by rememberSaveable { mutableStateOf(container.store.hasKey()) }
     var askedAutoUpdate by rememberSaveable { mutableStateOf(container.store.autoUpdateAsked) }
+    var askedBattery by rememberSaveable { mutableStateOf(container.store.batteryAsked) }
     val context = LocalContext.current
+    LaunchedEffect(askedBattery) {
+        if (!askedBattery && BatteryExemption.isExempt(context)) {
+            container.store.batteryAsked = true
+            askedBattery = true
+        }
+    }
+    if (!askedBattery && !BatteryExemption.isExempt(context)) {
+        BatteryPrompt { allow ->
+            container.store.batteryAsked = true
+            askedBattery = true
+            if (allow) {
+                BatteryExemption.requestExempt(context)
+            }
+        }
+        return
+    }
     if (!askedAutoUpdate) {
         AutoUpdatePrompt { enabled ->
             container.store.autoUpdate = enabled
             container.store.autoUpdateAsked = true
             askedAutoUpdate = true
             if (enabled) {
-                if (!AppUpdate.canInstall(context)) {
-                    AppUpdate.requestInstallPermission(context)
-                }
+                AppUpdate.requestInstallPermission(context)
                 AutoUpdateScheduler.sync(context.applicationContext, true)
             }
         }
