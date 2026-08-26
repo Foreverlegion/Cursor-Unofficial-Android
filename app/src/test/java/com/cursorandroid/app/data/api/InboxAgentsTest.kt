@@ -31,6 +31,29 @@ class InboxAgentsTest {
     }
 
     @Test
+    fun visibleInboxHidesLocalHiddenUnlessAsked() {
+        val shown = agent("shown")
+        val hidden = agent("hidden")
+
+        assertEquals(
+            listOf("shown"),
+            listOf(shown, hidden).visibleInbox(
+                showArchived = true,
+                hiddenIds = setOf("hidden"),
+                showHidden = false,
+            ).map { it.id },
+        )
+        assertEquals(
+            listOf("shown", "hidden"),
+            listOf(shown, hidden).visibleInbox(
+                showArchived = true,
+                hiddenIds = setOf("hidden"),
+                showHidden = true,
+            ).map { it.id },
+        )
+    }
+
+    @Test
     fun foldPagesWalksCursorsAndKeepsOlderItems() {
         val page1 = AgentListResponse(
             items = listOf(agent("new", updatedAt = "2026-08-26T00:00:00.000Z")),

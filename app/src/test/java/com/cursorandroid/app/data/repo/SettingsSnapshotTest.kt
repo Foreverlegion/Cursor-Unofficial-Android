@@ -9,6 +9,13 @@ class SettingsSnapshotTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
+    fun oldChatMetaIsNotHidden() {
+        val meta = json.decodeFromString<ChatMeta>("""{"title":"Old"}""")
+        assertEquals(false, meta.hidden)
+        assertEquals(false, meta.favorite)
+    }
+
+    @Test
     fun oldExportGetsDefaultAppearance() {
         val snap = json.decodeFromString<SettingsSnapshot>("""{"version":1}""")
         assertEquals(0xFFF54E00.toInt(), snap.themeColor)
