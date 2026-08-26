@@ -60,6 +60,8 @@ import com.cursorandroid.app.data.api.AccountOverview
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
+import com.cursorandroid.app.data.repo.AppUpdate
+import com.cursorandroid.app.data.repo.AutoUpdateScheduler
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import java.text.NumberFormat
@@ -96,6 +98,7 @@ fun SettingsScreen(
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
+    var autoUpdate by remember { mutableStateOf(container.store.autoUpdate) }
     var tab by remember { mutableStateOf(SettingsTab.Profile) }
     val context = LocalContext.current
     val fmt = remember { NumberFormat.getIntegerInstance(Locale.US) }
@@ -119,6 +122,7 @@ fun SettingsScreen(
         themeColor = container.store.themeColor
         showInboxEnvs = container.store.showInboxEnvs
         showInboxRemote = container.store.showInboxRemote
+        autoUpdate = container.store.autoUpdate
         onAppearanceChanged()
     }
 
@@ -257,7 +261,23 @@ fun SettingsScreen(
                         )
                         SettingsTab.Account -> AccountTab(
                             container = container,
-                            onImported = { reloadLocal() },
+                            autoUpdate = autoUpdate,
+                            onAutoUpdate = { on ->
+                                autoUpdate = on
+                                container.store.autoUpdate = on
+                                container.store.autoUpdateAsked = true
+                                if (on && !AppUpdate.canInstall(context)) {
+                                    AppUpdate.requestInstallPermission(context)
+                                }
+                                AutoUpdateScheduler.sync(context.applicationContext, on)
+                            },
+                            onImported = {
+                                reloadLocal()
+                                AutoUpdateScheduler.sync(
+                                    context.applicationContext,
+                                    container.store.autoUpdate,
+                                )
+                            },
                             onSignedOut = {
                                 RunWatchScheduler.stop(context.applicationContext)
                                 container.store.clear()
@@ -525,9 +545,22 @@ private fun ConnectionsTab(
 @Composable
 private fun AccountTab(
     container: AppContainer,
+    autoUpdate: Boolean,
+    onAutoUpdate: (Boolean) -> Unit,
     onImported: () -> Unit,
     onSignedOut: () -> Unit,
 ) {
+    Section(
+        title = "Updates",
+        detail = "When on, the app checks GitHub and installs newer releases.",
+    ) {
+        PrefSwitch(
+            title = "Auto update",
+            detail = "Stay on the latest published APK.",
+            checked = autoUpdate,
+            onCheckedChange = onAutoUpdate,
+        )
+    }
     Section(
         title = "Backup",
         detail = "Move settings to another phone or keep a copy before uninstalling.",

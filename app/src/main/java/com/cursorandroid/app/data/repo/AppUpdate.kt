@@ -179,6 +179,18 @@ object AppUpdate {
         return Remote(versionName, versionCode, null, null)
     }
 
+    suspend fun applyIfAvailable(context: Context, token: String? = null): Boolean {
+        val remote = findRemote(token)
+        val here = installed(context)
+        val url = remote.apkUrl ?: return false
+        if (remote.versionCode <= here.versionCode) return false
+        if (!canInstall(context)) return false
+        val apk = download(context, url, token)
+        if (checkReady(context, apk) != null) return false
+        install(context, apk)
+        return true
+    }
+
     suspend fun download(context: Context, url: String, token: String? = null): File {
         if (SafeLinks.githubHttps(url) == null) error("APK URL is not GitHub HTTPS")
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }

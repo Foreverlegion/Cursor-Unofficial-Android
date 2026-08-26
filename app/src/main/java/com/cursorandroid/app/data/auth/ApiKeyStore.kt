@@ -97,6 +97,18 @@ class ApiKeyStore(context: Context) {
             notifyPrefs.edit { putBoolean(SHOW_INBOX_REMOTE, value) }
         }
 
+    var autoUpdate: Boolean
+        get() = notifyPrefs.getBoolean(AUTO_UPDATE, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(AUTO_UPDATE, value) }
+        }
+
+    var autoUpdateAsked: Boolean
+        get() = notifyPrefs.getBoolean(AUTO_UPDATE_ASKED, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(AUTO_UPDATE_ASKED, value) }
+        }
+
     var githubToken: String?
         get() = readSecret(GITHUB)
         set(value) {
@@ -193,6 +205,8 @@ class ApiKeyStore(context: Context) {
         private const val THEME_COLOR = "theme_color"
         private const val SHOW_INBOX_ENVS = "show_inbox_envs"
         private const val SHOW_INBOX_REMOTE = "show_inbox_remote"
+        private const val AUTO_UPDATE = "auto_update"
+        private const val AUTO_UPDATE_ASKED = "auto_update_asked"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()
     }
 }
