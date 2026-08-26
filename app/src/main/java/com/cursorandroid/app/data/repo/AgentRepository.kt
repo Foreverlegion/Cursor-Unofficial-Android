@@ -29,7 +29,9 @@ import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -211,6 +213,23 @@ class AgentRepository(
             .sortedBy { it.displayName().lowercase() }
         if (merged.isNotEmpty()) catalog.saveRepos(merged)
         return merged.ifEmpty { catalog.repos() }
+    }
+
+    suspend fun createGithubRepo(
+        name: String,
+        privateRepo: Boolean,
+        description: String?,
+    ): RepositoryItem {
+        val created = withContext(Dispatchers.IO) {
+            GithubRepos.create(store.githubToken.orEmpty(), name, privateRepo, description)
+        }
+        val next = (listOf(created) + catalog.repos())
+            .distinctBy { it.url.trim().lowercase().removeSuffix(".git") }
+            .sortedBy { it.displayName().lowercase() }
+        catalog.saveRepos(next)
+        val branch = created.defaultBranch?.takeIf { it.isNotBlank() } ?: "main"
+        catalog.saveBranches(created.url, listOf(branch))
+        return created
     }
 
     suspend fun branches(repoUrl: String, defaultBranch: String? = null): List<String> {

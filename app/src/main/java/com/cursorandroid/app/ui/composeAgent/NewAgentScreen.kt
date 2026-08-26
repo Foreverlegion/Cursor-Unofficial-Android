@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -56,6 +57,7 @@ import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.data.repo.withStartupNotice
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
+import com.cursorandroid.app.data.repo.GithubRepos
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
@@ -96,6 +98,9 @@ fun NewAgentScreen(
     var repoMenu by remember { mutableStateOf(false) }
     var branchMenu by remember { mutableStateOf(false) }
     var repoQuery by remember { mutableStateOf("") }
+    var createRepo by remember { mutableStateOf(false) }
+    var newRepoName by remember { mutableStateOf("") }
+    var newRepoPrivate by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
@@ -106,7 +111,7 @@ fun NewAgentScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val providers = remember(repos) {
-        repos.map { it.providerLabel() }.distinct().sortedWith(
+        (listOf("GitHub") + repos.map { it.providerLabel() }).distinct().sortedWith(
             compareBy<String> {
                 when (it) {
                     "GitHub" -> 0
@@ -194,7 +199,15 @@ fun NewAgentScreen(
         }
     }
 
-    LaunchedEffect(provider, providerRepos) {
+    LaunchedEffect(provider) {
+        if (provider != "GitHub") {
+            createRepo = false
+            newRepoName = ""
+        }
+    }
+
+    LaunchedEffect(provider, providerRepos, createRepo) {
+        if (createRepo) return@LaunchedEffect
         if (providerRepos.none { it.url == repoUrl }) {
             repoUrl = providerRepos.firstOrNull()?.url.orEmpty()
             repoQuery = ""
@@ -286,13 +299,6 @@ fun NewAgentScreen(
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                            if (providers.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No GitHub or GitLab repos yet") },
-                                    onClick = { providerMenu = false },
-                                    enabled = false,
-                                )
-                            }
                             providers.forEach { name ->
                                 DropdownMenuItem(
                                     text = { Text(name) },
@@ -323,8 +329,12 @@ fun NewAgentScreen(
                     }
                     ExposedDropdownMenuBox(expanded = repoMenu, onExpandedChange = { repoMenu = it }) {
                         OutlinedTextField(
-                            value = selectedRepo?.displayName()
-                                ?: if (loadingRepos) "Loading repos…" else "Select a repo",
+                            value = when {
+                                createRepo -> "Create new repo"
+                                selectedRepo != null -> selectedRepo.displayName()
+                                loadingRepos -> "Loading repos…"
+                                else -> "Select a repo"
+                            },
                             onValueChange = {},
                             readOnly = true,
                             enabled = provider.isNotBlank(),
@@ -335,6 +345,20 @@ fun NewAgentScreen(
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(expanded = repoMenu, onDismissRequest = { repoMenu = false }) {
+                            if (provider == "GitHub") {
+                                DropdownMenuItem(
+                                    text = { Text("Create new repo") },
+                                    onClick = {
+                                        createRepo = true
+                                        newRepoName = ""
+                                        repoUrl = ""
+                                        startingRef = ""
+                                        branches = emptyList()
+                                        repoMenu = false
+                                    },
+                                )
+                                HorizontalDivider()
+                            }
                             if (visibleRepos.isEmpty()) {
                                 DropdownMenuItem(
                                     text = { Text("No repos for this source") },
@@ -346,6 +370,8 @@ fun NewAgentScreen(
                                 DropdownMenuItem(
                                     text = { Text(repo.displayName()) },
                                     onClick = {
+                                        createRepo = false
+                                        newRepoName = ""
                                         repoUrl = repo.url
                                         repoMenu = false
                                     },
@@ -353,7 +379,35 @@ fun NewAgentScreen(
                             }
                         }
                     }
-                    ExposedDropdownMenuBox(expanded = branchMenu, onExpandedChange = { branchMenu = it }) {
+                    if (createRepo && repoUrl.isBlank()) {
+                        val sanitized = GithubRepos.sanitizeName(newRepoName)
+                        val hasToken = !container.store.githubToken.isNullOrBlank()
+                        OutlinedTextField(
+                            value = newRepoName,
+                            onValueChange = { newRepoName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Name the repo") },
+                            placeholder = { Text("name-the-repo") },
+                            supportingText = {
+                                Text(
+                                    when {
+                                        !hasToken ->
+                                            "Add a GitHub token with repo access in Settings > Connections."
+                                        sanitized.isNotBlank() && sanitized != newRepoName.trim() ->
+                                            "Will be $sanitized"
+                                        else ->
+                                            "Creates a private repo under the token account, with a README on main."
+                                    },
+                                )
+                            },
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = newRepoPrivate, onCheckedChange = { newRepoPrivate = it })
+                            Text("Private")
+                        }
+                    }
+                    if (!createRepo || repoUrl.isNotBlank()) ExposedDropdownMenuBox(expanded = branchMenu, onExpandedChange = { branchMenu = it }) {
                         OutlinedTextField(
                             value = startingRef.ifBlank {
                                 if (loadingBranches) "Loading branches…" else "Select a branch"
@@ -562,6 +616,17 @@ fun NewAgentScreen(
                                     null
                                 }
                                 val named = agentName.trim().takeIf { it.isNotEmpty() }
+                                if (envType == "cloud" && createRepo && repoUrl.isBlank()) {
+                                    val made = container.repo.createGithubRepo(
+                                        name = newRepoName,
+                                        privateRepo = newRepoPrivate,
+                                        description = null,
+                                    )
+                                    repos = container.catalog.repos()
+                                    repoUrl = made.url
+                                    startingRef = made.defaultBranch?.takeIf { it.isNotBlank() } ?: "main"
+                                    createRepo = false
+                                }
                                 val repo = repoUrl.trim()
                                 val branch = startingRef.trim()
                                 val tip = if (envType == "cloud" && repo.isNotBlank() && branch.isNotBlank()) {
@@ -643,7 +708,14 @@ fun NewAgentScreen(
                     },
                     enabled = (prompt.isNotBlank() || attaches.any { it.ok }) && !loading && when (envType) {
                         "machine" -> envName.isNotBlank()
-                        "cloud" -> repoUrl.isNotBlank() && startingRef.isNotBlank()
+                        "cloud" -> {
+                            if (createRepo && repoUrl.isBlank()) {
+                                GithubRepos.sanitizeName(newRepoName).isNotBlank() &&
+                                    !container.store.githubToken.isNullOrBlank()
+                            } else {
+                                repoUrl.isNotBlank() && startingRef.isNotBlank()
+                            }
+                        }
                         else -> true
                     },
                     modifier = Modifier.fillMaxWidth(),
