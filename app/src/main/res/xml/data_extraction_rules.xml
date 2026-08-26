@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="cursor_secure.xml" />
+        <exclude domain="sharedpref" path="cursor_secure_bak.xml" />
+        <exclude domain="sharedpref" path="cursor_secure_fallback.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="cursor_secure.xml" />
+        <exclude domain="sharedpref" path="cursor_secure_bak.xml" />
+        <exclude domain="sharedpref" path="cursor_secure_fallback.xml" />
+    </device-transfer>
+</data-extraction-rules>
