@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.core.content.edit
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.isLiveStatus
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -16,15 +19,16 @@ class NoticeStore(context: Context) {
         encodeDefaults = true
     }
     private val lock = Any()
+    private val visibleFlow = MutableStateFlow<List<Notice>>(emptyList())
+    val feed: StateFlow<List<Notice>> = visibleFlow.asStateFlow()
 
-    fun visible(): List<Notice> {
-        return synchronized(lock) {
-            loadItems()
-                .filter { !it.dismissed }
-                .sortedByDescending { it.at }
-                .take(MAX_VISIBLE)
+    init {
+        synchronized(lock) {
+            visibleFlow.value = visibleOf(loadItems())
         }
     }
+
+    fun visible(): List<Notice> = visibleFlow.value
 
     fun record(
         agentId: String,
@@ -151,6 +155,14 @@ class NoticeStore(context: Context) {
             putString(ALL, json.encodeToString(items.take(MAX_STORED)))
             putString(DISMISSED, json.encodeToString(dismissed.takeLast(MAX_DISMISSED)))
         }
+        visibleFlow.value = visibleOf(items)
+    }
+
+    private fun visibleOf(items: List<Notice>): List<Notice> {
+        return items
+            .filter { !it.dismissed }
+            .sortedByDescending { it.at }
+            .take(MAX_VISIBLE)
     }
 
     private fun cancelShade(ids: List<String>) {
