@@ -21,10 +21,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun AutoUpdatePrompt(
+fun BatteryPrompt(
     onContinue: (Boolean) -> Unit,
 ) {
-    var enabled by remember { mutableStateOf(false) }
+    var enabled by remember { mutableStateOf(true) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -38,9 +38,9 @@ fun AutoUpdatePrompt(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Stay up to date", style = MaterialTheme.typography.headlineMedium)
+            Text("Keep notifications reliable", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "This app can check GitHub for a newer release and install it. If you enable this, you will be taken to Allow this app to install from other sources. You can change this later in Settings.",
+                "Android power management can pause this app and block run notifications. Turn it off for this app if you want alerts when a run finishes. The app is not a background hog: it only polls while a run is active, then every 15 minutes.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -49,7 +49,7 @@ fun AutoUpdatePrompt(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Checkbox(checked = enabled, onCheckedChange = { enabled = it })
-                Text("Enable auto update?")
+                Text("Turn off power management for this app?")
             }
             Button(
                 onClick = { onContinue(enabled) },

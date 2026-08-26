@@ -28,11 +28,15 @@ object AutoUpdateScheduler {
         val net = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
+        val periodic = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .setRequiresBatteryNotLow(true)
+            .build()
         wm.enqueueUniquePeriodicWork(
             PERIODIC,
             ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<AutoUpdateWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(net)
+            PeriodicWorkRequestBuilder<AutoUpdateWorker>(6, TimeUnit.HOURS)
+                .setConstraints(periodic)
                 .build(),
         )
         wm.enqueueUniqueWork(

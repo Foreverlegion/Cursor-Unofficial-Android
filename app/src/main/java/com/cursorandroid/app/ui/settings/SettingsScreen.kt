@@ -55,9 +55,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.api.AccountOverview
 import com.cursorandroid.app.data.api.ModelItem
+import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
@@ -101,6 +104,11 @@ fun SettingsScreen(
     var autoUpdate by remember { mutableStateOf(container.store.autoUpdate) }
     var tab by remember { mutableStateOf(SettingsTab.Profile) }
     val context = LocalContext.current
+    val lifeState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    var unrestrictedBattery by remember { mutableStateOf(BatteryExemption.isExempt(context)) }
+    LaunchedEffect(lifeState) {
+        unrestrictedBattery = BatteryExemption.isExempt(context)
+    }
     val fmt = remember { NumberFormat.getIntegerInstance(Locale.US) }
     val notifyPerm = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -230,6 +238,11 @@ fun SettingsScreen(
                                 container.store.notifyOnApproval = on
                                 if (on) RunWatchScheduler.resume(context.applicationContext)
                             },
+                            unrestrictedBattery = unrestrictedBattery,
+                            onUnrestrictedBattery = {
+                                BatteryExemption.openSettings(context)
+                                unrestrictedBattery = BatteryExemption.isExempt(context)
+                            },
                             showMicrophone = showMicrophone,
                             onShowMicrophone = {
                                 showMicrophone = it
@@ -266,7 +279,7 @@ fun SettingsScreen(
                                 autoUpdate = on
                                 container.store.autoUpdate = on
                                 container.store.autoUpdateAsked = true
-                                if (on && !AppUpdate.canInstall(context)) {
+                                if (on) {
                                     AppUpdate.requestInstallPermission(context)
                                 }
                                 AutoUpdateScheduler.sync(context.applicationContext, on)
@@ -424,6 +437,8 @@ private fun ChatsTab(
     onNotify: (Boolean) -> Unit,
     notifyApprovals: Boolean,
     onNotifyApprovals: (Boolean) -> Unit,
+    unrestrictedBattery: Boolean,
+    onUnrestrictedBattery: (Boolean) -> Unit,
     showMicrophone: Boolean,
     onShowMicrophone: (Boolean) -> Unit,
     modelLabel: String,
@@ -464,6 +479,12 @@ private fun ChatsTab(
             detail = "Shade alert when a tool is waiting. Approve it on your PC.",
             checked = notifyApprovals,
             onCheckedChange = onNotifyApprovals,
+        )
+        PrefSwitch(
+            title = "Unrestricted battery",
+            detail = "Opens Android power management so notifications are not blocked.",
+            checked = unrestrictedBattery,
+            onCheckedChange = onUnrestrictedBattery,
         )
     }
     Section(title = "New chats") {

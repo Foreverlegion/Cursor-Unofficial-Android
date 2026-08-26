@@ -67,12 +67,17 @@ object AppUpdate {
 
     @android.annotation.SuppressLint("UnsafeImplicitIntentLaunch")
     fun requestInstallPermission(context: Context) {
-        context.startActivity(
-            Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                "package:${context.packageName}".toUri(),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+        if (canInstall(context)) return
+        val pkg = context.packageName
+        val direct = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            "package:$pkg".toUri(),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val opened = runCatching { context.startActivity(direct) }.isSuccess
+        if (opened) return
+        val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$pkg".toUri())
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(fallback) }
     }
 
     fun copyUri(context: Context, uri: Uri): File {
