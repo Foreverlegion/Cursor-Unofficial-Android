@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
+      checks: read
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-android-build
@@ -45,6 +47,33 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "tag=v$name" >> "$GITHUB_OUTPUT"
+      - name: Wait for Security and CodeQL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha="${GITHUB_SHA}"
+          deadline=$((SECONDS + 2400))
+          while true; do
+            runs="$(gh run list --commit "$sha" --limit 30 --json name,status,conclusion)"
+            echo "$runs"
+            failed="$(printf '%s' "$runs" | jq -r '.[] | select(.name == "Security" or .name == "CodeQL") | select(.status == "completed") | select(.conclusion != "success" and .conclusion != "skipped") | .name' | sort -u | tr '\n' ' ')"
+            if [ -n "${failed// }" ]; then
+              echo "required checks failed: $failed"
+              exit 1
+            fi
+            security="$(printf '%s' "$runs" | jq -r '[.[] | select(.name == "Security")] | first | if . == null then "missing" else .status + "/" + (.conclusion // "") end')"
+            codeql="$(printf '%s' "$runs" | jq -r '[.[] | select(.name == "CodeQL")] | first | if . == null then "missing" else .status + "/" + (.conclusion // "") end')"
+            echo "Security=$security CodeQL=$codeql"
+            if [ "$security" = "completed/success" ] && [ "$codeql" = "completed/success" ]; then
+              exit 0
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "timed out waiting for Security and CodeQL"
+              exit 1
+            fi
+            sleep 20
+          done
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
