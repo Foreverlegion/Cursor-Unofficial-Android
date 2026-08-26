@@ -64,8 +64,9 @@ import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
-import com.cursorandroid.app.data.api.activeEnvs
+import com.cursorandroid.app.data.api.hostedEnvs
 import com.cursorandroid.app.data.api.isArchived
+import com.cursorandroid.app.data.api.remoteEnvs
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.api.mergeInboxAgents
@@ -132,16 +133,14 @@ fun InboxScreen(
                     runCatching { container.repo.refreshGitSnaps(agents) }
                     git = container.catalog.gitSnaps()
                 }
+                val next = runCatching { container.repo.listComputers(agents) }.getOrDefault(computers)
+                computers = next
+                container.catalog.saveComputers(next)
             } catch (e: Exception) {
                 if (items.isEmpty()) error = e.message ?: "Failed to load agents"
             } finally {
                 refreshing = false
             }
-        }
-        scope.launch {
-            val next = runCatching { container.repo.listComputers(items) }.getOrDefault(computers)
-            computers = next
-            container.catalog.saveComputers(next)
         }
         scope.launch {
             runCatching { container.repo.repositories() }
@@ -168,6 +167,11 @@ fun InboxScreen(
                 container.notices.reconcile(agents, live, container.chatTitles())
                 notices = container.notices.visible()
                 RunWatchScheduler.watchActive(context.applicationContext, agents)
+                val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
+                if (next != null) {
+                    computers = next
+                    container.catalog.saveComputers(next)
+                }
             } catch (_: Exception) {
             }
         }
@@ -329,20 +333,27 @@ fun InboxScreen(
                     )
                 } else if (tab == InboxTab.Envs) {
                     EnvList(
-                        envs = items.visibleInbox(showArchived, hiddenIds, showHidden).activeEnvs(),
+                        envs = items.visibleInbox(showArchived, hiddenIds, showHidden).hostedEnvs(),
                         refreshing = refreshing,
                         onOpen = { env ->
                             env.latestId?.let(onSelect)
                         },
                         onCompose = { env ->
-                            onCompose(env.type, env.composeName())
+                            onCompose(env.composeType(), env.composeName())
                         },
                     )
                 } else {
-                    ComputerList(
+                    RemotePane(
                         computers = computers,
+                        envs = items.visibleInbox(showArchived, hiddenIds, showHidden).remoteEnvs(),
                         refreshing = refreshing,
-                        onSelect = { onCompose("machine", it.name) },
+                        onOpenEnv = { env ->
+                            env.latestId?.let(onSelect)
+                        },
+                        onComposeEnv = { env ->
+                            onCompose(env.composeType(), env.composeName())
+                        },
+                        onSelectComputer = { onCompose("machine", it.name) },
                     )
                 }
             }
@@ -748,7 +759,7 @@ private fun EnvList(
     when {
         envs.isEmpty() && !refreshing -> {
             Text(
-                "No active environments. Start an agent on cloud, a named machine, or a pool.",
+                "No active environments. Start an agent on cloud or a pool.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
             )
@@ -810,15 +821,19 @@ private fun EnvRow(
 }
 
 @Composable
-private fun ComputerList(
+private fun RemotePane(
     computers: List<Computer>,
+    envs: List<ActiveEnv>,
     refreshing: Boolean,
-    onSelect: (Computer) -> Unit,
+    onOpenEnv: (ActiveEnv) -> Unit,
+    onComposeEnv: (ActiveEnv) -> Unit,
+    onSelectComputer: (Computer) -> Unit,
 ) {
-    val online = computers.filter { it.online }
-    val offline = computers.filter { !it.online }
+    val envNames = envs.map { it.name.lowercase() }.toHashSet()
+    val extraOnline = computers.filter { it.online && it.name.lowercase() !in envNames }
+    val extraOffline = computers.filter { !it.online && it.name.lowercase() !in envNames }
     when {
-        computers.isEmpty() && !refreshing -> {
+        computers.isEmpty() && envs.isEmpty() && !refreshing -> {
             Text(
                 "No remotes online. Open Cursor on a PC, stay signed in, and enable Remote Control.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -830,9 +845,26 @@ private fun ComputerList(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 88.dp),
             ) {
-                items(online + offline, key = { it.workerId ?: it.name }) { computer ->
-                    ComputerRow(computer = computer, onClick = { onSelect(computer) })
-                    HorizontalDivider()
+                if (extraOnline.isNotEmpty()) {
+                    item(key = "online") { SectionLabel("Online") }
+                    items(extraOnline, key = { "on:${it.workerId ?: it.name}" }) { computer ->
+                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
+                        HorizontalDivider()
+                    }
+                }
+                if (envs.isNotEmpty()) {
+                    item(key = "chats") { SectionLabel("Chats") }
+                    items(envs, key = { "env:${it.type}:${it.name}" }) { env ->
+                        EnvRow(env = env, onOpen = { onOpenEnv(env) }, onCompose = { onComposeEnv(env) })
+                        HorizontalDivider()
+                    }
+                }
+                if (extraOffline.isNotEmpty()) {
+                    item(key = "offline") { SectionLabel("Offline") }
+                    items(extraOffline, key = { "off:${it.workerId ?: it.name}" }) { computer ->
+                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
+                        HorizontalDivider()
+                    }
                 }
             }
         }

@@ -364,13 +364,13 @@ private fun ProfileTab(
     ) {
         PrefSwitch(
             title = "ENVs",
-            detail = "Active cloud, machine, and pool environments.",
+            detail = "Active cloud and pool environments.",
             checked = showInboxEnvs,
             onCheckedChange = onShowInboxEnvs,
         )
         PrefSwitch(
             title = "Remote",
-            detail = "Named machines with Remote Control.",
+            detail = "Remote Control machines and their chats.",
             checked = showInboxRemote,
             onCheckedChange = onShowInboxRemote,
         )
@@ -559,7 +559,7 @@ private fun ConnectionsTab(
     }
     Section(
         title = "Remote Control",
-        detail = "On the PC: Cursor 3.9.8+, Agents Window, Settings > Agents > Remote Control, then /remote-control. The session should appear under Remote. To start new work on a named machine, use New agent > Machine.",
+        detail = "On the PC: Cursor 3.9.8+, Agents Window, Settings > Agents > Remote Control, then /remote-control. Local remotes show under Remote, not ENVs. To start new work on a named machine, use New agent > Machine.",
     ) {}
 }
 
