@@ -41,8 +41,11 @@ data class AgentSummary(
 @Serializable
 data class AgentListResponse(
     val items: List<AgentSummary> = emptyList(),
+    val agents: List<AgentSummary> = emptyList(),
     val nextCursor: String? = null,
-)
+) {
+    fun entries(): List<AgentSummary> = (items + agents).distinctBy { it.id }
+}
 
 @Serializable
 data class AgentDetail(
@@ -315,6 +318,44 @@ fun prettyProvider(hostOrId: String): String {
 }
 
 fun AgentSummary.sortKey(): String = updatedAt ?: createdAt ?: ""
+
+fun List<AgentSummary>.visibleInbox(showArchived: Boolean): List<AgentSummary> {
+    return if (showArchived) this else filter { it.archived != true }
+}
+
+fun mergeInboxAgents(
+    existing: List<AgentSummary>,
+    incoming: List<AgentSummary>,
+): List<AgentSummary> {
+    if (incoming.isEmpty()) return existing
+    if (existing.isEmpty()) return incoming.distinctBy { it.id }.sortedByDescending { it.sortKey() }
+    val seen = HashSet<String>(existing.size + incoming.size)
+    val out = ArrayList<AgentSummary>(existing.size + incoming.size)
+    for (agent in incoming) {
+        if (seen.add(agent.id)) out += agent
+    }
+    for (agent in existing) {
+        if (seen.add(agent.id)) out += agent
+    }
+    return out.sortedByDescending { it.sortKey() }
+}
+
+fun foldAgentPages(pages: List<AgentListResponse>, maxPages: Int = pages.size): AgentListResponse {
+    val byId = LinkedHashMap<String, AgentSummary>()
+    var next: String? = null
+    for ((index, page) in pages.withIndex()) {
+        if (index >= maxPages) break
+        page.entries().forEach { byId[it.id] = it }
+        val cursor = page.nextCursor?.takeIf { it.isNotBlank() }
+        next = cursor
+        if (cursor == null || page.entries().isEmpty()) {
+            next = null
+            break
+        }
+    }
+    if (pages.size < maxPages) next = null
+    return AgentListResponse(items = byId.values.toList(), nextCursor = next)
+}
 
 fun AgentSummary.isWorking(): Boolean = isLiveStatus(status)
 
