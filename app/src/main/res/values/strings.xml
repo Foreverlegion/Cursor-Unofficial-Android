@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cursor</string>
+    <string name="notify_channel_name">Agent runs</string>
+    <string name="notify_channel_desc">Alerts when a cloud or remote agent run finishes</string>
+    <string name="notify_approval_channel_name">Agent approvals</string>
+    <string name="notify_approval_channel_desc">Alerts when a gated action needs approval on your PC</string>
+</resources>
