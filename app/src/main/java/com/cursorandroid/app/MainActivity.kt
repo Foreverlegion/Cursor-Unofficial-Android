@@ -9,7 +9,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.cursorandroid.app.data.notify.RunNotifier
-import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.ui.CursorApp
 
 class MainActivity : ComponentActivity() {
@@ -42,13 +41,4 @@ class MainActivity : ComponentActivity() {
         app.container.notifier.rememberDismissed(id)
     }
 
-    override fun onResume() {
-        super.onResume()
-        VisibleAgent.setResumed(true)
-    }
-
-    override fun onPause() {
-        VisibleAgent.setResumed(false)
-        super.onPause()
-    }
 }
