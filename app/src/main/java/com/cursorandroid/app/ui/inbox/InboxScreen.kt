@@ -69,6 +69,7 @@ import com.cursorandroid.app.data.api.isArchived
 import com.cursorandroid.app.data.api.remoteEnvs
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
+import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.mergeInboxAgents
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.visibleInbox
@@ -78,7 +79,10 @@ import com.cursorandroid.app.data.repo.ChatMeta
 import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.chat.RenameChatDialog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,28 +118,57 @@ fun InboxScreen(
     val tab = if (selectedTab in tabs) selectedTab else InboxTab.Agents
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var reloadJob by remember { mutableStateOf<Job?>(null) }
+
+    fun applyAgents(agents: List<AgentSummary>, cursor: String?) {
+        items = agents
+        nextCursor = cursor
+        container.catalog.saveAgents(agents)
+        live = container.conversations.liveStatuses()
+        container.notices.reconcile(agents, live, container.chatTitles())
+        notices = container.notices.visible()
+        RunWatchScheduler.watchActive(context.applicationContext, agents)
+    }
 
     fun reload(showSpinner: Boolean = true) {
-        scope.launch {
+        reloadJob?.cancel()
+        reloadJob = scope.launch {
             if (showSpinner) refreshing = true
             error = null
             try {
-                val page = container.repo.listInboxAgents()
-                val agents = page.entries()
-                items = agents
-                nextCursor = page.nextCursor
-                container.catalog.saveAgents(agents)
-                live = container.conversations.liveStatuses()
-                container.notices.reconcile(agents, live, container.chatTitles())
-                notices = container.notices.visible()
-                RunWatchScheduler.watchActive(context.applicationContext, agents)
-                scope.launch {
-                    runCatching { container.repo.refreshGitSnaps(agents) }
-                    git = container.catalog.gitSnaps()
+                var latest = items
+                var first = true
+                container.repo.walkInboxPages { page ->
+                    ensureActive()
+                    val incoming = if (first) {
+                        container.repo.hydrateStatuses(page.entries())
+                    } else {
+                        page.entries()
+                    }
+                    latest = mergeInboxAgents(latest, incoming)
+                    applyAgents(latest, page.nextCursor)
+                    if (first) {
+                        first = false
+                        refreshing = false
+                        metas = container.chats.snapshot()
+                        scope.launch {
+                            runCatching { container.repo.refreshGitSnaps(latest) }
+                            git = container.catalog.gitSnaps()
+                        }
+                        val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
+                        computers = next
+                        container.catalog.saveComputers(next)
+                    }
                 }
-                val next = runCatching { container.repo.listComputers(agents) }.getOrDefault(computers)
-                computers = next
-                container.catalog.saveComputers(next)
+                val marked = runCatching {
+                    val active = container.repo.listAllAgents(includeArchived = false)
+                    markCloudArchived(latest, active.entries())
+                }.getOrNull()
+                if (marked != null) {
+                    applyAgents(marked, nextCursor)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (items.isEmpty()) error = e.message ?: "Failed to load agents"
             } finally {
@@ -155,18 +188,15 @@ fun InboxScreen(
     LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
         if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
         while (true) {
-            delay(15_000)
+            delay(5_000)
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
+            if (reloadJob?.isActive == true) continue
             try {
                 val page = container.repo.listAgentsPage(includeArchived = true)
-                val agents = mergeInboxAgents(items, page.entries())
-                items = agents
-                container.catalog.saveAgents(agents)
+                val incoming = container.repo.hydrateStatuses(page.entries())
+                val agents = mergeInboxAgents(items, incoming)
+                applyAgents(agents, page.nextCursor ?: nextCursor)
                 metas = container.chats.snapshot()
-                live = container.conversations.liveStatuses()
-                container.notices.reconcile(agents, live, container.chatTitles())
-                notices = container.notices.visible()
-                RunWatchScheduler.watchActive(context.applicationContext, agents)
                 val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
                 if (next != null) {
                     computers = next

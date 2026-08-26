@@ -26,8 +26,10 @@ import com.cursorandroid.app.data.api.gitPath
 import com.cursorandroid.app.data.api.isRemoteEnvType
 import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.sortKey
+import com.cursorandroid.app.data.api.withDetail
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -93,6 +95,32 @@ class AgentRepository(
         val marked = markCloudArchived(all.entries(), active.entries())
             .sortedByDescending { it.sortKey() }
         return AgentListResponse(items = marked, nextCursor = all.nextCursor)
+    }
+
+    suspend fun walkInboxPages(onPage: suspend (AgentListResponse) -> Unit) {
+        var cursor: String? = null
+        repeat(MAX_PAGES) {
+            val page = listAgentsPage(includeArchived = true, cursor = cursor)
+            onPage(page)
+            val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+            if (next == null || page.entries().isEmpty()) return
+            cursor = next
+        }
+    }
+
+    suspend fun hydrateStatuses(agents: List<AgentSummary>, limit: Int = 15): List<AgentSummary> {
+        val targets = agents.take(limit)
+        if (targets.isEmpty()) return agents
+        val fresh = coroutineScope {
+            targets.map { agent ->
+                async {
+                    val detail = runCatching { getAgent(agent.id) }.getOrNull() ?: return@async agent
+                    agent.withDetail(detail)
+                }
+            }.awaitAll()
+        }
+        val byId = fresh.associateBy { it.id }
+        return agents.map { byId[it.id] ?: it }
     }
 
     suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
