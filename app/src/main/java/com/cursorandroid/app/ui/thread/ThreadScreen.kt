@@ -483,7 +483,10 @@ class ThreadViewModel(
 
     private fun insertAssistant(merged: MutableList<TranscriptLine>, line: TranscriptLine, runId: String): Boolean {
         val userIdx = merged.indexOfLast { it.kind == "user" && (it.runId == runId || it.id == "user-$runId") }
-        if (userIdx < 0) return false
+        if (userIdx < 0) {
+            merged.add(line)
+            return true
+        }
         var at = userIdx + 1
         while (at < merged.size && merged[at].kind == "tool") {
             at += 1
@@ -854,6 +857,16 @@ fun ThreadScreen(
             (row.line.runId == currentRunId || row.line.id == "assistant-$currentRunId")
     }
     val showTyping = working && !hasReply
+    val waitText = if (showTyping) {
+        waitCopy(
+            receiving = vm.receiving,
+            agentStatus = vm.agent?.status,
+            runStatus = vm.run?.status,
+            envType = vm.agent?.env?.type,
+        )
+    } else {
+        null
+    }
 
     fun openArtifact(item: ArtifactItem) {
         scope.launch {
@@ -1095,7 +1108,7 @@ fun ThreadScreen(
                     }
                     if (showTyping) {
                         item(key = "typing") {
-                            TypingBubble()
+                            TypingBubble(detail = waitText)
                         }
                     }
                 }
@@ -1677,7 +1690,7 @@ private fun ToolCallsBlock(
 }
 
 @Composable
-private fun TypingBubble() {
+private fun TypingBubble(detail: String? = null) {
     val transition = rememberInfiniteTransition(label = "typing")
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1689,6 +1702,14 @@ private fun TypingBubble() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
+        if (!detail.isNullOrBlank()) {
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp))

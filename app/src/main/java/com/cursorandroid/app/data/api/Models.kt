@@ -560,6 +560,9 @@ fun isLiveStatus(status: String?): Boolean {
     return s.isNotEmpty() && !isTerminalStatus(s)
 }
 
+fun isCreatingStatus(status: String?): Boolean =
+    status.equals("CREATING", ignoreCase = true)
+
 fun Run.isTerminal(): Boolean = isTerminalStatus(status)
 
 fun Run.isActive(): Boolean = isLiveStatus(status)

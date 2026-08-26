@@ -1,6 +1,7 @@
 package com.cursorandroid.app.ui.thread
 
 import com.cursorandroid.app.data.repo.TranscriptLine
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,6 +66,32 @@ class WorkBarTest {
                 busy = false,
                 agentStatus = "CREATING",
                 runStatus = null,
+            ),
+        )
+    }
+
+    @Test
+    fun machineWaitExplainsPc() {
+        assertEquals(
+            "Waiting for the PC. Keep Cursor open with Remote Control.",
+            waitCopy(
+                receiving = false,
+                agentStatus = "ACTIVE",
+                runStatus = "CREATING",
+                envType = "machine",
+            ),
+        )
+    }
+
+    @Test
+    fun receivingSkipsWaitCopy() {
+        assertEquals(
+            null,
+            waitCopy(
+                receiving = true,
+                agentStatus = "ACTIVE",
+                runStatus = "RUNNING",
+                envType = "machine",
             ),
         )
     }
