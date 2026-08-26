@@ -1,0 +1,43 @@
+name: setup-android-build
+description: Java, Gradle user-home cache, and Android SDK package cache
+
+inputs:
+  cache-read-only:
+    description: Restore caches without writing new ones
+    required: false
+    default: "false"
+  cache-encryption-key:
+    description: Encrypts the Gradle configuration cache so it can be reused across runs
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: 17
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          /usr/local/lib/android/sdk/platforms
+          /usr/local/lib/android/sdk/build-tools
+          /usr/local/lib/android/sdk/licenses
+          ~/.android
+        key: android-sdk-${{ runner.os }}-api37-agp9.1.1
+        restore-keys: |
+          android-sdk-${{ runner.os }}-
+
+    - uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: 9.3.1
+        cache-read-only: ${{ inputs.cache-read-only }}
+        cache-overwrite-existing: true
+        cache-cleanup: never
+        cache-encryption-key: ${{ inputs.cache-encryption-key }}
+        gradle-home-cache-includes: |
+          caches
+          notifications
+          wrapper
