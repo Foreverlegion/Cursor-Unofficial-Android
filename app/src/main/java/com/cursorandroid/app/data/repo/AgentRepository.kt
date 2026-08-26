@@ -23,6 +23,7 @@ import com.cursorandroid.app.data.api.StreamEvent
 import com.cursorandroid.app.data.api.foldAgentPages
 import com.cursorandroid.app.data.api.gitHost
 import com.cursorandroid.app.data.api.gitPath
+import com.cursorandroid.app.data.api.isRemoteEnvType
 import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.auth.ApiKeyStore
@@ -288,7 +289,7 @@ class AgentRepository(
         val fromAgents = agents
             .mapNotNull { agent ->
                 val env = agent.env ?: return@mapNotNull null
-                if (env.type?.lowercase() != "machine") return@mapNotNull null
+                if (!isRemoteEnvType(env.type)) return@mapNotNull null
                 val name = env.name?.trim().orEmpty()
                 if (name.isEmpty() || name.lowercase() in seen) null
                 else Computer(name = name, online = false, detail = "Seen on a previous agent")

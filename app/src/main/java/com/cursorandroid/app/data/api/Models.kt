@@ -417,8 +417,19 @@ data class ActiveEnv(
     fun typeLabel(): String = when (type) {
         "cloud" -> "Cloud"
         "machine" -> "Machine"
+        "local" -> "Local"
+        "remote" -> "Remote"
         "pool" -> "Pool"
         else -> type.replaceFirstChar { it.uppercase() }
+    }
+
+    fun composeType(): String = if (isRemoteEnvType(type)) "machine" else type
+}
+
+fun isRemoteEnvType(type: String?): Boolean {
+    return when (type?.trim()?.lowercase()) {
+        "machine", "local", "remote" -> true
+        else -> false
     }
 }
 
@@ -429,6 +440,8 @@ fun List<AgentSummary>.activeEnvs(): List<ActiveEnv> {
             when (type) {
                 "cloud" -> "Cloud"
                 "machine" -> "Machine"
+                "local" -> "Local"
+                "remote" -> "Remote"
                 "pool" -> "Pool"
                 else -> type
             }
@@ -451,6 +464,10 @@ fun List<AgentSummary>.activeEnvs(): List<ActiveEnv> {
             .thenBy { it.name.lowercase() },
     )
 }
+
+fun List<AgentSummary>.hostedEnvs(): List<ActiveEnv> = activeEnvs().filter { !isRemoteEnvType(it.type) }
+
+fun List<AgentSummary>.remoteEnvs(): List<ActiveEnv> = activeEnvs().filter { isRemoteEnvType(it.type) }
 
 @Serializable
 data class ArtifactItem(

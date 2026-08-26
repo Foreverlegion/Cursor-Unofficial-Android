@@ -122,16 +122,33 @@ class InboxAgentsTest {
         assertTrue(fromAgents.nextCursor.isNullOrBlank())
     }
 
+    @Test
+    fun localAndMachineEnvsGoToRemoteNotEnvs() {
+        val cloud = agent("cloud", env = Env(type = "cloud"))
+        val pool = agent("pool", env = Env(type = "pool", name = "default"))
+        val machine = agent("pc", env = Env(type = "machine", name = "Office-PC"))
+        val local = agent("local", env = Env(type = "local", name = "Laptop"))
+        val all = listOf(cloud, pool, machine, local)
+
+        assertEquals(listOf("Cloud", "default"), all.hostedEnvs().map { it.name })
+        assertEquals(listOf("Laptop", "Office-PC"), all.remoteEnvs().map { it.name }.sorted())
+        assertTrue(isRemoteEnvType("local"))
+        assertTrue(isRemoteEnvType("machine"))
+        assertEquals("machine", all.remoteEnvs().first().composeType())
+    }
+
     private fun agent(
         id: String,
         updatedAt: String? = null,
         archived: Boolean? = null,
         status: String? = null,
+        env: Env? = null,
     ) = AgentSummary(
         id = id,
         name = id,
         status = status,
         updatedAt = updatedAt,
         archived = archived,
+        env = env,
     )
 }
