@@ -553,7 +553,7 @@ private fun ConnectionsTab(
     }
     Section(
         title = "GitHub",
-        detail = "Only needed if you check for updates against a private repo.",
+        detail = "Needed to create a GitHub repo from New agent, or to check updates against a private repo.",
     ) {
         GithubTokenField(container)
     }
