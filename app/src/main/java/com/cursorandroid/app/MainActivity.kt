@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun consumeNotice(intent: Intent?, app: CursorAndroidApp) {
-        val id = intent?.getStringExtra(RunNotifier.EXTRA_NOTICE_ID)?.takeIf { it.isNotBlank() } ?: return
+        val id = RunNotifier.noticeIdFrom(intent) ?: return
         app.container.notices.dismiss(id)
         app.container.notifier.rememberDismissed(id)
     }

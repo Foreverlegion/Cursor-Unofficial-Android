@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.api.ActiveEnv
@@ -100,7 +101,7 @@ fun InboxScreen(
     var items by remember { mutableStateOf(container.catalog.agents().sortedByDescending { it.sortKey() }) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var metas by remember { mutableStateOf(container.chats.snapshot()) }
-    var notices by remember { mutableStateOf(container.notices.visible()) }
+    val notices by container.notices.feed.collectAsStateWithLifecycle()
     var git by remember { mutableStateOf(container.catalog.gitSnaps()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
@@ -126,7 +127,6 @@ fun InboxScreen(
         container.catalog.saveAgents(agents)
         live = container.conversations.liveStatuses()
         container.notices.reconcile(agents, live, container.chatTitles())
-        notices = container.notices.visible()
         RunWatchScheduler.watchActive(context.applicationContext, agents)
     }
 
@@ -234,17 +234,19 @@ fun InboxScreen(
         ) {
             NoticeTray(
                 notices = notices,
-                onOpen = onSelect,
+                onOpen = { notice ->
+                    container.notices.dismiss(notice.id)
+                    container.notifier.rememberDismissed(notice.id)
+                    onSelect(notice.agentId)
+                },
                 onDismiss = { id ->
                     container.notices.dismiss(id)
                     container.notifier.rememberDismissed(id)
-                    notices = container.notices.visible()
                 },
                 onClear = {
                     val ids = notices.map { it.id }
                     container.notices.dismissAll()
                     ids.forEach { container.notifier.rememberDismissed(it) }
-                    notices = container.notices.visible()
                 },
             )
             if (tabs.size > 1) {
@@ -432,7 +434,7 @@ fun InboxScreen(
 @Composable
 private fun NoticeTray(
     notices: List<Notice>,
-    onOpen: (String) -> Unit,
+    onOpen: (Notice) -> Unit,
     onDismiss: (String) -> Unit,
     onClear: () -> Unit,
 ) {
@@ -459,7 +461,7 @@ private fun NoticeTray(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpen(notice.agentId) }
+                    .clickable { onOpen(notice) }
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

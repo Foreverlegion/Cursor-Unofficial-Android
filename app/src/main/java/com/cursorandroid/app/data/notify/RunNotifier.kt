@@ -162,6 +162,19 @@ class RunNotifier(
 
         private fun seenKey(callId: String) = "approval:$callId"
 
+        fun noticeIdFrom(intent: Intent?): String? {
+            if (intent == null) return null
+            return noticeIdFrom(intent.getStringExtra(EXTRA_NOTICE_ID), intent.data?.toString())
+        }
+
+        fun noticeIdFrom(extra: String?, data: String?): String? {
+            extra?.takeIf { it.isNotBlank() }?.let { return it }
+            val raw = data?.trim().orEmpty()
+            val prefix = "cursor-notice:"
+            if (!raw.startsWith(prefix, ignoreCase = true)) return null
+            return raw.substring(prefix.length).trim().trimStart('/').takeIf { it.isNotBlank() }
+        }
+
         private fun openChat(
             context: Context,
             agentId: String?,
@@ -177,6 +190,8 @@ class RunNotifier(
                 intent.putExtra(EXTRA_AGENT_ID, agentId)
             }
             intent.putExtra(EXTRA_NOTICE_ID, noticeId)
+            intent.data = Uri.parse("cursor-notice:$noticeId")
+            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             return PendingIntent.getActivity(context, requestCode, intent, flags)
         }

@@ -2,6 +2,7 @@ package com.cursorandroid.app.data.notify
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,6 +62,16 @@ class NoticeStoreTest {
     fun shadeIdsMatchInboxAndBar() {
         assertEquals("run-1".hashCode(), shadeId("run-1"))
         assertEquals("approval-call-9".hashCode(), shadeId("approval-call-9"))
+    }
+
+    @Test
+    fun noticeIdReadsExtraThenCursorNoticeUri() {
+        assertEquals("run-1", RunNotifier.noticeIdFrom("run-1", null))
+        assertEquals("approval-call-9", RunNotifier.noticeIdFrom(null, "cursor-notice:approval-call-9"))
+        assertEquals("approval-call-9", RunNotifier.noticeIdFrom(null, "cursor-notice://approval-call-9"))
+        assertEquals("run-1", RunNotifier.noticeIdFrom("run-1", "cursor-notice:other"))
+        assertNull(RunNotifier.noticeIdFrom(null, "https://cursor.com/agents/x"))
+        assertNull(RunNotifier.noticeIdFrom(" ", null))
     }
 
     private fun notice(
