@@ -26,9 +26,9 @@ interface CursorApi {
 
     @GET("v1/agents")
     suspend fun listAgents(
-        @Query("limit") limit: Int = 50,
+        @Query("limit") limit: Int = 100,
         @Query("cursor") cursor: String? = null,
-        @Query("includeArchived") includeArchived: Boolean = false,
+        @Query("includeArchived") includeArchived: Boolean = true,
     ): AgentListResponse
 
     @GET("v1/agents/{id}")

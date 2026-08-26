@@ -62,7 +62,9 @@ import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.activeEnvs
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
+import com.cursorandroid.app.data.api.mergeInboxAgents
 import com.cursorandroid.app.data.api.sortKey
+import com.cursorandroid.app.data.api.visibleInbox
 import com.cursorandroid.app.data.notify.Notice
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.ChatMeta
@@ -104,13 +106,13 @@ fun InboxScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    fun reload(showSpinner: Boolean = items.isEmpty()) {
+    fun reload(showSpinner: Boolean = true) {
         scope.launch {
             if (showSpinner) refreshing = true
             error = null
             try {
-                val page = container.repo.listAgentsPage(includeArchived = showArchived)
-                val agents = page.items.sortedByDescending { it.sortKey() }
+                val page = container.repo.listAllAgents(includeArchived = true)
+                val agents = page.entries().sortedByDescending { it.sortKey() }
                 items = agents
                 nextCursor = page.nextCursor
                 container.catalog.saveAgents(agents)
@@ -138,15 +140,14 @@ fun InboxScreen(
         }
     }
 
-    LaunchedEffect(showArchived) {
+    LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
         while (true) {
             delay(3_000)
             try {
-                val page = container.repo.listAgentsPage(includeArchived = showArchived)
-                val agents = page.items.sortedByDescending { it.sortKey() }
+                val page = container.repo.listAgentsPage(includeArchived = true)
+                val agents = mergeInboxAgents(items, page.entries())
                 items = agents
-                nextCursor = page.nextCursor
                 container.catalog.saveAgents(agents)
                 metas = container.chats.snapshot()
                 live = container.conversations.liveStatuses()
@@ -211,12 +212,12 @@ fun InboxScreen(
             }
             PullToRefreshBox(
                 isRefreshing = refreshing,
-                onRefresh = { reload() },
+                onRefresh = { reload(showSpinner = true) },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 if (tab == InboxTab.Agents) {
                     AgentList(
-                        items = items,
+                        items = items.visibleInbox(showArchived),
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
@@ -238,9 +239,9 @@ fun InboxScreen(
                             val cursor = nextCursor ?: return@AgentList
                             scope.launch {
                                 val page = runCatching {
-                                    container.repo.listAgentsPage(includeArchived = showArchived, cursor = cursor)
+                                    container.repo.listAgentsPage(includeArchived = true, cursor = cursor)
                                 }.getOrNull() ?: return@launch
-                                items = (items + page.items).distinctBy { it.id }.sortedByDescending { it.sortKey() }
+                                items = mergeInboxAgents(items, page.entries())
                                 nextCursor = page.nextCursor
                                 container.catalog.saveAgents(items)
                             }
@@ -269,7 +270,7 @@ fun InboxScreen(
                     )
                 } else if (tab == InboxTab.Envs) {
                     EnvList(
-                        envs = items.activeEnvs(),
+                        envs = items.visibleInbox(showArchived).activeEnvs(),
                         refreshing = refreshing,
                         onOpen = { env ->
                             env.latestId?.let(onSelect)
@@ -441,7 +442,10 @@ private fun AgentList(
             )
         }
         else -> {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 88.dp),
+            ) {
                 item(key = "search") {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         OutlinedTextField(
@@ -547,7 +551,10 @@ private fun EnvList(
             )
         }
         else -> {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 88.dp),
+            ) {
                 items(envs, key = { "${it.type}:${it.name}" }) { env ->
                     EnvRow(env = env, onOpen = { onOpen(env) }, onCompose = { onCompose(env) })
                     HorizontalDivider()
@@ -616,7 +623,10 @@ private fun ComputerList(
             )
         }
         else -> {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 88.dp),
+            ) {
                 items(online + offline, key = { it.workerId ?: it.name }) { computer ->
                     ComputerRow(computer = computer, onClick = { onSelect(computer) })
                     HorizontalDivider()

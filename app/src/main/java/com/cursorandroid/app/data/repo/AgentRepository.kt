@@ -20,6 +20,7 @@ import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.api.Run
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.api.StreamEvent
+import com.cursorandroid.app.data.api.foldAgentPages
 import com.cursorandroid.app.data.api.gitHost
 import com.cursorandroid.app.data.api.gitPath
 import com.cursorandroid.app.data.auth.ApiKeyStore
@@ -48,12 +49,37 @@ class AgentRepository(
 
     suspend fun me(): MeResponse = wrap { api.me() }
 
-    suspend fun listAgents(includeArchived: Boolean = false, cursor: String? = null): List<AgentSummary> {
-        return listAgentsPage(includeArchived, cursor).items
+    suspend fun listAgents(includeArchived: Boolean = true, cursor: String? = null): List<AgentSummary> {
+        return if (cursor == null) {
+            listAllAgents(includeArchived).items
+        } else {
+            listAgentsPage(includeArchived, cursor).entries()
+        }
     }
 
-    suspend fun listAgentsPage(includeArchived: Boolean = false, cursor: String? = null): AgentListResponse {
-        return wrap { api.listAgents(includeArchived = includeArchived, cursor = cursor) }
+    suspend fun listAgentsPage(includeArchived: Boolean = true, cursor: String? = null): AgentListResponse {
+        return wrap {
+            api.listAgents(
+                limit = PAGE_SIZE,
+                includeArchived = includeArchived,
+                cursor = cursor,
+            )
+        }
+    }
+
+    suspend fun listAllAgents(includeArchived: Boolean = true): AgentListResponse {
+        val pages = ArrayList<AgentListResponse>()
+        var cursor: String? = null
+        repeat(MAX_PAGES) {
+            val page = listAgentsPage(includeArchived, cursor)
+            pages += page
+            val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+            if (next == null || page.entries().isEmpty()) {
+                return foldAgentPages(pages, MAX_PAGES)
+            }
+            cursor = next
+        }
+        return foldAgentPages(pages, MAX_PAGES)
     }
 
     suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
@@ -417,5 +443,7 @@ class AgentRepository(
 
     companion object {
         private val DEFAULT_BRANCHES = listOf("main", "master", "develop")
+        const val PAGE_SIZE = 100
+        const val MAX_PAGES = 20
     }
 }

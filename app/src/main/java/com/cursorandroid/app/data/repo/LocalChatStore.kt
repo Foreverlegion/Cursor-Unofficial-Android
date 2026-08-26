@@ -95,7 +95,7 @@ class LocalChatStore(context: Context) {
         }
 
     var inboxShowArchived: Boolean
-        get() = durable.getBoolean(INBOX_ARCHIVED, false)
+        get() = durable.getBoolean(INBOX_ARCHIVED, true)
         set(value) {
             durable.edit { putBoolean(INBOX_ARCHIVED, value) }
         }
