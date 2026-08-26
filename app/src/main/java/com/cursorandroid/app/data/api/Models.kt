@@ -319,16 +319,46 @@ fun prettyProvider(hostOrId: String): String {
 
 fun AgentSummary.sortKey(): String = updatedAt ?: createdAt ?: ""
 
+fun AgentSummary.isArchived(): Boolean {
+    if (archived == true) return true
+    return status?.equals("ARCHIVED", ignoreCase = true) == true
+}
+
 fun List<AgentSummary>.visibleInbox(
     showArchived: Boolean,
     hiddenIds: Set<String> = emptySet(),
     showHidden: Boolean = false,
 ): List<AgentSummary> {
     return filter { agent ->
-        if (!showArchived && agent.archived == true) return@filter false
-        if (!showHidden && agent.id in hiddenIds) return@filter false
-        true
+        val archived = agent.isArchived()
+        val hidden = agent.id in hiddenIds
+        when {
+            showArchived && showHidden -> archived || hidden
+            showArchived -> archived && !hidden
+            showHidden -> hidden
+            else -> !archived && !hidden
+        }
     }
+}
+
+fun markCloudArchived(
+    all: List<AgentSummary>,
+    active: List<AgentSummary>,
+): List<AgentSummary> {
+    val activeIds = active.map { it.id }.toHashSet()
+    return all.map { agent ->
+        if (agent.isArchived() || agent.id !in activeIds) {
+            agent.copy(archived = true)
+        } else {
+            agent.copy(archived = false)
+        }
+    }
+}
+
+fun reconcileAgent(existing: AgentSummary?, incoming: AgentSummary): AgentSummary {
+    if (existing == null) return incoming
+    val archived = incoming.isArchived() || existing.isArchived()
+    return incoming.copy(archived = if (archived) true else incoming.archived ?: existing.archived)
 }
 
 fun mergeInboxAgents(
@@ -337,10 +367,12 @@ fun mergeInboxAgents(
 ): List<AgentSummary> {
     if (incoming.isEmpty()) return existing
     if (existing.isEmpty()) return incoming.distinctBy { it.id }.sortedByDescending { it.sortKey() }
+    val prev = existing.associateBy { it.id }
     val seen = HashSet<String>(existing.size + incoming.size)
     val out = ArrayList<AgentSummary>(existing.size + incoming.size)
     for (agent in incoming) {
-        if (seen.add(agent.id)) out += agent
+        if (!seen.add(agent.id)) continue
+        out += reconcileAgent(prev[agent.id], agent)
     }
     for (agent in existing) {
         if (seen.add(agent.id)) out += agent
@@ -503,7 +535,7 @@ data class GitSnap(
 
 fun isTerminalStatus(status: String?): Boolean {
     val s = status?.uppercase().orEmpty()
-    return s == "FINISHED" || s == "ERROR" || s == "CANCELLED" || s == "EXPIRED"
+    return s == "FINISHED" || s == "ERROR" || s == "CANCELLED" || s == "EXPIRED" || s == "ARCHIVED"
 }
 
 fun isLiveStatus(status: String?): Boolean {

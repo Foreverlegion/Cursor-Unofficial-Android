@@ -22,35 +22,60 @@ class InboxAgentsTest {
     }
 
     @Test
-    fun visibleInboxHidesArchivedUnlessAsked() {
+    fun visibleInboxShowsArchivedOnlyWhenSelected() {
         val live = agent("live", archived = false)
         val archived = agent("archived", archived = true)
 
         assertEquals(listOf("live"), listOf(live, archived).visibleInbox(showArchived = false).map { it.id })
-        assertEquals(listOf("live", "archived"), listOf(live, archived).visibleInbox(showArchived = true).map { it.id })
+        assertEquals(listOf("archived"), listOf(live, archived).visibleInbox(showArchived = true).map { it.id })
     }
 
     @Test
-    fun visibleInboxHidesLocalHiddenUnlessAsked() {
+    fun visibleInboxShowsHiddenOnlyWhenSelected() {
         val shown = agent("shown")
         val hidden = agent("hidden")
 
         assertEquals(
             listOf("shown"),
             listOf(shown, hidden).visibleInbox(
-                showArchived = true,
+                showArchived = false,
                 hiddenIds = setOf("hidden"),
                 showHidden = false,
             ).map { it.id },
         )
         assertEquals(
-            listOf("shown", "hidden"),
+            listOf("hidden"),
             listOf(shown, hidden).visibleInbox(
-                showArchived = true,
+                showArchived = false,
                 hiddenIds = setOf("hidden"),
                 showHidden = true,
             ).map { it.id },
         )
+    }
+
+    @Test
+    fun cloudStatusArchivedCountsAsArchived() {
+        val cloud = agent("cloud", status = "ARCHIVED")
+        assertTrue(cloud.isArchived())
+        assertEquals(listOf<String>(), listOf(cloud).visibleInbox(showArchived = false).map { it.id })
+        assertEquals(listOf("cloud"), listOf(cloud).visibleInbox(showArchived = true).map { it.id })
+    }
+
+    @Test
+    fun markCloudArchivedUsesActiveListGap() {
+        val kept = agent("kept")
+        val gone = agent("gone")
+        val marked = markCloudArchived(listOf(kept, gone), listOf(kept))
+        assertEquals(false, marked.first { it.id == "kept" }.archived)
+        assertEquals(true, marked.first { it.id == "gone" }.archived)
+    }
+
+    @Test
+    fun mergeKeepsKnownArchivedFlag() {
+        val existing = agent("a", archived = true)
+        val incoming = agent("a", archived = null, status = "FINISHED")
+        val merged = mergeInboxAgents(listOf(existing), listOf(incoming))
+        assertTrue(merged.single().isArchived())
     }
 
     @Test
