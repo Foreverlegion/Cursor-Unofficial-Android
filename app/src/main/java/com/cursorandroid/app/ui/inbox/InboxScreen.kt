@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,12 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -94,7 +93,9 @@ fun InboxScreen(
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
+    var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
     var workingOnly by remember { mutableStateOf(container.chats.inboxWorkingOnly) }
+    val hiddenIds = metas.filter { it.value.hidden }.keys
     var nextCursor by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<AgentSummary?>(null) }
     var deleting by remember { mutableStateOf<AgentSummary?>(null) }
@@ -217,7 +218,7 @@ fun InboxScreen(
             ) {
                 if (tab == InboxTab.Agents) {
                     AgentList(
-                        items = items.visibleInbox(showArchived),
+                        items = items.visibleInbox(showArchived, hiddenIds, showHidden),
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
@@ -228,6 +229,11 @@ fun InboxScreen(
                         onShowArchived = {
                             showArchived = it
                             container.chats.inboxShowArchived = it
+                        },
+                        showHidden = showHidden,
+                        onShowHidden = {
+                            showHidden = it
+                            container.chats.inboxShowHidden = it
                         },
                         workingOnly = workingOnly,
                         onWorkingOnly = {
@@ -254,6 +260,14 @@ fun InboxScreen(
                             metas = container.chats.snapshot()
                         },
                         onRename = { renaming = it },
+                        onHide = { agent ->
+                            container.chats.setHidden(agent.id, true)
+                            metas = container.chats.snapshot()
+                        },
+                        onUnhide = { agent ->
+                            container.chats.setHidden(agent.id, false)
+                            metas = container.chats.snapshot()
+                        },
                         onArchive = { agent ->
                             scope.launch {
                                 runCatching { container.repo.archive(agent.id) }
@@ -270,7 +284,7 @@ fun InboxScreen(
                     )
                 } else if (tab == InboxTab.Envs) {
                     EnvList(
-                        envs = items.visibleInbox(showArchived).activeEnvs(),
+                        envs = items.visibleInbox(showArchived, hiddenIds, showHidden).activeEnvs(),
                         refreshing = refreshing,
                         onOpen = { env ->
                             env.latestId?.let(onSelect)
@@ -390,6 +404,8 @@ private fun AgentList(
     onQueryChange: (String) -> Unit,
     showArchived: Boolean,
     onShowArchived: (Boolean) -> Unit,
+    showHidden: Boolean,
+    onShowHidden: (Boolean) -> Unit,
     workingOnly: Boolean,
     onWorkingOnly: (Boolean) -> Unit,
     canLoadMore: Boolean,
@@ -399,6 +415,8 @@ private fun AgentList(
     onSelect: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onRename: (AgentSummary) -> Unit,
+    onHide: (AgentSummary) -> Unit,
+    onUnhide: (AgentSummary) -> Unit,
     onArchive: (AgentSummary) -> Unit,
     onUnarchive: (AgentSummary) -> Unit,
     onDelete: (AgentSummary) -> Unit,
@@ -469,6 +487,11 @@ private fun AgentList(
                                 onClick = { onShowArchived(!showArchived) },
                                 label = { Text("Archived") },
                             )
+                            FilterChip(
+                                selected = showHidden,
+                                onClick = { onShowHidden(!showHidden) },
+                                label = { Text("Hidden") },
+                            )
                         }
                     }
                 }
@@ -483,9 +506,12 @@ private fun AgentList(
                             git = git[agent.id],
                             selected = agent.id == selectedId,
                             favorite = true,
+                            hidden = metas[agent.id]?.hidden == true,
                             onClick = { onSelect(agent.id) },
                             onToggleFavorite = { onToggleFavorite(agent.id) },
                             onRename = { onRename(agent) },
+                            onHide = { onHide(agent) },
+                            onUnhide = { onUnhide(agent) },
                             onArchive = { onArchive(agent) },
                             onUnarchive = { onUnarchive(agent) },
                             onDelete = { onDelete(agent) },
@@ -503,9 +529,12 @@ private fun AgentList(
                         git = git[agent.id],
                         selected = agent.id == selectedId,
                         favorite = false,
+                        hidden = metas[agent.id]?.hidden == true,
                         onClick = { onSelect(agent.id) },
                         onToggleFavorite = { onToggleFavorite(agent.id) },
                         onRename = { onRename(agent) },
+                        onHide = { onHide(agent) },
+                        onUnhide = { onUnhide(agent) },
                         onArchive = { onArchive(agent) },
                         onUnarchive = { onUnarchive(agent) },
                         onDelete = { onDelete(agent) },
@@ -675,9 +704,12 @@ private fun AgentRow(
     git: GitSnap?,
     selected: Boolean,
     favorite: Boolean,
+    hidden: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRename: () -> Unit,
+    onHide: () -> Unit,
+    onUnhide: () -> Unit,
     onArchive: () -> Unit,
     onUnarchive: () -> Unit,
     onDelete: () -> Unit,
@@ -687,61 +719,57 @@ private fun AgentRow(
     var menu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val gitLine = git?.line().orEmpty()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onRename)
-            .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onToggleFavorite) {
-            Icon(
-                imageVector = if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                contentDescription = if (favorite) "Unstar" else "Star",
-                tint = if (favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                name,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                buildString {
-                    append(agent.status ?: "UNKNOWN")
-                    append(" · ")
-                    append(env)
-                    agent.env?.name?.let { append(" · "); append(it) }
-                    if (gitLine.isNotBlank()) {
-                        append(" · ")
-                        append(gitLine)
-                    }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            val prUrl = git?.prUrl
-            if (!prUrl.isNullOrBlank()) {
+    val archived = agent.archived == true
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "Open PR",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable {
-                        SafeLinks.open(context, prUrl)
-                    },
+                    name,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                 )
+                Text(
+                    buildString {
+                        append(agent.status ?: "UNKNOWN")
+                        append(" · ")
+                        append(env)
+                        agent.env?.name?.let { append(" · "); append(it) }
+                        if (gitLine.isNotBlank()) {
+                            append(" · ")
+                            append(gitLine)
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val prUrl = git?.prUrl
+                if (!prUrl.isNullOrBlank()) {
+                    Text(
+                        "Open PR",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            SafeLinks.open(context, prUrl)
+                        },
+                    )
+                }
             }
-        }
-        IconButton(onClick = { menu = true }) {
-            Icon(Icons.Outlined.MoreVert, contentDescription = "More")
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Outlined.MoreVert, contentDescription = "More")
+            }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
-                text = { Text("Share") },
+                text = { Text(if (favorite) "Unfavorite" else "Favorite") },
                 onClick = {
                     menu = false
-                    ChatShare.send(context, name, agent.id, agent.url)
+                    onToggleFavorite()
                 },
             )
             DropdownMenuItem(
@@ -752,17 +780,24 @@ private fun AgentRow(
                 },
             )
             DropdownMenuItem(
-                text = { Text("Archive") },
+                text = { Text(if (hidden) "Unhide" else "Hide") },
                 onClick = {
                     menu = false
-                    onArchive()
+                    if (hidden) onUnhide() else onHide()
                 },
             )
             DropdownMenuItem(
-                text = { Text("Unarchive") },
+                text = { Text("Share") },
                 onClick = {
                     menu = false
-                    onUnarchive()
+                    ChatShare.send(context, name, agent.id, agent.url)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(if (archived) "Unarchive" else "Archive") },
+                onClick = {
+                    menu = false
+                    if (archived) onUnarchive() else onArchive()
                 },
             )
             DropdownMenuItem(

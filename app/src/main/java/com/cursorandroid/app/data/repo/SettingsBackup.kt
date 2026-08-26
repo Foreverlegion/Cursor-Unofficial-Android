@@ -27,6 +27,7 @@ object SettingsBackup {
             githubToken = container.store.githubToken,
             inboxWorkingOnly = container.chats.inboxWorkingOnly,
             inboxShowArchived = container.chats.inboxShowArchived,
+            inboxShowHidden = container.chats.inboxShowHidden,
             themeColor = container.store.themeColor,
             showInboxEnvs = container.store.showInboxEnvs,
             showInboxRemote = container.store.showInboxRemote,
@@ -63,6 +64,7 @@ object SettingsBackup {
         }
         container.chats.inboxWorkingOnly = snap.inboxWorkingOnly
         container.chats.inboxShowArchived = snap.inboxShowArchived
+        container.chats.inboxShowHidden = snap.inboxShowHidden
         container.store.themeColor = snap.themeColor
         container.store.showInboxEnvs = snap.showInboxEnvs
         container.store.showInboxRemote = snap.showInboxRemote
@@ -100,6 +102,7 @@ data class SettingsSnapshot(
     val githubToken: String? = null,
     val inboxWorkingOnly: Boolean = false,
     val inboxShowArchived: Boolean = false,
+    val inboxShowHidden: Boolean = false,
     val themeColor: Int = 0xFFF54E00.toInt(),
     val showInboxEnvs: Boolean = true,
     val showInboxRemote: Boolean = true,

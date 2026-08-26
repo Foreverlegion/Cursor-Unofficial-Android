@@ -319,8 +319,16 @@ fun prettyProvider(hostOrId: String): String {
 
 fun AgentSummary.sortKey(): String = updatedAt ?: createdAt ?: ""
 
-fun List<AgentSummary>.visibleInbox(showArchived: Boolean): List<AgentSummary> {
-    return if (showArchived) this else filter { it.archived != true }
+fun List<AgentSummary>.visibleInbox(
+    showArchived: Boolean,
+    hiddenIds: Set<String> = emptySet(),
+    showHidden: Boolean = false,
+): List<AgentSummary> {
+    return filter { agent ->
+        if (!showArchived && agent.archived == true) return@filter false
+        if (!showHidden && agent.id in hiddenIds) return@filter false
+        true
+    }
 }
 
 fun mergeInboxAgents(

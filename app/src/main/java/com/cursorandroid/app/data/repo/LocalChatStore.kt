@@ -81,6 +81,12 @@ class LocalChatStore(context: Context) {
         return next
     }
 
+    fun isHidden(agentId: String): Boolean = loadAll()[agentId]?.hidden == true
+
+    fun setHidden(agentId: String, hidden: Boolean) {
+        update(agentId) { it.copy(hidden = hidden) }
+    }
+
     fun favoriteIds(): List<String> {
         return loadAll().entries
             .filter { it.value.favorite }
@@ -98,6 +104,12 @@ class LocalChatStore(context: Context) {
         get() = durable.getBoolean(INBOX_ARCHIVED, true)
         set(value) {
             durable.edit { putBoolean(INBOX_ARCHIVED, value) }
+        }
+
+    var inboxShowHidden: Boolean
+        get() = durable.getBoolean(INBOX_HIDDEN, false)
+        set(value) {
+            durable.edit { putBoolean(INBOX_HIDDEN, value) }
         }
 
     private fun update(agentId: String, block: (ChatMeta) -> ChatMeta) {
@@ -135,6 +147,7 @@ class LocalChatStore(context: Context) {
         private const val MIRROR = "chat_meta"
         private const val INBOX_WORKING = "inbox_working_only"
         private const val INBOX_ARCHIVED = "inbox_show_archived"
+        private const val INBOX_HIDDEN = "inbox_show_hidden"
     }
 }
 
@@ -143,6 +156,7 @@ data class ChatMeta(
     val title: String? = null,
     val favorite: Boolean = false,
     val favoritedAt: Long = 0L,
+    val hidden: Boolean = false,
     val repoUrl: String? = null,
     val baseBranch: String? = null,
     val startSha: String? = null,
