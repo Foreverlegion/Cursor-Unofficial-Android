@@ -19,10 +19,18 @@ class CatalogCache(context: Context) {
     fun agents(): List<AgentSummary> = readList("agents")
     fun computers(): List<Computer> = readList("computers")
     fun repos(): List<RepositoryItem> = readList("repos")
+    fun cloudEnvs(): List<String> = readList("cloud_envs")
 
     fun saveAgents(items: List<AgentSummary>) = write("agents", items)
     fun saveComputers(items: List<Computer>) = write("computers", items)
     fun saveRepos(items: List<RepositoryItem>) = write("repos", items)
+
+    fun rememberCloudEnv(name: String) {
+        val next = name.trim()
+        if (next.isEmpty() || next.equals("Cloud", ignoreCase = true)) return
+        val merged = (cloudEnvs() + next).distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
+        write("cloud_envs", merged)
+    }
 
     fun gitSnaps(): Map<String, GitSnap> {
         val raw = prefs.getString("git", null) ?: return emptyMap()

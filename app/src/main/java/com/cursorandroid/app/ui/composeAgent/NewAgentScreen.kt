@@ -44,6 +44,8 @@ import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
+import com.cursorandroid.app.data.api.cloudCreateTarget
+import com.cursorandroid.app.data.api.namedCloudEnvironments
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelSelection
 import com.cursorandroid.app.data.api.CustomSubagent
@@ -101,6 +103,10 @@ fun NewAgentScreen(
     var createRepo by remember { mutableStateOf(false) }
     var newRepoName by remember { mutableStateOf("") }
     var newRepoPrivate by remember { mutableStateOf(true) }
+    var cloudFromEnv by remember {
+        mutableStateOf(!initialEnvName.isNullOrBlank() && initialEnvType == "cloud")
+    }
+    var cloudEnvMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
@@ -125,6 +131,9 @@ fun NewAgentScreen(
         repos.filter { provider.isBlank() || it.providerLabel() == provider }
     }
     val selectedRepo = providerRepos.firstOrNull { it.url == repoUrl }
+    val cloudEnvs = remember(repos, envName) {
+        container.catalog.agents().namedCloudEnvironments(container.catalog.cloudEnvs() + listOf(envName))
+    }
 
     LaunchedEffect(resetTick) {
         val saved = container.drafts.load(DraftStore.NEW_AGENT)
@@ -140,9 +149,11 @@ fun NewAgentScreen(
         if (!initialEnvName.isNullOrBlank() || initialEnvType != "cloud") {
             envType = initialEnvType
             envName = initialEnvName.orEmpty()
+            cloudFromEnv = initialEnvType == "cloud" && !initialEnvName.isNullOrBlank()
         } else {
             if (saved.envType.isNotBlank()) envType = saved.envType
             if (saved.envName.isNotBlank()) envName = saved.envName
+            cloudFromEnv = saved.envType == "cloud" && saved.envName.isNotBlank() && saved.repoUrl.isBlank()
         }
         if (saved.provider.isNotBlank()) provider = saved.provider
         if (saved.repoUrl.isNotBlank()) repoUrl = saved.repoUrl
@@ -184,7 +195,7 @@ fun NewAgentScreen(
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
         scope.launch {
             computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
-            if (envName.isBlank()) {
+            if (envType == "machine" && envName.isBlank()) {
                 computers.firstOrNull { it.online }?.let { envName = it.name }
             }
         }
@@ -287,6 +298,54 @@ fun NewAgentScreen(
                     FilterChip(selected = envType == "pool", onClick = { envType = "pool" }, label = { Text("Pool") })
                 }
                 if (envType == "cloud") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !cloudFromEnv,
+                            onClick = { cloudFromEnv = false },
+                            label = { Text("From repo") },
+                        )
+                        FilterChip(
+                            selected = cloudFromEnv,
+                            onClick = { cloudFromEnv = true },
+                            label = { Text("Cloud computer") },
+                        )
+                    }
+                    if (cloudFromEnv) {
+                        ExposedDropdownMenuBox(expanded = cloudEnvMenu, onExpandedChange = { cloudEnvMenu = it }) {
+                            OutlinedTextField(
+                                value = envName,
+                                onValueChange = { envName = it },
+                                modifier = Modifier
+                                    .menuAnchor(MenuAnchorType.PrimaryEditable)
+                                    .fillMaxWidth(),
+                                label = { Text("Environment") },
+                                placeholder = { Text("Name of the saved environment") },
+                                supportingText = {
+                                    Text("Uses that Cursor cloud computer (snapshot, secrets, repos). Mutually exclusive with picking a repo here.")
+                                },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cloudEnvMenu) },
+                                singleLine = true,
+                            )
+                            ExposedDropdownMenu(expanded = cloudEnvMenu, onDismissRequest = { cloudEnvMenu = false }) {
+                                if (cloudEnvs.isEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Type a saved environment name") },
+                                        onClick = { cloudEnvMenu = false },
+                                        enabled = false,
+                                    )
+                                }
+                                cloudEnvs.forEach { name ->
+                                    DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = {
+                                            envName = name
+                                            cloudEnvMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    } else {
                     ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
                         OutlinedTextField(
                             value = provider.ifBlank { if (loadingRepos) "Loading…" else "No source connected" },
@@ -443,6 +502,13 @@ fun NewAgentScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = autoPr, onCheckedChange = { autoPr = it })
                         Text("Open PR when finished")
+                    }
+                    }
+                    if (cloudFromEnv) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = autoPr, onCheckedChange = { autoPr = it })
+                            Text("Open PR when finished")
+                        }
                     }
                 } else if (envType == "machine") {
                     val online = computers.filter { it.online }
@@ -616,7 +682,7 @@ fun NewAgentScreen(
                                     null
                                 }
                                 val named = agentName.trim().takeIf { it.isNotEmpty() }
-                                if (envType == "cloud" && createRepo && repoUrl.isBlank()) {
+                                if (envType == "cloud" && !cloudFromEnv && createRepo && repoUrl.isBlank()) {
                                     val made = container.repo.createGithubRepo(
                                         name = newRepoName,
                                         privateRepo = newRepoPrivate,
@@ -629,8 +695,13 @@ fun NewAgentScreen(
                                 }
                                 val repo = repoUrl.trim()
                                 val branch = startingRef.trim()
-                                val tip = if (envType == "cloud" && repo.isNotBlank() && branch.isNotBlank()) {
+                                val tip = if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank() && branch.isNotBlank()) {
                                     runCatching { container.repo.branchTip(repo, branch) }.getOrNull()
+                                } else {
+                                    null
+                                }
+                                val cloudTarget = if (envType == "cloud") {
+                                    cloudCreateTarget(cloudFromEnv, envName, repo, tip?.sha ?: branch.ifBlank { null })
                                 } else {
                                     null
                                 }
@@ -639,17 +710,12 @@ fun NewAgentScreen(
                                     model = modelId.takeIf { it.isNotBlank() }?.let { ModelSelection(it) },
                                     name = named,
                                     env = if (envType == "cloud") {
-                                        null
+                                        cloudTarget?.first
                                     } else {
                                         Env(type = envType, name = envName.trim().ifBlank { null })
                                     },
-                                    repos = if (envType == "cloud" && repo.isNotBlank()) {
-                                        listOf(
-                                            Repo(
-                                                url = repo,
-                                                startingRef = tip?.sha ?: branch.ifBlank { null },
-                                            ),
-                                        )
+                                    repos = if (envType == "cloud") {
+                                        cloudTarget?.second
                                     } else {
                                         null
                                     },
@@ -662,7 +728,10 @@ fun NewAgentScreen(
                                 if (named != null) {
                                     container.chats.setTitle(created.agent.id, named)
                                 }
-                                if (envType == "cloud" && repo.isNotBlank()) {
+                                if (envType == "cloud" && cloudFromEnv) {
+                                    container.catalog.rememberCloudEnv(envName)
+                                }
+                                if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank()) {
                                     container.chats.setRepoBase(
                                         created.agent.id,
                                         repo,
@@ -709,7 +778,9 @@ fun NewAgentScreen(
                     enabled = (prompt.isNotBlank() || attaches.any { it.ok }) && !loading && when (envType) {
                         "machine" -> envName.isNotBlank()
                         "cloud" -> {
-                            if (createRepo && repoUrl.isBlank()) {
+                            if (cloudFromEnv) {
+                                envName.trim().isNotBlank()
+                            } else if (createRepo && repoUrl.isBlank()) {
                                 GithubRepos.sanitizeName(newRepoName).isNotBlank() &&
                                     !container.store.githubToken.isNullOrBlank()
                             } else {

@@ -97,6 +97,7 @@ import com.cursorandroid.app.data.api.Run
 import com.cursorandroid.app.data.api.StreamEvent
 import com.cursorandroid.app.data.api.gitPath
 import com.cursorandroid.app.data.api.isActive
+import com.cursorandroid.app.data.api.isCloudEnvType
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
@@ -999,6 +1000,15 @@ fun ThreadScreen(
                                 ChatShare.send(context, title, agentId, vm.agent?.url)
                             },
                         )
+                        if (isCloudEnvType(vm.agent?.env?.type)) {
+                            DropdownMenuItem(
+                                text = { Text("Open cloud computer") },
+                                onClick = {
+                                    menu = false
+                                    SafeLinks.open(context, ChatShare.url(agentId, vm.agent?.url))
+                                },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Chat properties") },
                             onClick = {
