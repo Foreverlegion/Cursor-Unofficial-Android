@@ -321,7 +321,7 @@ fun NewAgentScreen(
                                 label = { Text("Environment") },
                                 placeholder = { Text("Name of the saved environment") },
                                 supportingText = {
-                                    Text("Uses that Cursor cloud computer (snapshot, secrets, repos). Mutually exclusive with picking a repo here.")
+                                    Text("Saved environment: snapshot, secrets, and repos. Do not also pick a repo.")
                                 },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cloudEnvMenu) },
                                 singleLine = true,
