@@ -6,7 +6,11 @@ import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.cursorandroid.app.data.api.McpServer
-import com.cursorandroid.app.data.repo.SafeLinks
+import com.cursorandroid.app.data.repo.StoredMcpServer
+import com.cursorandroid.app.data.repo.decodeStoredMcps
+import com.cursorandroid.app.data.repo.encodeStoredMcps
+import com.cursorandroid.app.data.repo.migrateLegacyMcp
+import com.cursorandroid.app.data.repo.storedMcpsToApi
 
 class ApiKeyStore(context: Context) {
     private val app = context.applicationContext
@@ -52,15 +56,15 @@ class ApiKeyStore(context: Context) {
         }
 
     var mcpName: String
-        get() = notifyPrefs.getString(MCP_NAME, "").orEmpty()
+        get() = storedMcps().firstOrNull { !it.isStdio() }?.name.orEmpty()
         set(value) {
-            notifyPrefs.edit { putString(MCP_NAME, value.trim()) }
+            upsertLegacyHttp(name = value, url = mcpUrl)
         }
 
     var mcpUrl: String
-        get() = notifyPrefs.getString(MCP_URL, "").orEmpty()
+        get() = storedMcps().firstOrNull { !it.isStdio() }?.url.orEmpty()
         set(value) {
-            notifyPrefs.edit { putString(MCP_URL, value.trim()) }
+            upsertLegacyHttp(name = mcpName, url = value)
         }
 
     var defaultModel: String
@@ -121,12 +125,42 @@ class ApiKeyStore(context: Context) {
             writeSecret(GITHUB, value?.trim()?.takeIf { it.isNotEmpty() })
         }
 
-    fun mcpServers(): List<McpServer>? {
-        val name = mcpName.trim()
-        val url = mcpUrl.trim()
-        if (name.isBlank() || url.isBlank()) return null
-        if (!SafeLinks.isHttps(url)) return null
-        return listOf(McpServer(name = name, type = "http", url = url))
+    fun storedMcps(): List<StoredMcpServer> {
+        val stored = decodeStoredMcps(readSecret(MCP_LIST))
+        if (stored.isNotEmpty()) return stored
+        val legacy = migrateLegacyMcp(
+            notifyPrefs.getString(MCP_NAME, "").orEmpty(),
+            notifyPrefs.getString(MCP_URL, "").orEmpty(),
+        ) ?: return emptyList()
+        saveStoredMcps(listOf(legacy))
+        return listOf(legacy)
+    }
+
+    fun saveStoredMcps(items: List<StoredMcpServer>) {
+        val next = items.take(50)
+        writeSecret(MCP_LIST, if (next.isEmpty()) null else encodeStoredMcps(next))
+        val first = next.firstOrNull { !it.isStdio() }
+        notifyPrefs.edit {
+            putString(MCP_NAME, first?.name.orEmpty())
+            putString(MCP_URL, first?.url.orEmpty())
+        }
+    }
+
+    fun mcpServers(): List<McpServer>? = storedMcpsToApi(storedMcps())
+
+    private fun upsertLegacyHttp(name: String, url: String) {
+        val items = storedMcps().toMutableList()
+        val idx = items.indexOfFirst { !it.isStdio() }
+        val next = StoredMcpServer(
+            id = items.getOrNull(idx)?.id ?: java.util.UUID.randomUUID().toString(),
+            enabled = items.getOrNull(idx)?.enabled ?: true,
+            name = name,
+            type = com.cursorandroid.app.data.repo.TYPE_HTTP,
+            url = url,
+            headers = items.getOrNull(idx)?.headers.orEmpty(),
+        )
+        if (idx >= 0) items[idx] = next else items.add(next)
+        saveStoredMcps(items)
     }
 
     fun hasKey(): Boolean = !apiKey.isNullOrBlank()
@@ -206,6 +240,7 @@ class ApiKeyStore(context: Context) {
         private const val SHOW_THINKING = "show_thinking"
         private const val MCP_NAME = "mcp_name"
         private const val MCP_URL = "mcp_url"
+        private const val MCP_LIST = "mcp_list"
         private const val DEFAULT_MODEL = "default_model"
         private const val SHOW_MIC = "show_microphone"
         private const val THEME_COLOR = "theme_color"

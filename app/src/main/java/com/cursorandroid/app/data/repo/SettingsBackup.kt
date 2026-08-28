@@ -20,6 +20,7 @@ object SettingsBackup {
             notifyOnApproval = container.store.notifyOnApproval,
             mcpName = container.store.mcpName,
             mcpUrl = container.store.mcpUrl,
+            mcpServers = container.store.storedMcps(),
             showThinking = container.store.showThinking,
             showToolCalls = container.store.showToolCalls,
             defaultModel = container.store.defaultModel,
@@ -53,8 +54,12 @@ object SettingsBackup {
         }
         container.store.notifyOnComplete = snap.notifyOnComplete
         container.store.notifyOnApproval = snap.notifyOnApproval
-        container.store.mcpName = snap.mcpName
-        container.store.mcpUrl = snap.mcpUrl
+        if (snap.mcpServers.isNotEmpty()) {
+            container.store.saveStoredMcps(snap.mcpServers)
+        } else if (snap.mcpName.isNotBlank() || snap.mcpUrl.isNotBlank()) {
+            container.store.mcpName = snap.mcpName
+            container.store.mcpUrl = snap.mcpUrl
+        }
         container.store.showThinking = snap.showThinking && !snap.hideThinking
         container.store.showToolCalls = snap.showToolCalls && !snap.hideTools
         container.store.defaultModel = snap.defaultModel
@@ -93,6 +98,7 @@ data class SettingsSnapshot(
     val notifyOnApproval: Boolean = true,
     val mcpName: String = "",
     val mcpUrl: String = "",
+    val mcpServers: List<StoredMcpServer> = emptyList(),
     val showThinking: Boolean = true,
     val showToolCalls: Boolean = true,
     val hideThinking: Boolean = false,
