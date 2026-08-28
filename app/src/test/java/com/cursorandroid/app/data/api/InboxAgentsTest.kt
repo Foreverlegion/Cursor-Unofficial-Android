@@ -153,6 +153,33 @@ class InboxAgentsTest {
         assertEquals("machine", all.remoteEnvs().first().composeType())
     }
 
+    @Test
+    fun namedCloudEnvironmentsSkipGenericCloud() {
+        val generic = agent("a", env = Env(type = "cloud"))
+        val named = agent("b", env = Env(type = "cloud", name = "thermal-nexus"))
+        val machine = agent("c", env = Env(type = "machine", name = "Office-PC"))
+        assertEquals(
+            listOf("saved", "thermal-nexus"),
+            listOf(generic, named, machine).namedCloudEnvironments(listOf("saved", "Cloud")),
+        )
+    }
+
+    @Test
+    fun cloudCreateUsesNamedEnvWithoutRepos() {
+        val (env, repos) = cloudCreateTarget(true, "thermal-nexus", "https://github.com/acme/app", "main")
+        assertEquals("cloud", env?.type)
+        assertEquals("thermal-nexus", env?.name)
+        assertNull(repos)
+    }
+
+    @Test
+    fun cloudCreateFromRepoOmitsEnv() {
+        val (env, repos) = cloudCreateTarget(false, "", "https://github.com/acme/app", "main")
+        assertNull(env)
+        assertEquals("https://github.com/acme/app", repos?.single()?.url)
+        assertEquals("main", repos?.single()?.startingRef)
+    }
+
     private fun agent(
         id: String,
         updatedAt: String? = null,

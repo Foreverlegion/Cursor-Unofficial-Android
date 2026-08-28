@@ -448,6 +448,43 @@ fun isRemoteEnvType(type: String?): Boolean {
     }
 }
 
+fun isCloudEnvType(type: String?): Boolean {
+    val key = type?.trim()?.lowercase().orEmpty()
+    return key.isEmpty() || key == "cloud"
+}
+
+fun Env?.namedCloud(): String? {
+    if (!isCloudEnvType(this?.type)) return null
+    val name = this?.name?.trim().orEmpty()
+    if (name.isBlank() || name.equals("Cloud", ignoreCase = true)) return null
+    return name
+}
+
+fun List<AgentSummary>.namedCloudEnvironments(extra: List<String> = emptyList()): List<String> {
+    val extras = extra.mapNotNull { raw ->
+        val name = raw.trim()
+        if (name.isEmpty() || name.equals("Cloud", ignoreCase = true)) null else name
+    }
+    return (mapNotNull { it.env.namedCloud() } + extras)
+        .distinctBy { it.lowercase() }
+        .sortedBy { it.lowercase() }
+}
+
+fun cloudCreateTarget(
+    fromSavedEnv: Boolean,
+    envName: String,
+    repoUrl: String,
+    startingRef: String?,
+): Pair<Env?, List<Repo>?> {
+    val name = envName.trim()
+    if (fromSavedEnv && name.isNotBlank()) {
+        return Env(type = "cloud", name = name) to null
+    }
+    val repo = repoUrl.trim()
+    if (repo.isBlank()) return null to null
+    return null to listOf(Repo(url = repo, startingRef = startingRef?.trim()?.takeIf { it.isNotEmpty() }))
+}
+
 fun List<AgentSummary>.activeEnvs(): List<ActiveEnv> {
     return groupBy { agent ->
         val type = agent.env?.type?.trim()?.lowercase().orEmpty().ifBlank { "cloud" }
