@@ -96,8 +96,6 @@ fun SettingsScreen(
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
     var modelItems by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelMenu by remember { mutableStateOf(false) }
-    var mcpName by remember { mutableStateOf(container.store.mcpName) }
-    var mcpUrl by remember { mutableStateOf(container.store.mcpUrl) }
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
@@ -125,8 +123,6 @@ fun SettingsScreen(
         showThinking = container.store.showThinking
         defaultModel = container.store.defaultModel
         showMicrophone = container.store.showMicrophone
-        mcpName = container.store.mcpName
-        mcpUrl = container.store.mcpUrl
         themeColor = container.store.themeColor
         showInboxEnvs = container.store.showInboxEnvs
         showInboxRemote = container.store.showInboxRemote
@@ -261,16 +257,6 @@ fun SettingsScreen(
                         )
                         SettingsTab.Connections -> ConnectionsTab(
                             container = container,
-                            mcpName = mcpName,
-                            onMcpName = {
-                                mcpName = it
-                                container.store.mcpName = it
-                            },
-                            mcpUrl = mcpUrl,
-                            onMcpUrl = {
-                                mcpUrl = it
-                                container.store.mcpUrl = it
-                            },
                         )
                         SettingsTab.Account -> AccountTab(
                             container = container,
@@ -521,35 +507,12 @@ private fun ChatsTab(
 @Composable
 private fun ConnectionsTab(
     container: AppContainer,
-    mcpName: String,
-    onMcpName: (String) -> Unit,
-    mcpUrl: String,
-    onMcpUrl: (String) -> Unit,
 ) {
     Section(
         title = "MCP",
-        detail = "Saved on this phone. Applied to new agents and follow-ups. Leave blank to skip.",
+        detail = "Saved on this phone. Enabled servers are attached to new agents and follow-ups. The agent calls their tools.",
     ) {
-        OutlinedTextField(
-            value = mcpName,
-            onValueChange = onMcpName,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Server name") },
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = mcpUrl,
-            onValueChange = onMcpUrl,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("HTTPS URL") },
-            singleLine = true,
-            isError = mcpUrl.isNotBlank() && !SafeLinks.isHttps(mcpUrl),
-            supportingText = {
-                if (mcpUrl.isNotBlank() && !SafeLinks.isHttps(mcpUrl)) {
-                    Text("HTTPS URL required")
-                }
-            },
-        )
+        McpListSection(container.store)
     }
     Section(
         title = "GitHub",

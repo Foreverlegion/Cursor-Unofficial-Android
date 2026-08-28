@@ -95,6 +95,8 @@ data class McpServer(
     val url: String? = null,
     val command: String? = null,
     val args: List<String>? = null,
+    val headers: Map<String, String>? = null,
+    val env: Map<String, String>? = null,
 )
 
 @Serializable
