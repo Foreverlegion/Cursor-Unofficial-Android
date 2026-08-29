@@ -896,6 +896,8 @@ fun ThreadScreen(
         showTools = container.store.showToolCalls
         showThinking = container.store.showThinking
         showMicrophone = container.store.showMicrophone
+        muted = container.chats.isMuted(agentId)
+        favorite = container.chats.isFavorite(agentId)
         vm.refresh()
     }
 
