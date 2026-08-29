@@ -824,6 +824,7 @@ fun ThreadScreen(
     )
     var draft by remember { mutableStateOf("") }
     var favorite by remember { mutableStateOf(container.chats.isFavorite(agentId)) }
+    var muted by remember { mutableStateOf(container.chats.isMuted(agentId)) }
     var localTitle by remember { mutableStateOf(container.chats.title(agentId)) }
     var renaming by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -991,6 +992,14 @@ fun ThreadScreen(
                             onClick = {
                                 menu = false
                                 favorite = container.chats.toggleFavorite(agentId)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (muted) "Unmute notifications" else "Mute notifications") },
+                            onClick = {
+                                menu = false
+                                muted = container.chats.toggleMuted(agentId)
+                                if (muted) container.notices.cancelShadeForAgent(agentId)
                             },
                         )
                         DropdownMenuItem(

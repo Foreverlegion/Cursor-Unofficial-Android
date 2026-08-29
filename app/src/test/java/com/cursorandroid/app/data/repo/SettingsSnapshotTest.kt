@@ -13,6 +13,7 @@ class SettingsSnapshotTest {
         val meta = json.decodeFromString<ChatMeta>("""{"title":"Old"}""")
         assertEquals(false, meta.hidden)
         assertEquals(false, meta.favorite)
+        assertEquals(false, meta.muted)
     }
 
     @Test

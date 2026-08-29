@@ -87,6 +87,18 @@ class LocalChatStore(context: Context) {
         update(agentId) { it.copy(hidden = hidden) }
     }
 
+    fun isMuted(agentId: String): Boolean = loadAll()[agentId]?.muted == true
+
+    fun setMuted(agentId: String, muted: Boolean) {
+        update(agentId) { it.copy(muted = muted) }
+    }
+
+    fun toggleMuted(agentId: String): Boolean {
+        val next = !isMuted(agentId)
+        setMuted(agentId, next)
+        return next
+    }
+
     fun favoriteIds(): List<String> {
         return loadAll().entries
             .filter { it.value.favorite }
@@ -157,6 +169,7 @@ data class ChatMeta(
     val favorite: Boolean = false,
     val favoritedAt: Long = 0L,
     val hidden: Boolean = false,
+    val muted: Boolean = false,
     val repoUrl: String? = null,
     val baseBranch: String? = null,
     val startSha: String? = null,

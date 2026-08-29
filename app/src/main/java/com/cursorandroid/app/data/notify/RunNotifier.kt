@@ -64,7 +64,7 @@ class RunNotifier(
         val noticeId = "approval-$id"
         val title = chatTitle(agentId, agentName)
         if (!notices.recordApproval(agentId, title, id, ask.body)) return
-        if (VisibleAgent.shouldSuppress()) return
+        if (skipShade(agentId)) return
         if (!NotifyPermission.granted(context)) return
         ensureChannel()
         val notifyId = shadeId(noticeId)
@@ -90,7 +90,7 @@ class RunNotifier(
         if (!terminal) return
         if (!fresh) return
         if (!claim(runId)) return
-        if (VisibleAgent.shouldSuppress()) return
+        if (skipShade(agentId)) return
         if (!NotifyPermission.granted(context)) return
 
         ensureChannel()
@@ -114,6 +114,10 @@ class RunNotifier(
             .setDeleteIntent(dismissShade(context, runId, notifyId))
             .build()
         NotifyShade.post(context, notifyId, notification)
+    }
+
+    private fun skipShade(agentId: String): Boolean {
+        return chats.isMuted(agentId) || VisibleAgent.shouldSuppress()
     }
 
     fun rememberDismissed(noticeId: String) {
