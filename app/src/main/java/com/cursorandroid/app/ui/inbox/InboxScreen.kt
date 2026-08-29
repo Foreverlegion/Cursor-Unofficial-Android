@@ -308,6 +308,11 @@ fun InboxScreen(
                             container.chats.toggleFavorite(id)
                             metas = container.chats.snapshot()
                         },
+                        onToggleMute = { id ->
+                            val muted = container.chats.toggleMuted(id)
+                            if (muted) container.notices.cancelShadeForAgent(id)
+                            metas = container.chats.snapshot()
+                        },
                         onFavoriteIds = { ids, favorite ->
                             ids.forEach { container.chats.setFavorite(it, favorite) }
                             metas = container.chats.snapshot()
@@ -506,6 +511,7 @@ private fun AgentList(
     refreshing: Boolean,
     onSelect: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onToggleMute: (String) -> Unit,
     onFavoriteIds: (Collection<String>, Boolean) -> Unit,
     onRename: (AgentSummary) -> Unit,
     onHide: (AgentSummary) -> Unit,
@@ -714,6 +720,7 @@ private fun AgentList(
                             selected = agent.id == selectedId,
                             favorite = true,
                             hidden = metas[agent.id]?.hidden == true,
+                            muted = metas[agent.id]?.muted == true,
                             selecting = selecting,
                             checked = agent.id in checkedIds,
                             onClick = {
@@ -721,6 +728,7 @@ private fun AgentList(
                             },
                             onLongClick = { startSelecting(agent.id) },
                             onToggleFavorite = { onToggleFavorite(agent.id) },
+                            onToggleMute = { onToggleMute(agent.id) },
                             onRename = { onRename(agent) },
                             onHide = { onHide(agent) },
                             onUnhide = { onUnhide(agent) },
@@ -742,6 +750,7 @@ private fun AgentList(
                         selected = agent.id == selectedId,
                         favorite = false,
                         hidden = metas[agent.id]?.hidden == true,
+                        muted = metas[agent.id]?.muted == true,
                         selecting = selecting,
                         checked = agent.id in checkedIds,
                         onClick = {
@@ -749,6 +758,7 @@ private fun AgentList(
                         },
                         onLongClick = { startSelecting(agent.id) },
                         onToggleFavorite = { onToggleFavorite(agent.id) },
+                        onToggleMute = { onToggleMute(agent.id) },
                         onRename = { onRename(agent) },
                         onHide = { onHide(agent) },
                         onUnhide = { onUnhide(agent) },
@@ -943,11 +953,13 @@ private fun AgentRow(
     selected: Boolean,
     favorite: Boolean,
     hidden: Boolean,
+    muted: Boolean,
     selecting: Boolean,
     checked: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleMute: () -> Unit,
     onRename: () -> Unit,
     onHide: () -> Unit,
     onUnhide: () -> Unit,
@@ -984,6 +996,7 @@ private fun AgentRow(
                         append(" · ")
                         append(env)
                         agent.env?.name?.let { append(" · "); append(it) }
+                        if (muted) append(" · muted")
                         if (gitLine.isNotBlank()) {
                             append(" · ")
                             append(gitLine)
@@ -1028,6 +1041,13 @@ private fun AgentRow(
                 onClick = {
                     menu = false
                     if (hidden) onUnhide() else onHide()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(if (muted) "Unmute notifications" else "Mute notifications") },
+                onClick = {
+                    menu = false
+                    onToggleMute()
                 },
             )
             DropdownMenuItem(

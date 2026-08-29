@@ -96,6 +96,13 @@ class NoticeStore(context: Context) {
         cancelShade(ids)
     }
 
+    fun cancelShadeForAgent(agentId: String) {
+        val ids = synchronized(lock) {
+            loadItems().filter { it.agentId == agentId }.map { it.id }
+        }
+        cancelShade(ids)
+    }
+
     fun dismissAgent(agentId: String) {
         val ids: List<String>
         synchronized(lock) {
