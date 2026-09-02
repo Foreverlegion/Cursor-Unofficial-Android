@@ -72,3 +72,5 @@ Built and maintained in my spare time. Features track what the public Cloud Agen
 Issues and APKs live in this repository: [Foreverlegion/Cursor-Unofficial-Android](https://github.com/Foreverlegion/Cursor-Unofficial-Android).
 
 If you work at Cursor and want this taken down or renamed, open an issue. I will handle it. I am not trying to pass this off as yours.
+
+I have asked the moderators on the Cursor forum to review this repository. If someone at Cursor or Anysphere wants what I have built, I will transfer ownership of the repo to a developer there. No payment, no conditions. I made this so Cloud Agents could live on a phone. If the people who make Cursor want to take it from here, it is theirs.

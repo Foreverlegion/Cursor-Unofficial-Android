@@ -41,7 +41,7 @@ jobs:
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
             gradle wrapper --gradle-version 9.3.1
           fi
-          ./gradlew --no-daemon :app:assembleDebug :app:compileReleaseKotlin
+          ./gradlew --no-daemon --no-build-cache --rerun-tasks :app:compileDebugKotlin :app:compileReleaseKotlin
       - uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
