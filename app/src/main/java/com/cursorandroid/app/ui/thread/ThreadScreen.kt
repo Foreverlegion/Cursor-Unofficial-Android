@@ -231,6 +231,7 @@ class ThreadViewModel(
         thumbs: List<String>,
         appContext: android.content.Context,
         attaches: List<AttachItem> = emptyList(),
+        caption: String = "",
     ) {
         val shown = label.ifBlank { prompt.text }.trim()
         if (shown.isEmpty() && prompt.images.isNullOrEmpty()) return
@@ -244,7 +245,7 @@ class ThreadViewModel(
             queued = run?.isActive() == true || outbound.isNotEmpty(),
             thumbs = thumbs,
         )
-        outbound.add(QueuedOutbound(localId, prompt, attaches))
+        outbound.add(QueuedOutbound(localId, prompt, attaches, caption))
         persistQueue()
         viewModelScope.launch { flushOutbound() }
     }
@@ -389,12 +390,13 @@ class ThreadViewModel(
         try {
             val created = container.repo.followUp(
                 agentId,
-                next.prompt,
+                outboundPrompt(next),
                 mode = followMode.takeIf { it.isNotBlank() },
                 model = followModel.takeIf { it.isNotBlank() }?.let { ModelSelection(it) },
             )
             outbound.removeAll { it.id == next.id }
             persistQueue()
+            Attachments.forget(next.attaches)
             run = created
             assistantBuf = StringBuilder()
             thinkingBuf = StringBuilder()
@@ -432,16 +434,28 @@ class ThreadViewModel(
         if (saved.isEmpty()) {
             val leftover = lines.filter { it.kind == "user" && it.queued && it.runId == null }
             leftover.forEach { line ->
-                outbound.add(QueuedOutbound(line.id, Prompt(line.text), emptyList()))
+                val thumbs = line.thumbs.mapIndexed { index, path ->
+                    Attachments.fromCache(path, "image-$index.jpg", "image/jpeg")
+                }.filter { it.ok }
+                outbound.add(
+                    QueuedOutbound(
+                        id = line.id,
+                        prompt = Attachments.prompt(line.text, thumbs),
+                        attaches = thumbs,
+                        caption = line.text,
+                    ),
+                )
             }
         } else {
             saved.forEach { item ->
                 val attaches = item.attaches.toItems()
+                val caption = item.caption.ifBlank { item.text }
                 outbound.add(
                     QueuedOutbound(
                         id = item.id,
-                        prompt = Attachments.prompt(item.text, attaches),
+                        prompt = Attachments.prompt(caption, attaches),
                         attaches = attaches,
+                        caption = caption,
                     ),
                 )
             }
@@ -449,11 +463,25 @@ class ThreadViewModel(
         if (outbound.isNotEmpty()) markUsersQueued()
     }
 
+    private fun outboundPrompt(item: QueuedOutbound): Prompt {
+        val ready = item.attaches.filter { it.ok }.ifEmpty {
+            item.attaches.mapNotNull { attach ->
+                val thumb = attach.thumbPath ?: return@mapNotNull null
+                Attachments.fromCache(thumb, attach.name, "image/jpeg").takeIf { it.ok }
+            }
+        }
+        return if (ready.any { it.image != null || it.excerpt != null }) {
+            Attachments.prompt(item.caption, ready)
+        } else {
+            item.prompt
+        }
+    }
+
     private fun persistQueue() {
         container.drafts.saveQueue(
             agentId,
             outbound.map { item ->
-                QueuedItem(item.id, item.prompt.text, item.attaches.toDraft())
+                QueuedItem(item.id, item.prompt.text, item.attaches.toDraft(), item.caption)
             },
         )
     }
@@ -796,6 +824,7 @@ data class QueuedOutbound(
     val id: String,
     val prompt: Prompt,
     val attaches: List<AttachItem> = emptyList(),
+    val caption: String = "",
 )
 
 class ThreadVmFactory(
@@ -1098,7 +1127,7 @@ fun ThreadScreen(
                                 onEditQueued = if (row.line.queued) {
                                     {
                                         vm.editQueued(row.line.id)?.let { item ->
-                                            draft = item.prompt.text
+                                            draft = item.caption.ifBlank { item.prompt.text }
                                             attaches = item.attaches
                                         }
                                     }
@@ -1238,6 +1267,7 @@ fun ThreadScreen(
                                 ready.mapNotNull { it.thumbPath },
                                 context.applicationContext,
                                 ready,
+                                caption = draft,
                             )
                             draft = ""
                             attaches = emptyList()

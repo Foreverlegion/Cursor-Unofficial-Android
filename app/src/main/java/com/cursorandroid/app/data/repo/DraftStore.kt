@@ -120,6 +120,7 @@ data class QueuedItem(
     val id: String,
     val text: String,
     val attaches: List<DraftAttach> = emptyList(),
+    val caption: String = "",
 )
 
 fun List<AttachItem>.toDraft(): List<DraftAttach> {
