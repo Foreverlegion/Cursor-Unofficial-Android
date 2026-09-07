@@ -9,6 +9,21 @@ object ReleaseNotes {
             !remote.apkUrl.isNullOrBlank()
     }
 
+    fun checkFile(text: String, versionName: String): String? {
+        val name = versionName.trim()
+        if (name.isBlank()) return "versionName is blank"
+        val lines = text.replace("\r\n", "\n").replace('\r', '\n').lines()
+        val start = lines.indexOfFirst { it.isNotBlank() }
+        if (start < 0) return "RELEASE_NOTES.md is empty"
+        val heading = lines[start].trim()
+        if (heading != "# $name") {
+            return "RELEASE_NOTES.md must start with '# $name'"
+        }
+        val body = strip(lines.drop(start + 1).joinToString("\n")).trim()
+        if (body.isEmpty()) return "RELEASE_NOTES.md must describe version $name"
+        return null
+    }
+
     fun display(raw: String?, versionName: String): String {
         val text = strip(raw.orEmpty()).trim()
         if (text.isNotEmpty()) return text.take(MAX_CHARS)
