@@ -4,10 +4,12 @@
         <exclude domain="sharedpref" path="cursor_secure.xml" />
         <exclude domain="sharedpref" path="cursor_secure_bak.xml" />
         <exclude domain="sharedpref" path="cursor_secure_fallback.xml" />
+        <exclude domain="sharedpref" path="cursor_install.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="cursor_secure.xml" />
         <exclude domain="sharedpref" path="cursor_secure_bak.xml" />
         <exclude domain="sharedpref" path="cursor_secure_fallback.xml" />
+        <exclude domain="sharedpref" path="cursor_install.xml" />
     </device-transfer>
 </data-extraction-rules>

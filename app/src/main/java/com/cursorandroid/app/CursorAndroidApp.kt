@@ -6,6 +6,7 @@ import android.os.Bundle
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.data.repo.AutoUpdateScheduler
+import com.cursorandroid.app.data.repo.InstallPulseScheduler
 
 class CursorAndroidApp : Application() {
     lateinit var container: AppContainer
@@ -20,6 +21,7 @@ class CursorAndroidApp : Application() {
             RunWatchScheduler.resume(this)
         }
         AutoUpdateScheduler.sync(this, container.store.autoUpdate)
+        InstallPulseScheduler.sync(this)
     }
 
     private object ForegroundCallbacks : ActivityLifecycleCallbacks {

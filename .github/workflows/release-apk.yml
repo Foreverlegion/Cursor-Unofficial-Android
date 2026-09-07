@@ -40,6 +40,8 @@ jobs:
           CURSOR_ANDROID_STORE_PASSWORD: ${{ secrets.CURSOR_ANDROID_STORE_PASSWORD }}
           CURSOR_ANDROID_KEY_PASSWORD: ${{ secrets.CURSOR_ANDROID_KEY_PASSWORD }}
           CURSOR_ANDROID_KEY_ALIAS: ${{ secrets.CURSOR_ANDROID_KEY_ALIAS }}
+          # Fine-grained PAT: this repo Issues read/write, plus Account Gists read/write.
+          CURSOR_ANDROID_ISSUES_TOKEN: ${{ secrets.CURSOR_ANDROID_ISSUES_TOKEN }}
       - id: ver
         run: |
           code=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -1)

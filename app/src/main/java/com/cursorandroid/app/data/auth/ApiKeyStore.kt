@@ -119,6 +119,12 @@ class ApiKeyStore(context: Context) {
             notifyPrefs.edit { putBoolean(BATTERY_ASKED, value) }
         }
 
+    var shareInstallCount: Boolean
+        get() = notifyPrefs.getBoolean(SHARE_INSTALL, true)
+        set(value) {
+            notifyPrefs.edit { putBoolean(SHARE_INSTALL, value) }
+        }
+
     var githubToken: String?
         get() = readSecret(GITHUB)
         set(value) {
@@ -249,6 +255,7 @@ class ApiKeyStore(context: Context) {
         private const val AUTO_UPDATE = "auto_update"
         private const val AUTO_UPDATE_ASKED = "auto_update_asked"
         private const val BATTERY_ASKED = "battery_asked"
+        private const val SHARE_INSTALL = "share_install_count"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()
     }
 }

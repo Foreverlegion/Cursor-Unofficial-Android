@@ -16,6 +16,13 @@ fun Project.signingProp(name: String): String {
     return fromFile?.takeIf { it.isNotBlank() } ?: System.getenv(name).orEmpty()
 }
 
+fun escapeBuildConfig(value: String): String {
+    return value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("$", "\\$")
+}
+
 val stableKeystore = file("signing/stable.p12")
 val stableStorePassword = signingProp("CURSOR_ANDROID_STORE_PASSWORD")
 val stableKeyPassword = signingProp("CURSOR_ANDROID_KEY_PASSWORD")
@@ -32,8 +39,13 @@ android {
         applicationId = "com.cursorandroid.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 115
-        versionName = "1.0.15"
+        versionCode = 116
+        versionName = "1.0.16"
+        buildConfigField(
+            "String",
+            "APP_ISSUES_TOKEN",
+            "\"${escapeBuildConfig(signingProp("CURSOR_ANDROID_ISSUES_TOKEN"))}\"",
+        )
     }
 
     if (canSignStable) {
@@ -72,6 +84,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
