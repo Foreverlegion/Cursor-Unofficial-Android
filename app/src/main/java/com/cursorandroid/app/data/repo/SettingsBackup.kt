@@ -34,6 +34,7 @@ object SettingsBackup {
             showInboxRemote = container.store.showInboxRemote,
             autoUpdate = container.store.autoUpdate,
             shareInstallCount = container.store.shareInstallCount,
+            skippedUpdateCode = container.store.skippedUpdateCode,
             chats = container.chats.snapshot(),
             conversations = container.conversations.exportAll(),
             drafts = container.drafts.exportAll(),
@@ -76,6 +77,7 @@ object SettingsBackup {
         container.store.showInboxRemote = snap.showInboxRemote
         container.store.autoUpdate = snap.autoUpdate
         container.store.shareInstallCount = snap.shareInstallCount
+        container.store.skippedUpdateCode = snap.skippedUpdateCode
         if (snap.autoUpdate) {
             container.store.autoUpdateAsked = true
         }
@@ -116,6 +118,7 @@ data class SettingsSnapshot(
     val showInboxRemote: Boolean = true,
     val autoUpdate: Boolean = false,
     val shareInstallCount: Boolean = true,
+    val skippedUpdateCode: Long = 0L,
     val chats: Map<String, ChatMeta> = emptyMap(),
     val conversations: Map<String, List<TranscriptLine>> = emptyMap(),
     val drafts: Map<String, ChatDraft> = emptyMap(),

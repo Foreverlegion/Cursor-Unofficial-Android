@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,16 +31,19 @@ import com.cursorandroid.app.data.repo.AutoUpdateScheduler
 import com.cursorandroid.app.data.repo.InstallPulseScheduler
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
+import com.cursorandroid.app.data.repo.ReleaseNotes
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
 import com.cursorandroid.app.ui.settings.AutoUpdatePrompt
 import com.cursorandroid.app.ui.settings.BatteryPrompt
+import com.cursorandroid.app.ui.settings.ReleaseNotesPrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class Pane { Inbox, Compose, Settings }
@@ -127,10 +131,24 @@ private fun CursorAppContent(
     var composeEnvType by rememberSaveable { mutableStateOf("cloud") }
     var composeEnvName by rememberSaveable { mutableStateOf<String?>(null) }
     var composeTick by rememberSaveable { mutableStateOf(0) }
+    var offer by remember { mutableStateOf<AppUpdate.Remote?>(null) }
+    var offerBusy by remember { mutableStateOf(false) }
+    var offerError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(signedIn) {
         if (signedIn) RunWatchScheduler.resume(context.applicationContext)
         AutoUpdateScheduler.sync(context.applicationContext, container.store.autoUpdate)
         InstallPulseScheduler.sync(context.applicationContext)
+    }
+    LaunchedEffect(signedIn, container.store.autoUpdate) {
+        if (!signedIn || !container.store.autoUpdate) return@LaunchedEffect
+        val remote = withContext(Dispatchers.IO) {
+            runCatching { AppUpdate.findRemote(container.store.githubToken) }.getOrNull()
+        } ?: return@LaunchedEffect
+        val here = AppUpdate.installed(context)
+        if (ReleaseNotes.shouldOffer(remote, here.versionCode, container.store.skippedUpdateCode)) {
+            offer = remote
+        }
     }
 
     LaunchedEffect(launch.nonce) {
@@ -165,6 +183,7 @@ private fun CursorAppContent(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (twoPane) {
             Row(Modifier.fillMaxSize()) {
@@ -271,6 +290,36 @@ private fun CursorAppContent(
                 )
             }
         }
+    }
+    val pending = offer
+    if (pending != null) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            ReleaseNotesPrompt(
+                remote = pending,
+                busy = offerBusy,
+                error = offerError,
+                onSkip = {
+                    container.store.skippedUpdateCode = pending.versionCode
+                    offer = null
+                    offerError = null
+                },
+                onUpdate = {
+                    scope.launch {
+                        offerBusy = true
+                        offerError = null
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                AppUpdate.installRemote(context, pending, container.store.githubToken)
+                            }
+                        }.onFailure { fail ->
+                            offerError = fail.message ?: "Update failed"
+                        }
+                        offerBusy = false
+                    }
+                },
+            )
+        }
+    }
     }
 }
 

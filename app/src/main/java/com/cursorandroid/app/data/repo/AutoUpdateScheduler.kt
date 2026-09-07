@@ -56,9 +56,6 @@ class AutoUpdateWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as? CursorAndroidApp ?: return Result.success()
         if (!app.container.store.autoUpdate) return Result.success()
-        runCatching {
-            AppUpdate.applyIfAvailable(applicationContext, app.container.store.githubToken)
-        }
         return Result.success()
     }
 }

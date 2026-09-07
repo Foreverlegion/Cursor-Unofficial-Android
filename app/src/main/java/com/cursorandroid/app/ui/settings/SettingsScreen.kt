@@ -541,11 +541,11 @@ private fun AccountTab(
 ) {
     Section(
         title = "Updates",
-        detail = "When on, the app checks GitHub and installs newer releases.",
+        detail = "When on, the app checks GitHub and shows release notes before installing.",
     ) {
         PrefSwitch(
             title = "Auto update",
-            detail = "Stay on the latest published APK.",
+            detail = "Offer newer published APKs when you open the app.",
             checked = autoUpdate,
             onCheckedChange = onAutoUpdate,
         )
