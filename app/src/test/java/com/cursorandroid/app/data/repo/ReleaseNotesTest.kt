@@ -35,6 +35,23 @@ class ReleaseNotesTest {
     }
 
     @Test
+    fun fileMustMatchVersionAndHaveBody() {
+        assertEquals(null, ReleaseNotes.checkFile("# 1.0.17\n\n- Notes for this release", "1.0.17"))
+        assertEquals(
+            "RELEASE_NOTES.md must start with '# 1.0.18'",
+            ReleaseNotes.checkFile("# 1.0.17\n\n- Old notes", "1.0.18"),
+        )
+        assertEquals(
+            "RELEASE_NOTES.md must describe version 1.0.17",
+            ReleaseNotes.checkFile("# 1.0.17\n\n", "1.0.17"),
+        )
+        assertEquals(
+            "RELEASE_NOTES.md is empty",
+            ReleaseNotes.checkFile("   \n", "1.0.17"),
+        )
+    }
+
+    @Test
     fun displayUsesNotesAndFallback() {
         assertEquals(
             "Fixes\n\n- Faster launch",
