@@ -12,6 +12,8 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -55,6 +57,7 @@ object AppUpdate {
         val versionCode: Long,
         val apkUrl: String?,
         val tag: String?,
+        val notes: String? = null,
     )
 
     fun installed(context: Context): Installed {
@@ -167,7 +170,11 @@ object AppUpdate {
                 if (published.versionCode >= gradle.versionCode) {
                     published
                 } else {
-                    gradle.copy(apkUrl = published.apkUrl ?: gradle.apkUrl, tag = published.tag)
+                    gradle.copy(
+                        apkUrl = published.apkUrl ?: gradle.apkUrl,
+                        tag = published.tag,
+                        notes = published.notes,
+                    )
                 }
             published != null -> published
             gradle != null -> gradle
@@ -187,13 +194,20 @@ object AppUpdate {
     suspend fun applyIfAvailable(context: Context, token: String? = null): Boolean {
         val remote = findRemote(token)
         val here = installed(context)
-        val url = remote.apkUrl ?: return false
-        if (remote.versionCode <= here.versionCode) return false
-        if (!canInstall(context)) return false
-        val apk = download(context, url, token)
-        if (checkReady(context, apk) != null) return false
-        install(context, apk)
+        if (!ReleaseNotes.shouldOffer(remote, here.versionCode, 0L)) return false
+        installRemote(context, remote, token)
         return true
+    }
+
+    suspend fun installRemote(context: Context, remote: Remote, token: String? = null) {
+        val url = remote.apkUrl ?: error("Latest is ${remote.versionName}. No release APK yet.")
+        if (!canInstall(context)) {
+            withContext(Dispatchers.Main.immediate) { requestInstallPermission(context) }
+            error("Allow installs from this app, then try Update App again")
+        }
+        val apk = download(context, url, token)
+        checkReady(context, apk)?.let { error(it) }
+        withContext(Dispatchers.Main.immediate) { install(context, apk) }
     }
 
     suspend fun download(context: Context, url: String, token: String? = null): File {
@@ -259,7 +273,7 @@ object AppUpdate {
         val versionName = Regex("""(\d+\.\d+\.\d+)""").find(title)?.groupValues?.get(1)
             ?: tag.takeIf { it.isNotBlank() }
             ?: return null
-        return Remote(versionName, versionCode, apkUrl, release.tag_name)
+        return Remote(versionName, versionCode, apkUrl, release.tag_name, release.body)
     }
 
     private fun decodeContents(raw: String): String {
@@ -340,6 +354,7 @@ object AppUpdate {
         val draft: Boolean = false,
         val tag_name: String? = null,
         val name: String? = null,
+        val body: String? = null,
         val assets: List<GhAsset> = emptyList(),
     )
 

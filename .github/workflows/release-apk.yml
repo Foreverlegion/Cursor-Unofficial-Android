@@ -6,6 +6,7 @@ on:
     paths:
       - app/build.gradle.kts
       - .github/workflows/release-apk.yml
+      - RELEASE_NOTES.md
   workflow_dispatch:
 
 jobs:
@@ -86,8 +87,9 @@ jobs:
           test -f "$apk"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
+            gh release edit "$tag" --title "$title" --notes-file RELEASE_NOTES.md
           elif git ls-remote --exit-code origin "refs/tags/$tag"; then
-            gh release create "$tag" "$apk" --title "$title" --verify-tag --latest
+            gh release create "$tag" "$apk" --title "$title" --notes-file RELEASE_NOTES.md --verify-tag --latest
           else
-            gh release create "$tag" "$apk" --title "$title" --latest --target "$GITHUB_SHA"
+            gh release create "$tag" "$apk" --title "$title" --notes-file RELEASE_NOTES.md --latest --target "$GITHUB_SHA"
           fi

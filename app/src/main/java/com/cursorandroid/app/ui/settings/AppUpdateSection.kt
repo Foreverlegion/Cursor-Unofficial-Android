@@ -2,9 +2,11 @@ package com.cursorandroid.app.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -18,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.repo.AppUpdate
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +40,9 @@ fun AppUpdateSection(
     var latest by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<AppUpdate.Remote?>(null) }
+    var offerBusy by remember { mutableStateOf(false) }
+    var offerError by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -73,19 +80,10 @@ fun AppUpdateSection(
                                 error = true
                                 "Latest is ${remote.versionName}. No release APK yet."
                             }
-                            !AppUpdate.canInstall(context) -> {
-                                AppUpdate.requestInstallPermission(context)
-                                error = true
-                                "Allow installs from this app, then try Update again"
-                            }
                             else -> {
-                                status = "Installing ${remote.versionName}…"
-                                val apk = withContext(Dispatchers.IO) {
-                                    AppUpdate.download(context, remote.apkUrl, token)
-                                }
-                                AppUpdate.checkReady(context, apk)?.let { throw IllegalStateException(it) }
-                                AppUpdate.install(context, apk)
-                                "Installer opened for ${remote.versionName}"
+                                pending = remote
+                                offerError = null
+                                "Release notes for ${remote.versionName}"
                             }
                         }
                     }.onSuccess { message ->
@@ -112,6 +110,47 @@ fun AppUpdateSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+    val remote = pending
+    if (remote != null) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                ReleaseNotesPrompt(
+                    remote = remote,
+                    busy = offerBusy,
+                    error = offerError,
+                    onSkip = {
+                        container.store.skippedUpdateCode = remote.versionCode
+                        pending = null
+                        offerError = null
+                        status = "Skipped ${remote.versionName}"
+                    },
+                    onUpdate = {
+                        scope.launch {
+                            offerBusy = true
+                            offerError = null
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    AppUpdate.installRemote(context, remote, container.store.githubToken)
+                                }
+                                status = "Installer opened for ${remote.versionName}"
+                            }.onFailure { fail ->
+                                offerError = fail.message ?: "Update failed"
+                                error = true
+                                status = offerError
+                            }
+                            offerBusy = false
+                        }
+                    },
+                )
+            }
         }
     }
 }
