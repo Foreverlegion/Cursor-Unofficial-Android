@@ -23,6 +23,7 @@ class SettingsSnapshotTest {
         assertTrue(snap.showInboxEnvs)
         assertTrue(snap.showInboxRemote)
         assertEquals(false, snap.autoUpdate)
+        assertEquals(true, snap.shareInstallCount)
     }
 
     @Test
@@ -32,11 +33,13 @@ class SettingsSnapshotTest {
             showInboxEnvs = false,
             showInboxRemote = true,
             autoUpdate = true,
+            shareInstallCount = false,
         )
         val again = json.decodeFromString<SettingsSnapshot>(json.encodeToString(SettingsSnapshot.serializer(), snap))
         assertEquals(0xFF3B82F6.toInt(), again.themeColor)
         assertEquals(false, again.showInboxEnvs)
         assertEquals(true, again.showInboxRemote)
         assertEquals(true, again.autoUpdate)
+        assertEquals(false, again.shareInstallCount)
     }
 }

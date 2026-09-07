@@ -65,6 +65,8 @@ import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.AutoUpdateScheduler
+import com.cursorandroid.app.data.repo.InstallPulse
+import com.cursorandroid.app.data.repo.InstallPulseScheduler
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import java.text.NumberFormat
@@ -270,12 +272,14 @@ fun SettingsScreen(
                                 }
                                 AutoUpdateScheduler.sync(context.applicationContext, on)
                             },
+                            showInstallCounts = InstallPulse.isOwner(overview?.me?.userEmail),
                             onImported = {
                                 reloadLocal()
                                 AutoUpdateScheduler.sync(
                                     context.applicationContext,
                                     container.store.autoUpdate,
                                 )
+                                InstallPulseScheduler.sync(context.applicationContext)
                             },
                             onSignedOut = {
                                 RunWatchScheduler.stop(context.applicationContext)
@@ -531,6 +535,7 @@ private fun AccountTab(
     container: AppContainer,
     autoUpdate: Boolean,
     onAutoUpdate: (Boolean) -> Unit,
+    showInstallCounts: Boolean,
     onImported: () -> Unit,
     onSignedOut: () -> Unit,
 ) {
@@ -551,6 +556,10 @@ private fun AccountTab(
     ) {
         SettingsTransfer(container = container, onImported = onImported)
     }
+    FeedbackSection(
+        container = container,
+        showInstallCounts = showInstallCounts,
+    )
     Section(title = "Session") {
         Button(onClick = onSignedOut, modifier = Modifier.fillMaxWidth()) {
             Text("Sign out")
@@ -600,7 +609,7 @@ private fun Section(
 }
 
 @Composable
-private fun PrefSwitch(
+internal fun PrefSwitch(
     title: String,
     detail: String,
     checked: Boolean,
