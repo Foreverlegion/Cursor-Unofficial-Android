@@ -254,7 +254,27 @@ class ThreadViewModel(
         )
         outbound.add(QueuedOutbound(localId, prompt, attaches, caption))
         persistQueue()
-        viewModelScope.launch { flushOutbound() }
+        viewModelScope.launch {
+            if (run?.isActive() == true) {
+                val item = outbound.lastOrNull { it.id == localId }
+                if (item != null && trySteer(item)) {
+                    outbound.removeAll { it.id == localId }
+                    persistQueue()
+                    lines = lines.map { line ->
+                        if (line.id == localId) line.copy(queued = false) else line
+                    }
+                    persist()
+                    return@launch
+                }
+            }
+            flushOutbound()
+        }
+    }
+
+    private suspend fun trySteer(item: QueuedOutbound): Boolean {
+        val runId = run?.id ?: return false
+        if (run?.isActive() != true) return false
+        return runCatching { container.repo.steer(agentId, runId, outboundPrompt(item)) }.getOrDefault(false)
     }
 
     fun cancelQueued(id: String) {
@@ -985,7 +1005,7 @@ fun ThreadScreen(
 
     var stickToBottom by remember(agentId) { mutableStateOf(true) }
     var programmaticScroll by remember(agentId) { mutableStateOf(false) }
-    val tailLen = rows.filterIsInstance<ChatRow.Message>().lastOrNull()?.line?.text?.length ?: 0
+    val growKey = threadScrollKey(rows)
 
     suspend fun snapToBottom() {
         programmaticScroll = true
@@ -1007,7 +1027,7 @@ fun ThreadScreen(
         }
     }
 
-    LaunchedEffect(agentId, rows.size, showTyping, vm.pinnedArtifact != null, tailLen, stickToBottom) {
+    LaunchedEffect(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey, stickToBottom) {
         if (stickToBottom && !listState.isScrollInProgress) {
             snapToBottom()
         }
@@ -1288,7 +1308,7 @@ fun ThreadScreen(
                     value = draft,
                     onValueChange = { draft = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("chat", maxLines = 1) },
+                    placeholder = { Text(if (working) "steer" else "chat", maxLines = 1) },
                     maxLines = 4,
                 )
                 IconButton(
@@ -1313,7 +1333,10 @@ fun ThreadScreen(
                     },
                     enabled = draft.isNotBlank() || attaches.any { it.ok },
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send")
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.Send,
+                                    contentDescription = if (working) "Steer" else "Send",
+                                )
                 }
             }
         }
@@ -1385,12 +1408,28 @@ fun ThreadScreen(
     }
 }
 
-private sealed class ChatRow {
+internal sealed class ChatRow {
     data class Message(val line: TranscriptLine) : ChatRow()
     data class Tools(val id: String, val tools: List<TranscriptLine>) : ChatRow()
 }
 
-private fun groupChatRows(
+internal fun threadScrollKey(rows: List<ChatRow>): String {
+    val last = when (val row = rows.lastOrNull()) {
+        is ChatRow.Message -> "${row.line.id}:${row.line.text.length}"
+        is ChatRow.Tools -> "tools-${row.id}-${row.tools.size}-${row.tools.lastOrNull()?.text?.length ?: 0}"
+        null -> "empty"
+    }
+    val think = rows.filterIsInstance<ChatRow.Message>()
+        .lastOrNull { it.line.kind == "thinking" }
+        ?.let { "${it.line.id}:${it.line.text.length}" }
+        .orEmpty()
+    val tools = rows.filterIsInstance<ChatRow.Tools>().lastOrNull()
+        ?.let { "${it.id}:${it.tools.size}" }
+        .orEmpty()
+    return "$last|$think|$tools|${rows.size}"
+}
+
+internal fun groupChatRows(
     lines: List<TranscriptLine>,
     showTools: Boolean,
     showThinking: Boolean,

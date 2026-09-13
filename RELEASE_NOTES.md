@@ -1,3 +1,11 @@
+# 1.0.21
+
+Play Protect skip no longer drops the APK URI, so Update can finish after you skip the scan. Autoscroll follows thinking even when a message is queued underneath. Send during a live run tries steer first and does not cancel the current turn; if the API will not take it, the message stays queued.
+
+This build also includes the conversation history load that did not make the immutable 1.0.20 APK.
+
+---
+
 # 1.0.20
 
 Show your messages in every thread, including chats started on PC or Cloud. The app now loads the agent conversation (`GET /v0/agents/{id}/conversation`) so user prompts come back from the server, not only from this phone. Long tool traces no longer clip those bubbles away.

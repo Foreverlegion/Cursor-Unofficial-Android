@@ -1,7 +1,9 @@
 package com.cursorandroid.app.data.repo
 
+import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
@@ -139,15 +141,40 @@ object AppUpdate {
     @android.annotation.SuppressLint("UnsafeImplicitIntentLaunch")
     private fun installViaView(context: Context, apk: File) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", apk)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = apkViewIntent(uri)
+        if (context !is Activity) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        grantApkUri(context, uri, intent)
         if (intent.resolveActivity(context.packageManager) == null) {
             error("No package installer")
         }
         context.startActivity(intent)
+    }
+
+    internal fun apkViewIntent(uri: Uri): Intent {
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            clipData = ClipData.newRawUri("update.apk", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    internal fun grantApkUri(context: Context, uri: Uri, intent: Intent) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val seen = HashSet<String>()
+        val resolved = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        for (item in resolved) {
+            val pkg = item.activityInfo?.packageName?.takeIf { it.isNotBlank() } ?: continue
+            if (seen.add(pkg)) {
+                runCatching { context.grantUriPermission(pkg, uri, flags) }
+            }
+        }
+        for (pkg in INSTALLER_PACKAGES) {
+            if (seen.add(pkg)) {
+                runCatching { context.grantUriPermission(pkg, uri, flags) }
+            }
+        }
     }
 
     fun checkReady(context: Context, apk: File): String? {
@@ -365,22 +392,30 @@ object AppUpdate {
     )
 
     private const val MAX_APK_BYTES = 100L * 1024L * 1024L
+    internal val INSTALLER_PACKAGES = listOf(
+        "com.google.android.packageinstaller",
+        "com.android.packageinstaller",
+        "com.google.android.gms",
+        "com.android.vending",
+        "com.samsung.android.packageinstaller",
+        "com.miui.packageinstaller",
+        "com.google.android.permissioncontroller",
+    )
 }
 
 class AppUpdateReceiver : BroadcastReceiver() {
     @android.annotation.SuppressLint("UnsafeImplicitIntentLaunch")
     override fun onReceive(context: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            val confirm = if (Build.VERSION.SDK_INT >= 33) {
-                intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_INTENT)
-            } ?: return
-            confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(confirm)
-        }
+        if (status != PackageInstaller.STATUS_PENDING_USER_ACTION) return
+        val confirm = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(Intent.EXTRA_INTENT)
+        } ?: return
+        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(confirm) }
     }
 }
 

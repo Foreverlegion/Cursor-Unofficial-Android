@@ -16,6 +16,13 @@ class AppUpdateTest {
     }
 
     @Test
+    fun installerPackagesCoverPlayProtectHandoff() {
+        assert(AppUpdate.INSTALLER_PACKAGES.contains("com.google.android.gms"))
+        assert(AppUpdate.INSTALLER_PACKAGES.contains("com.android.vending"))
+        assert(AppUpdate.INSTALLER_PACKAGES.contains("com.google.android.packageinstaller"))
+    }
+
+    @Test
     fun resolveRemoteFallsBackToGradleWhenNoRelease() {
         val gradle = AppUpdate.Remote("1.0.19", 119, null, null)
         val remote = AppUpdate.resolveRemote(null, gradle)

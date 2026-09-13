@@ -14,6 +14,7 @@ import com.cursorandroid.app.data.api.WorkerPool
 import com.cursorandroid.app.data.api.WorkersSummaryResponse
 import com.cursorandroid.app.data.api.CreateAgentResponse
 import com.cursorandroid.app.data.api.CreateRunRequest
+import com.cursorandroid.app.data.api.SteerRequest
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.MeResponse
 import com.cursorandroid.app.data.api.ModelItem
@@ -327,6 +328,12 @@ class AgentRepository(
 
     suspend fun cancel(agentId: String, runId: String) {
         wrap { api.cancelRun(agentId, runId) }
+    }
+
+    suspend fun steer(agentId: String, runId: String, prompt: Prompt): Boolean {
+        val body = SteerRequest(ClientOrigin.stamp(prompt))
+        if (runCatching { wrap { api.steerRun(agentId, runId, body) } }.isSuccess) return true
+        return runCatching { wrap { api.steerAgent(agentId, body) } }.isSuccess
     }
 
     fun stream(agentId: String, runId: String, lastEventId: String? = null): Flow<StreamEvent> {
