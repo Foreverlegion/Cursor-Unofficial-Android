@@ -2,6 +2,8 @@ package com.cursorandroid.app.data.repo
 
 import android.content.Context
 import androidx.core.content.edit
+import com.cursorandroid.app.data.api.CustomSubagent
+import com.cursorandroid.app.data.api.ModelParam
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -29,6 +31,11 @@ data class ChatDraft(
     val subDesc: String = "",
     val subPrompt: String = "",
     val agentName: String = "",
+    val workOnBranch: Boolean? = null,
+    val skipReviewer: Boolean? = null,
+    val prUrl: String = "",
+    val modelParams: List<ModelParam> = emptyList(),
+    val subagents: List<DraftSubagent> = emptyList(),
 ) {
     fun isEmpty(): Boolean {
         return text.isBlank() &&
@@ -44,7 +51,18 @@ data class ChatDraft(
             subName.isBlank() &&
             subDesc.isBlank() &&
             subPrompt.isBlank() &&
-            agentName.isBlank()
+            agentName.isBlank() &&
+            workOnBranch == null &&
+            skipReviewer == null &&
+            prUrl.isBlank() &&
+            modelParams.isEmpty() &&
+            subagents.isEmpty()
+    }
+
+    fun resolvedSubagents(): List<DraftSubagent> {
+        if (subagents.isNotEmpty()) return subagents
+        if (subName.isBlank() || subDesc.isBlank() || subPrompt.isBlank()) return emptyList()
+        return listOf(DraftSubagent(subName, subDesc, subPrompt))
     }
 
     fun toItems(): List<AttachItem> {
@@ -132,4 +150,31 @@ fun List<AttachItem>.toDraft(): List<DraftAttach> {
 
 fun List<DraftAttach>.toItems(): List<AttachItem> {
     return map { Attachments.fromCache(it.path, it.name, it.mime) }
+}
+
+@Serializable
+data class DraftSubagent(
+    val name: String = "",
+    val description: String = "",
+    val prompt: String = "",
+    val model: String = "",
+) {
+    fun ready(): Boolean {
+        return name.isNotBlank() && description.isNotBlank() && prompt.isNotBlank()
+    }
+
+    fun toApi(): CustomSubagent {
+        return CustomSubagent(
+            name = name.trim(),
+            description = description.trim(),
+            prompt = prompt.trim(),
+            model = model.trim().ifBlank { null },
+        )
+    }
+}
+
+fun List<DraftSubagent>.toApi(): List<CustomSubagent>? {
+    return mapNotNull { item -> if (item.ready()) item.toApi() else null }
+        .take(20)
+        .ifEmpty { null }
 }

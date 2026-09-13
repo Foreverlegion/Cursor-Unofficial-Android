@@ -83,7 +83,7 @@ fun SettingsTransfer(
         }
         Text(
             if (allowExport) {
-                "Export includes the API key, GitHub token, theme color, inbox tabs, notify, approval alerts, hide thinking/tools, default model, MCP, chat names, favorites, drafts, and cached transcripts. Keep the file private."
+                "Export includes the API key, GitHub token, theme color, inbox tabs, notify, approval alerts, hide thinking/tools, default model, MCP, chat names, favorites, drafts (including subagents and model params), and cached transcripts. Keep the file private."
             } else {
                 "Import a previous export to restore the API key and local settings."
             },
