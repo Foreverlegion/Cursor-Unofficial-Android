@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.edit
+import com.cursorandroid.app.data.api.Run
 import com.cursorandroid.app.data.api.isLiveStatus
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -230,15 +231,9 @@ class ConversationStore(context: Context) {
         private const val MAX_TEXT = 32_000
         private const val FLUSH_MS = 350L
         private val UNSAFE = Regex("[^A-Za-z0-9._-]")
-        private val DURABLE = setOf("user", "assistant", "thinking", "tool", "notice")
     }
 
-    private fun clip(lines: List<TranscriptLine>): List<TranscriptLine> {
-        val durable = coalesceTranscript(lines).filter { it.kind in DURABLE }.map { line ->
-            if (line.text.length <= MAX_TEXT) line else line.copy(text = line.text.take(MAX_TEXT))
-        }
-        return if (durable.size <= MAX_LINES) durable else durable.takeLast(MAX_LINES)
-    }
+    private fun clip(lines: List<TranscriptLine>): List<TranscriptLine> = clipTranscript(lines, MAX_LINES, MAX_TEXT)
 }
 
 internal fun lineKey(line: TranscriptLine): String {
@@ -385,6 +380,66 @@ internal fun mergeTranscript(
         }
     }
     return coalesceTranscript(order.mapNotNull { chosen[it] })
+}
+
+internal val DURABLE_KINDS = setOf("user", "assistant", "thinking", "tool", "notice")
+
+internal fun clipTranscript(
+    lines: List<TranscriptLine>,
+    maxLines: Int = 400,
+    maxText: Int = 32_000,
+): List<TranscriptLine> {
+    val durable = coalesceTranscript(lines).filter { it.kind in DURABLE_KINDS }.map { line ->
+        if (line.text.length <= maxText) line else line.copy(text = line.text.take(maxText))
+    }
+    if (durable.size <= maxLines) return durable
+    val keep = BooleanArray(durable.size) { true }
+    var extra = durable.size - maxLines
+    fun drop(kindOk: (String) -> Boolean) {
+        for (i in durable.indices) {
+            if (extra <= 0) return
+            if (keep[i] && kindOk(durable[i].kind)) {
+                keep[i] = false
+                extra -= 1
+            }
+        }
+    }
+    drop { it != "user" && it != "assistant" }
+    drop { it != "user" }
+    drop { true }
+    return durable.filterIndexed { index, _ -> keep[index] }
+}
+
+internal fun visibleUserText(text: String): String {
+    var out = text.trim()
+    if (out.startsWith(ClientOrigin.PREFIX)) {
+        out = out.removePrefix(ClientOrigin.PREFIX).trim()
+    }
+    return out
+}
+
+internal fun mergeRunTranscript(
+    lines: List<TranscriptLine>,
+    runs: List<Run>,
+): List<TranscriptLine> {
+    if (runs.isEmpty()) return coalesceTranscript(lines)
+    val ordered = if (runs.all { !it.createdAt.isNullOrBlank() }) {
+        runs.sortedBy { it.createdAt }
+    } else {
+        runs.asReversed()
+    }
+    val extra = ArrayList<TranscriptLine>(ordered.size * 2)
+    for (run in ordered) {
+        val user = visibleUserText(run.prompt?.text.orEmpty())
+        if (user.isNotEmpty()) {
+            extra += TranscriptLine("user-${run.id}", "user", user, run.id)
+        }
+        val result = run.result?.trim().orEmpty()
+        if (result.isNotEmpty()) {
+            extra += TranscriptLine("assistant-${run.id}", "assistant", result, run.id)
+        }
+    }
+    return mergeTranscript(lines, extra)
 }
 
 @Serializable

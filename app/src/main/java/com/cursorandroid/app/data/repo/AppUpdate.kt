@@ -108,7 +108,7 @@ object AppUpdate {
     }
 
     fun install(context: Context, apk: File) {
-        runCatching { installSession(context, apk) }.getOrElse { installViaView(context, apk) }
+        runCatching { installViaView(context, apk) }.getOrElse { installSession(context, apk) }
     }
 
     private fun installSession(context: Context, apk: File) {
@@ -144,9 +144,10 @@ object AppUpdate {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        if (intent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(intent)
+        if (intent.resolveActivity(context.packageManager) == null) {
+            error("No package installer")
         }
+        context.startActivity(intent)
     }
 
     fun checkReady(context: Context, apk: File): String? {
@@ -165,21 +166,13 @@ object AppUpdate {
     suspend fun findRemote(token: String? = null): Remote {
         val published = latestPublished(token)
         val gradle = runCatching { readGradleVersion(token) }.getOrNull()
-        return when {
-            published != null && gradle != null ->
-                if (published.versionCode >= gradle.versionCode) {
-                    published
-                } else {
-                    gradle.copy(
-                        apkUrl = published.apkUrl ?: gradle.apkUrl,
-                        tag = published.tag,
-                        notes = published.notes,
-                    )
-                }
-            published != null -> published
-            gradle != null -> gradle
-            else -> error("Could not read the latest version from GitHub")
-        }
+        return resolveRemote(published, gradle)
+    }
+
+    fun resolveRemote(published: Remote?, gradle: Remote?): Remote {
+        if (published != null) return published
+        if (gradle != null) return gradle
+        error("Could not read the latest version from GitHub")
     }
 
     private fun readGradleVersion(token: String?): Remote {

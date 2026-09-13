@@ -41,6 +41,7 @@ interface CursorApi {
     suspend fun listRuns(
         @Path("id") id: String,
         @Query("limit") limit: Int = 20,
+        @Query("cursor") cursor: String? = null,
     ): RunListResponse
 
     @GET("v1/agents/{id}/runs/{runId}")
