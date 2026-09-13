@@ -65,6 +65,19 @@ interface CursorApi {
         @Path("runId") runId: String,
     )
 
+    @POST("v1/agents/{id}/runs/{runId}/steer")
+    suspend fun steerRun(
+        @Path("id") id: String,
+        @Path("runId") runId: String,
+        @Body body: SteerRequest,
+    )
+
+    @POST("v1/agents/{id}/steer")
+    suspend fun steerAgent(
+        @Path("id") id: String,
+        @Body body: SteerRequest,
+    )
+
     @GET("v1/agents/{id}/artifacts")
     suspend fun listArtifacts(@Path("id") id: String): ArtifactListResponse
 

@@ -145,6 +145,11 @@ data class CreateRunRequest(
 )
 
 @Serializable
+data class SteerRequest(
+    val prompt: Prompt,
+)
+
+@Serializable
 data class CreateRunResponse(
     val run: Run,
 )

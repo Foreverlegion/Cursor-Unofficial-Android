@@ -67,6 +67,13 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun steerRequestKeepsPromptText() {
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true }
+        val body = json.encodeToString(SteerRequest.serializer(), SteerRequest(Prompt("stay on the branch")))
+        assertTrue(body.contains("stay on the branch"))
+    }
+
+    @Test
     fun conversationDecodesUserAndAssistant() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val convo = json.decodeFromString<AgentConversation>(
