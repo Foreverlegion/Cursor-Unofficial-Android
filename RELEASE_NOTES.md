@@ -1,3 +1,9 @@
+# 1.0.19
+
+Keep user messages that share the same text. Image follow-ups all use "See attached." and short repeats like "ok" were being collapsed into the first send, so later turns vanished after refresh.
+
+---
+
 # 1.0.18
 
 New Agent now sends the Cloud Agents create fields the public API already supports.

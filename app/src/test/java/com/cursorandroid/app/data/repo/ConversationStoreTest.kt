@@ -55,6 +55,53 @@ class ConversationStoreTest {
     }
 
     @Test
+    fun sameUserTextFromDifferentRunsStaysTwice() {
+        val first = line("user-r1", "user", "See attached.", "r1")
+        val second = line("user-r2", "user", "See attached.", "r2")
+
+        val ordered = coalesceTranscript(listOf(first, second))
+
+        assertEquals(2, ordered.count { it.kind == "user" })
+        assertEquals(listOf("r1", "r2"), ordered.filter { it.kind == "user" }.map { it.runId })
+    }
+
+    @Test
+    fun duplicateUserLineSameRunCollapses() {
+        val a = line("user-r1", "user", "ok", "r1")
+        val b = TranscriptLine(id = "user-local-9", kind = "user", text = "ok", runId = "r1")
+
+        val ordered = coalesceTranscript(listOf(a, b))
+
+        assertEquals(1, ordered.count { it.kind == "user" })
+        assertEquals("r1", ordered.single { it.kind == "user" }.runId)
+    }
+
+    @Test
+    fun localFollowUpsWithSameCaptionStay() {
+        val first = TranscriptLine(id = "user-local-1", kind = "user", text = "See attached.")
+        val second = TranscriptLine(id = "user-local-2", kind = "user", text = "See attached.")
+
+        val ordered = coalesceTranscript(listOf(first, second))
+
+        assertEquals(listOf("user-local-1", "user-local-2"), ordered.map { it.id })
+    }
+
+    @Test
+    fun mergeKeepsRepeatedUserCaptions() {
+        val user1 = line("user-r1", "user", "ok", "r1")
+        val assistant = line("assistant-r1", "assistant", "done", "r1")
+        val user2 = line("user-r2", "user", "ok", "r2")
+
+        val merged = mergeTranscript(
+            memory = listOf(user1, assistant, user2),
+            disk = listOf(user1, assistant),
+        )
+
+        assertEquals(2, merged.count { it.kind == "user" })
+        assertEquals(listOf("r1", "r2"), merged.filter { it.kind == "user" }.map { it.runId })
+    }
+
+    @Test
     fun mergeDoesNotLiftOrphanThinkingToTheTop() {
         val user = line("user-r2", "user", "next", "r2")
         val assistant = line("assistant-r2", "assistant", "done", "r2")
