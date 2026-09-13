@@ -356,9 +356,11 @@ class AgentRepository(
                     inUse = worker.isInUse == true,
                     detail = worker.detail().ifBlank { null },
                     workerId = worker.workerId,
+                    repoUrl = worker.boundRepo(),
+                    workspaceRootPath = worker.workspaceRootPath?.trim()?.takeIf { it.isNotEmpty() },
                 )
             }
-            .distinctBy { it.name.lowercase() }
+            .distinctBy { it.workerId?.takeIf(String::isNotBlank) ?: it.name.lowercase() }
         val seen = fromWorkers.map { it.name.lowercase() }.toHashSet()
         val agents = knownAgents.ifEmpty { emptyList() }
         val fromAgents = agents

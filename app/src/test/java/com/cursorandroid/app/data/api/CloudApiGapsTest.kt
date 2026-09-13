@@ -33,6 +33,33 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun machineCreateTargetSendsRepoWithMachineEnv() {
+        val (env, repos) = machineCreateTarget("zenbook", "https://github.com/acme/app", "main")!!
+        assertEquals("machine", env.type)
+        assertEquals("zenbook", env.name)
+        assertEquals("https://github.com/acme/app", repos!!.single().url)
+        assertEquals("main", repos.single().startingRef)
+    }
+
+    @Test
+    fun machineCreateTargetWithoutRepoStaysRepoLess() {
+        val (env, repos) = machineCreateTarget("zenbook", "", null)!!
+        assertEquals("zenbook", env.name)
+        assertNull(repos)
+    }
+
+    @Test
+    fun workerDecodesBoundRepoAndWorkspace() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val worker = json.decodeFromString<Worker>(
+            """{"workerId":"w1","name":"zenbook","repoUrl":"https://github.com/acme/app","workspaceRootPath":"/home/mike/app","labels":[{"key":"name","value":"zenbook"}]}""",
+        )
+        assertEquals("https://github.com/acme/app", worker.boundRepo())
+        assertEquals("/home/mike/app", worker.workspaceRootPath)
+        assertEquals("zenbook", worker.displayName())
+    }
+
+    @Test
     fun modelDefaultParamsPreferDefaultVariant() {
         val model = ModelItem(
             id = "composer-2",

@@ -1,3 +1,9 @@
+# 1.0.22
+
+New agent on a Machine now sends a repository with the worker name. The public Cloud Agents API rejects a repo-less private-worker start. The form pre-fills the worker's registered repo when it has one, and you can pick another checkout the PC already has. Commit-on-branch defaults on for machines.
+
+---
+
 # 1.0.21
 
 Play Protect skip no longer drops the APK URI, so Update can finish after you skip the scan. Autoscroll follows thinking even when a message is queued underneath. Send during a live run tries steer first and does not cancel the current turn; if the API will not take it, the message stays queued.
