@@ -280,7 +280,6 @@ internal fun coalesceTranscript(lines: List<TranscriptLine>): List<TranscriptLin
     val out = ArrayList<TranscriptLine>(lines.size)
     val keys = HashMap<String, Int>()
     val assistantText = HashSet<String>()
-    val userText = HashMap<String, Int>()
     for (line in lines) {
         val key = lineKey(line)
         val existing = keys[key]
@@ -291,16 +290,6 @@ internal fun coalesceTranscript(lines: List<TranscriptLine>): List<TranscriptLin
         if (line.kind == "assistant") {
             val text = line.text.trim()
             if (text.isNotEmpty() && !assistantText.add(text)) continue
-        }
-        if (line.kind == "user") {
-            val text = line.text.trim()
-            val prev = userText[text]
-            if (prev != null) {
-                out[prev] = pickLine(out[prev], line)
-                keys[key] = prev
-                continue
-            }
-            if (text.isNotEmpty()) userText[text] = out.size
         }
         keys[key] = out.size
         out += line
