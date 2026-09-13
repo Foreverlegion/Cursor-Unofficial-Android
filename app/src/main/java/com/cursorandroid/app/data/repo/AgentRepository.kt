@@ -9,6 +9,8 @@ import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.TokenUsage
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CreateAgentRequest
+import com.cursorandroid.app.data.api.WorkerPool
+import com.cursorandroid.app.data.api.WorkersSummaryResponse
 import com.cursorandroid.app.data.api.CreateAgentResponse
 import com.cursorandroid.app.data.api.CreateRunRequest
 import com.cursorandroid.app.data.api.CursorApi
@@ -177,6 +179,9 @@ class AgentRepository(
                 .sortedByDescending { it.tokens }
                 .take(8)
             val machines = computers.await()
+            val pools = catalog.pools().ifEmpty {
+                runCatching { listPools() }.getOrDefault(emptyList())
+            }
             AccountOverview(
                 me = me.await(),
                 agentCount = list.size,
@@ -184,6 +189,8 @@ class AgentRepository(
                 repoCount = catalog.repos().size,
                 computerCount = machines.size,
                 computersOnline = machines.count { it.online },
+                poolCount = pools.size,
+                poolsConnected = pools.sumOf { it.connectedWorkerCount },
                 usage = total,
                 sampledAgents = samples.size,
                 top = top,
@@ -343,6 +350,22 @@ class AgentRepository(
             }
             .distinctBy { it.name.lowercase() }
         return fromWorkers + fromAgents
+    }
+
+    suspend fun listPools(): List<WorkerPool> {
+        val listed = runCatching {
+            wrap { api.listPools(scope = "all", includeStale = false) }.pools
+        }.getOrElse {
+            runCatching { wrap { api.listPools(includeStale = false) }.pools }.getOrDefault(emptyList())
+        }
+        val named = listed.filter { it.poolName.isNotBlank() }
+            .distinctBy { "${it.scope}:${it.poolName.lowercase()}" }
+        if (named.isNotEmpty()) catalog.savePools(named)
+        return named
+    }
+
+    suspend fun workersSummary(): WorkersSummaryResponse? {
+        return runCatching { wrap { api.workersSummary() } }.getOrNull()
     }
 
     suspend fun branchTip(repoUrl: String, ref: String): GitCommitTip? {

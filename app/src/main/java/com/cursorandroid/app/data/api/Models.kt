@@ -114,7 +114,9 @@ data class CreateAgentRequest(
     val name: String? = null,
     val env: Env? = null,
     val repos: List<Repo>? = null,
+    val workOnCurrentBranch: Boolean? = null,
     val autoCreatePR: Boolean? = null,
+    val skipReviewerRequest: Boolean? = null,
     val mode: String? = null,
     val mcpServers: List<McpServer>? = null,
     val customSubagents: List<CustomSubagent>? = null,
@@ -273,6 +275,48 @@ data class WorkerListResponse(
     val workers: List<Worker> = emptyList(),
     val totalCount: Int? = null,
     val nextPageToken: String? = null,
+)
+
+@Serializable
+data class WorkerPool(
+    val scope: String? = null,
+    val ownerId: Int? = null,
+    val poolName: String,
+    val connectedWorkerCount: Int = 0,
+    val inUseWorkerCount: Int = 0,
+    val firstSeenAtMs: Long? = null,
+    val lastSeenAtMs: Long? = null,
+    val isStale: Boolean? = null,
+    val repoOwner: String? = null,
+    val repoName: String? = null,
+    val repoUrl: String? = null,
+    val workerReadyTimeoutSeconds: Int? = null,
+) {
+    fun idle(): Int = (connectedWorkerCount - inUseWorkerCount).coerceAtLeast(0)
+
+    fun line(): String {
+        val load = "$inUseWorkerCount/$connectedWorkerCount busy"
+        val repo = listOfNotNull(repoOwner, repoName).joinToString("/").ifBlank { null }
+        return listOfNotNull(poolName, load, repo, if (isStale == true) "stale" else null)
+            .joinToString(" · ")
+    }
+}
+
+@Serializable
+data class PoolListResponse(
+    val pools: List<WorkerPool> = emptyList(),
+)
+
+@Serializable
+data class WorkerCountSummary(
+    val totalConnected: Int = 0,
+    val inUse: Int = 0,
+)
+
+@Serializable
+data class WorkersSummaryResponse(
+    val userSummary: WorkerCountSummary? = null,
+    val teamSummary: WorkerCountSummary? = null,
 )
 
 @Serializable
@@ -477,6 +521,7 @@ fun cloudCreateTarget(
     envName: String,
     repoUrl: String,
     startingRef: String?,
+    prUrl: String? = null,
 ): Pair<Env?, List<Repo>?> {
     val name = envName.trim()
     if (fromSavedEnv && name.isNotBlank()) {
@@ -484,7 +529,36 @@ fun cloudCreateTarget(
     }
     val repo = repoUrl.trim()
     if (repo.isBlank()) return null to null
-    return null to listOf(Repo(url = repo, startingRef = startingRef?.trim()?.takeIf { it.isNotEmpty() }))
+    val pull = prUrl?.trim()?.takeIf { it.isNotEmpty() }
+    return null to listOf(
+        Repo(
+            url = repo,
+            startingRef = if (pull == null) startingRef?.trim()?.takeIf { it.isNotEmpty() } else null,
+            prUrl = pull,
+        ),
+    )
+}
+
+fun ModelItem.defaultParams(): List<ModelParam> {
+    val variant = variants?.firstOrNull { it.isDefault == true } ?: variants?.firstOrNull()
+    if (variant != null) return variant.params
+    return parameters.orEmpty().mapNotNull { param ->
+        val value = param.values.firstOrNull()?.value?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        ModelParam(param.id, value)
+    }
+}
+
+fun ModelItem.selection(params: List<ModelParam>): ModelSelection {
+    val cleaned = params.filter { it.id.isNotBlank() && it.value.isNotBlank() }
+    return ModelSelection(id = id, params = cleaned.takeIf { it.isNotEmpty() })
+}
+
+fun ModelItem.setParam(current: List<ModelParam>, id: String, value: String): List<ModelParam> {
+    return current.filterNot { it.id == id } + ModelParam(id, value)
+}
+
+fun ModelItem.namedVariants(): List<ModelVariant> {
+    return variants.orEmpty().filter { !it.displayName.isNullOrBlank() }
 }
 
 fun List<AgentSummary>.activeEnvs(): List<ActiveEnv> {
@@ -575,6 +649,8 @@ data class AccountOverview(
     val repoCount: Int = 0,
     val computerCount: Int = 0,
     val computersOnline: Int = 0,
+    val poolCount: Int = 0,
+    val poolsConnected: Int = 0,
     val usage: TokenUsage = TokenUsage(),
     val sampledAgents: Int = 0,
     val top: List<AgentUsageRow> = emptyList(),

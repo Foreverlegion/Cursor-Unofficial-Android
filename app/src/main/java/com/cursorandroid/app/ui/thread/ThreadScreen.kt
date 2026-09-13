@@ -108,6 +108,8 @@ import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.data.api.ModelItem
+import com.cursorandroid.app.data.api.ModelParam
+import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.repo.ArtifactSaver
 import com.cursorandroid.app.data.repo.AttachItem
 import com.cursorandroid.app.data.repo.Attachments
@@ -121,6 +123,7 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.data.repo.toItems
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
+import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import com.cursorandroid.app.ui.chat.VoiceButton
 import kotlinx.coroutines.CancellationException
@@ -224,6 +227,7 @@ class ThreadViewModel(
 
     var followMode by mutableStateOf("")
     var followModel by mutableStateOf("")
+    var followParams by mutableStateOf<List<ModelParam>>(emptyList())
 
     fun followUp(
         prompt: Prompt,
@@ -392,7 +396,9 @@ class ThreadViewModel(
                 agentId,
                 outboundPrompt(next),
                 mode = followMode.takeIf { it.isNotBlank() },
-                model = followModel.takeIf { it.isNotBlank() }?.let { ModelSelection(it) },
+                model = followModel.takeIf { it.isNotBlank() }?.let {
+                    ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
+                },
             )
             outbound.removeAll { it.id == next.id }
             persistQueue()
@@ -942,16 +948,26 @@ fun ThreadScreen(
         draft = saved.text
         vm.followMode = saved.mode
         vm.followModel = saved.modelId
+        vm.followParams = saved.modelParams
         attaches = saved.toItems()
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        if (vm.followParams.isEmpty() && vm.followModel.isNotBlank()) {
+            vm.followParams = models.firstOrNull { it.id == vm.followModel }?.defaultParams().orEmpty()
+        }
         draftReady = true
     }
 
-    LaunchedEffect(draft, vm.followMode, vm.followModel, attaches, draftReady) {
+    LaunchedEffect(draft, vm.followMode, vm.followModel, vm.followParams, attaches, draftReady) {
         if (!draftReady) return@LaunchedEffect
         container.drafts.save(
             agentId,
-            ChatDraft(draft, vm.followMode, vm.followModel, attaches.toDraft()),
+            ChatDraft(
+                text = draft,
+                mode = vm.followMode,
+                modelId = vm.followModel,
+                attaches = attaches.toDraft(),
+                modelParams = vm.followParams,
+            ),
         )
     }
 
@@ -1221,6 +1237,7 @@ fun ThreadScreen(
                             text = { Text("Account default") },
                             onClick = {
                                 vm.followModel = ""
+                                vm.followParams = emptyList()
                                 modelMenu = false
                             },
                         )
@@ -1229,6 +1246,7 @@ fun ThreadScreen(
                                 text = { Text(model.displayName ?: model.id) },
                                 onClick = {
                                     vm.followModel = model.id
+                                    vm.followParams = model.defaultParams()
                                     modelMenu = false
                                 },
                             )
@@ -1236,6 +1254,12 @@ fun ThreadScreen(
                     }
                 }
             }
+            ModelParamRow(
+                model = models.firstOrNull { it.id == vm.followModel },
+                params = vm.followParams,
+                onParams = { vm.followParams = it },
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

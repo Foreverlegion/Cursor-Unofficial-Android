@@ -90,5 +90,18 @@ interface CursorApi {
         @Query("status") status: String = "all",
         @Query("scope") scope: String = "personal",
         @Query("limit") limit: Int = 50,
+        @Query("pageToken") pageToken: String? = null,
     ): WorkerListResponse
+
+    @GET("v0/private-workers/summary")
+    suspend fun workersSummary(): WorkersSummaryResponse
+
+    @GET("v0/private-workers/{id}")
+    suspend fun getWorker(@Path("id") id: String): Worker
+
+    @GET("v0/private-workers/pools")
+    suspend fun listPools(
+        @Query("scope") scope: String? = null,
+        @Query("includeStale") includeStale: Boolean = false,
+    ): PoolListResponse
 }

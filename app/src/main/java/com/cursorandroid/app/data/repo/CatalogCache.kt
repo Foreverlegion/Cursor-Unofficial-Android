@@ -6,6 +6,7 @@ import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.RepositoryItem
+import com.cursorandroid.app.data.api.WorkerPool
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -19,11 +20,13 @@ class CatalogCache(context: Context) {
     fun agents(): List<AgentSummary> = readList("agents")
     fun computers(): List<Computer> = readList("computers")
     fun repos(): List<RepositoryItem> = readList("repos")
+    fun pools(): List<WorkerPool> = readList("pools")
     fun cloudEnvs(): List<String> = readList("cloud_envs")
 
     fun saveAgents(items: List<AgentSummary>) = write("agents", items)
     fun saveComputers(items: List<Computer>) = write("computers", items)
     fun saveRepos(items: List<RepositoryItem>) = write("repos", items)
+    fun savePools(items: List<WorkerPool>) = write("pools", items)
 
     fun rememberCloudEnv(name: String) {
         val next = name.trim()

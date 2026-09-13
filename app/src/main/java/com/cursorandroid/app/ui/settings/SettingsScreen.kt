@@ -402,7 +402,7 @@ private fun ProfileTab(
     }
     Section(title = "Catalog") {
         Text(
-            "${overview?.agentCount ?: 0} chats · ${overview?.computersOnline ?: 0}/${overview?.computerCount ?: 0} remote online · ${overview?.repoCount ?: 0} cached repos",
+            "${overview?.agentCount ?: 0} chats · ${overview?.computersOnline ?: 0}/${overview?.computerCount ?: 0} remote online · ${overview?.poolCount ?: 0} pools (${overview?.poolsConnected ?: 0} workers) · ${overview?.repoCount ?: 0} cached repos",
             style = MaterialTheme.typography.bodyMedium,
         )
         val models = overview?.modelNames.orEmpty()

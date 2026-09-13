@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
@@ -44,13 +45,12 @@ import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
+import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.cloudCreateTarget
+import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.api.namedCloudEnvironments
+import com.cursorandroid.app.data.api.selection
 import com.cursorandroid.app.data.api.ModelItem
-import com.cursorandroid.app.data.api.ModelSelection
-import com.cursorandroid.app.data.api.CustomSubagent
-import com.cursorandroid.app.data.api.Prompt
-import com.cursorandroid.app.data.api.Repo
 import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AttachItem
@@ -59,10 +59,13 @@ import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.data.repo.withStartupNotice
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
+import com.cursorandroid.app.data.repo.DraftSubagent
 import com.cursorandroid.app.data.repo.GithubRepos
+import com.cursorandroid.app.data.repo.toApi
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
+import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.VoiceButton
 import kotlinx.coroutines.launch
 
@@ -90,12 +93,18 @@ fun NewAgentScreen(
     var loadingRepos by remember { mutableStateOf(repos.isEmpty()) }
     var loadingBranches by remember { mutableStateOf(false) }
     var autoPr by remember { mutableStateOf(true) }
+    var workOnBranch by remember { mutableStateOf(false) }
+    var skipReviewer by remember { mutableStateOf(false) }
+    var prUrl by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("agent") }
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelId by remember { mutableStateOf("") }
+    var modelParams by remember { mutableStateOf<List<ModelParam>>(emptyList()) }
     var modelMenu by remember { mutableStateOf(false) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var computerMenu by remember { mutableStateOf(false) }
+    var pools by remember { mutableStateOf(container.catalog.pools()) }
+    var poolMenu by remember { mutableStateOf(false) }
     var providerMenu by remember { mutableStateOf(false) }
     var repoMenu by remember { mutableStateOf(false) }
     var branchMenu by remember { mutableStateOf(false) }
@@ -110,9 +119,11 @@ fun NewAgentScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
+    var subagents by remember { mutableStateOf<List<DraftSubagent>>(emptyList()) }
     var subName by remember { mutableStateOf("") }
     var subDesc by remember { mutableStateOf("") }
     var subPrompt by remember { mutableStateOf("") }
+    var subModel by remember { mutableStateOf("") }
     var draftReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -159,17 +170,20 @@ fun NewAgentScreen(
         if (saved.repoUrl.isNotBlank()) repoUrl = saved.repoUrl
         if (saved.startingRef.isNotBlank()) startingRef = saved.startingRef
         if (saved.autoPr != null) autoPr = saved.autoPr
-        if (saved.subName.isNotBlank()) subName = saved.subName
-        if (saved.subDesc.isNotBlank()) subDesc = saved.subDesc
-        if (saved.subPrompt.isNotBlank()) subPrompt = saved.subPrompt
+        if (saved.workOnBranch != null) workOnBranch = saved.workOnBranch
+        if (saved.skipReviewer != null) skipReviewer = saved.skipReviewer
+        if (saved.prUrl.isNotBlank()) prUrl = saved.prUrl
+        if (saved.modelParams.isNotEmpty()) modelParams = saved.modelParams
+        subagents = saved.resolvedSubagents()
         draftReady = true
     }
 
     LaunchedEffect(
-        agentName, prompt, modelId, mode, attaches, envType, envName, provider, repoUrl, startingRef,
-        autoPr, subName, subDesc, subPrompt, draftReady,
+        agentName, prompt, modelId, modelParams, mode, attaches, envType, envName, provider, repoUrl,
+        startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, draftReady,
     ) {
         if (!draftReady) return@LaunchedEffect
+        val first = subagents.firstOrNull()
         container.drafts.save(
             DraftStore.NEW_AGENT,
             ChatDraft(
@@ -183,10 +197,15 @@ fun NewAgentScreen(
                 repoUrl = repoUrl,
                 startingRef = startingRef,
                 autoPr = autoPr,
-                subName = subName,
-                subDesc = subDesc,
-                subPrompt = subPrompt,
+                subName = first?.name.orEmpty(),
+                subDesc = first?.description.orEmpty(),
+                subPrompt = first?.prompt.orEmpty(),
                 agentName = agentName,
+                workOnBranch = workOnBranch,
+                skipReviewer = skipReviewer,
+                prUrl = prUrl,
+                modelParams = modelParams,
+                subagents = subagents,
             ),
         )
     }
@@ -195,8 +214,12 @@ fun NewAgentScreen(
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
         scope.launch {
             computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
+            pools = runCatching { container.repo.listPools() }.getOrDefault(pools)
             if (envType == "machine" && envName.isBlank()) {
                 computers.firstOrNull { it.online }?.let { envName = it.name }
+            }
+            if (envType == "pool" && envName.isBlank()) {
+                pools.firstOrNull()?.let { envName = it.poolName }
             }
         }
         loadingRepos = repos.isEmpty()
@@ -466,6 +489,17 @@ fun NewAgentScreen(
                             Text("Private")
                         }
                     }
+                    OutlinedTextField(
+                        value = prUrl,
+                        onValueChange = { prUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("PR URL (optional)") },
+                        placeholder = { Text("https://github.com/org/repo/pull/12") },
+                        singleLine = true,
+                        supportingText = {
+                            Text("When set, the agent works on that PR. Branch is ignored.")
+                        },
+                    )
                     if (!createRepo || repoUrl.isNotBlank()) ExposedDropdownMenuBox(expanded = branchMenu, onExpandedChange = { branchMenu = it }) {
                         OutlinedTextField(
                             value = startingRef.ifBlank {
@@ -500,14 +534,35 @@ fun NewAgentScreen(
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = workOnBranch, onCheckedChange = { workOnBranch = it })
+                        Text("Commit on this branch")
+                    }
+                    Text(
+                        "Off creates a new cursor/ branch from the start ref. On pushes to the branch or PR head you picked.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = autoPr, onCheckedChange = { autoPr = it })
                         Text("Open PR when finished")
+                    }
+                    if (autoPr) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = skipReviewer, onCheckedChange = { skipReviewer = it })
+                            Text("Don't add me as reviewer")
+                        }
                     }
                     }
                     if (cloudFromEnv) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = autoPr, onCheckedChange = { autoPr = it })
                             Text("Open PR when finished")
+                        }
+                        if (autoPr) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = skipReviewer, onCheckedChange = { skipReviewer = it })
+                                Text("Don't add me as reviewer")
+                            }
                         }
                     }
                 } else if (envType == "machine") {
@@ -569,15 +624,39 @@ fun NewAgentScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    OutlinedTextField(
-                        value = envName,
-                        onValueChange = { envName = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Pool name") },
-                        singleLine = true,
-                    )
+                    ExposedDropdownMenuBox(expanded = poolMenu, onExpandedChange = { poolMenu = it }) {
+                        OutlinedTextField(
+                            value = envName,
+                            onValueChange = { envName = it },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryEditable)
+                                .fillMaxWidth(),
+                            label = { Text("Pool") },
+                            placeholder = { Text("default") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = poolMenu) },
+                            singleLine = true,
+                        )
+                        ExposedDropdownMenu(expanded = poolMenu, onDismissRequest = { poolMenu = false }) {
+                            if (pools.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("No registered pools. Type a name.") },
+                                    onClick = { poolMenu = false },
+                                    enabled = false,
+                                )
+                            }
+                            pools.forEach { pool ->
+                                DropdownMenuItem(
+                                    text = { Text(pool.line()) },
+                                    onClick = {
+                                        envName = pool.poolName
+                                        poolMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        "Routes to a self-hosted pool. Unknown pool names fail with 400.",
+                        "Self-hosted pool from List Pools. Unknown names fail with 400.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -599,6 +678,7 @@ fun NewAgentScreen(
                             text = { Text("Account default") },
                             onClick = {
                                 modelId = ""
+                                modelParams = emptyList()
                                 modelMenu = false
                             },
                         )
@@ -607,12 +687,18 @@ fun NewAgentScreen(
                                 text = { Text(model.displayName ?: model.id) },
                                 onClick = {
                                     modelId = model.id
+                                    modelParams = model.defaultParams()
                                     modelMenu = false
                                 },
                             )
                         }
                     }
                 }
+                ModelParamRow(
+                    model = models.firstOrNull { it.id == modelId },
+                    params = modelParams,
+                    onParams = { modelParams = it },
+                )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = mode == "agent", onClick = { mode = "agent" }, label = { Text("Agent") })
@@ -638,28 +724,88 @@ fun NewAgentScreen(
                         minLines = 5,
                     )
                 }
-                Text("Subagent (optional)", style = MaterialTheme.typography.labelLarge)
-                OutlinedTextField(
-                    value = subName,
-                    onValueChange = { subName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Name") },
-                    singleLine = true,
+                Text("Subagents (optional)", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    "The agent can delegate to these. Max 20. Names cannot be explore, debug, shell, or computerUse.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedTextField(
-                    value = subDesc,
-                    onValueChange = { subDesc = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("When to use") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = subPrompt,
-                    onValueChange = { subPrompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Prompt") },
-                    minLines = 2,
-                )
+                subagents.forEach { item ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            buildString {
+                                append(item.name)
+                                if (item.model.isNotBlank()) {
+                                    append(" · ")
+                                    append(item.model)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        IconButton(onClick = { subagents = subagents.filter { it !== item } }) {
+                            Icon(Icons.Outlined.Close, contentDescription = "Remove")
+                        }
+                    }
+                    Text(
+                        item.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (subagents.size < 20) {
+                    OutlinedTextField(
+                        value = subName,
+                        onValueChange = { subName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Name") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = subDesc,
+                        onValueChange = { subDesc = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("When to use") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = subPrompt,
+                        onValueChange = { subPrompt = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Prompt") },
+                        minLines = 2,
+                    )
+                    Text("Subagent model", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = subModel.isBlank(),
+                            onClick = { subModel = "" },
+                            label = { Text("Inherit") },
+                        )
+                        models.take(6).forEach { model ->
+                            FilterChip(
+                                selected = subModel == model.id,
+                                onClick = { subModel = model.id },
+                                label = { Text(model.displayName ?: model.id) },
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            val next = DraftSubagent(subName, subDesc, subPrompt, subModel)
+                            if (next.ready()) {
+                                subagents = subagents + next
+                                subName = ""
+                                subDesc = ""
+                                subPrompt = ""
+                                subModel = ""
+                            }
+                        },
+                        enabled = DraftSubagent(subName, subDesc, subPrompt).ready(),
+                    ) {
+                        Text("Add subagent")
+                    }
+                }
                 if (error != null) {
                     Text(error!!, color = MaterialTheme.colorScheme.error)
                 }
@@ -670,17 +816,9 @@ fun NewAgentScreen(
                             error = null
                             try {
                                 val ready = attaches.filter { it.ok }
-                                val subs = if (subName.isNotBlank() && subDesc.isNotBlank() && subPrompt.isNotBlank()) {
-                                    listOf(
-                                        CustomSubagent(
-                                            name = subName.trim(),
-                                            description = subDesc.trim(),
-                                            prompt = subPrompt.trim(),
-                                        ),
-                                    )
-                                } else {
-                                    null
-                                }
+                                val pending = DraftSubagent(subName, subDesc, subPrompt, subModel)
+                                val allSubs = if (pending.ready()) subagents + pending else subagents
+                                val subs = allSubs.toApi()
                                 val named = agentName.trim().takeIf { it.isNotEmpty() }
                                 if (envType == "cloud" && !cloudFromEnv && createRepo && repoUrl.isBlank()) {
                                     val made = container.repo.createGithubRepo(
@@ -701,13 +839,20 @@ fun NewAgentScreen(
                                     null
                                 }
                                 val cloudTarget = if (envType == "cloud") {
-                                    cloudCreateTarget(cloudFromEnv, envName, repo, tip?.sha ?: branch.ifBlank { null })
+                                    cloudCreateTarget(
+                                        cloudFromEnv,
+                                        envName,
+                                        repo,
+                                        tip?.sha ?: branch.ifBlank { null },
+                                        prUrl,
+                                    )
                                 } else {
                                     null
                                 }
+                                val picked = models.firstOrNull { it.id == modelId }
                                 val body = CreateAgentRequest(
                                     prompt = Attachments.prompt(prompt, ready),
-                                    model = modelId.takeIf { it.isNotBlank() }?.let { ModelSelection(it) },
+                                    model = picked?.selection(modelParams),
                                     name = named,
                                     env = if (envType == "cloud") {
                                         cloudTarget?.first
@@ -719,7 +864,9 @@ fun NewAgentScreen(
                                     } else {
                                         null
                                     },
+                                    workOnCurrentBranch = if (envType == "cloud" && !cloudFromEnv) workOnBranch else null,
                                     autoCreatePR = if (envType == "cloud") autoPr else null,
+                                    skipReviewerRequest = if (envType == "cloud" && autoPr && skipReviewer) true else null,
                                     mode = mode,
                                     mcpServers = container.store.mcpServers(),
                                     customSubagents = subs,
@@ -784,7 +931,7 @@ fun NewAgentScreen(
                                 GithubRepos.sanitizeName(newRepoName).isNotBlank() &&
                                     !container.store.githubToken.isNullOrBlank()
                             } else {
-                                repoUrl.isNotBlank() && startingRef.isNotBlank()
+                                repoUrl.isNotBlank() && (startingRef.isNotBlank() || prUrl.isNotBlank())
                             }
                         }
                         else -> true
