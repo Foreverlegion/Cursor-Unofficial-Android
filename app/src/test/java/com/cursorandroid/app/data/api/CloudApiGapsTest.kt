@@ -67,6 +67,17 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun conversationDecodesUserAndAssistant() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val convo = json.decodeFromString<AgentConversation>(
+            """{"id":"bc-1","messages":[{"id":"m1","type":"user_message","text":"hi"},{"type":"assistant_message","text":"yo"}]}""",
+        )
+        assertEquals("user", convo.messages[0].transcriptKind())
+        assertEquals("hi", convo.messages[0].text)
+        assertEquals("assistant", convo.messages[1].transcriptKind())
+    }
+
+    @Test
     fun runDecodesObjectOrStringPrompt() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val objectPrompt = json.decodeFromString<Run>(

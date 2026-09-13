@@ -34,6 +34,9 @@ interface CursorApi {
     @GET("v1/agents/{id}")
     suspend fun getAgent(@Path("id") id: String): AgentDetail
 
+    @GET("v0/agents/{id}/conversation")
+    suspend fun getConversation(@Path("id") id: String): AgentConversation
+
     @POST("v1/agents")
     suspend fun createAgent(@Body body: CreateAgentRequest): CreateAgentResponse
 

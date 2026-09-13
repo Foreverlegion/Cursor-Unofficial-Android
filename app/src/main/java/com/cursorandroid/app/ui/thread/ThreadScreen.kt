@@ -102,6 +102,7 @@ import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
+import com.cursorandroid.app.data.repo.mergeConversationTranscript
 import com.cursorandroid.app.data.repo.mergeRunTranscript
 import com.cursorandroid.app.data.repo.mergeTranscript
 import com.cursorandroid.app.data.api.isTerminal
@@ -195,6 +196,7 @@ class ThreadViewModel(
                     val detail = container.repo.getAgent(agentId)
                     agent = detail
                     mergeServerRuns()
+                    mergeConversationHistory()
                     val runId = detail.latestRunId
                     if (runId != null) {
                         val latest = container.repo.getRun(agentId, runId)
@@ -512,6 +514,16 @@ class ThreadViewModel(
                 merged = mergeRunTranscript(lines, filled)
             }
         }
+        if (merged != lines) {
+            lines = merged
+            persist()
+        }
+    }
+
+    private suspend fun mergeConversationHistory() {
+        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return
+        if (convo.messages.isEmpty()) return
+        val merged = mergeConversationTranscript(lines, convo.messages)
         if (merged != lines) {
             lines = merged
             persist()

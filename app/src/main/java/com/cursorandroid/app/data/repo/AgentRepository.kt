@@ -1,6 +1,7 @@
 package com.cursorandroid.app.data.repo
 
 import com.cursorandroid.app.data.api.AccountOverview
+import com.cursorandroid.app.data.api.AgentConversation
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentListResponse
 import com.cursorandroid.app.data.api.AgentSummary
@@ -128,6 +129,8 @@ class AgentRepository(
     suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
 
     suspend fun getRun(agentId: String, runId: String): Run = wrap { api.getRun(agentId, runId) }
+
+    suspend fun conversation(agentId: String): AgentConversation = wrap { api.getConversation(agentId) }
 
     suspend fun listRuns(agentId: String, limit: Int = 100): List<Run> {
         return wrap {
