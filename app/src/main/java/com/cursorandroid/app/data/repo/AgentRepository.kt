@@ -129,8 +129,19 @@ class AgentRepository(
 
     suspend fun getRun(agentId: String, runId: String): Run = wrap { api.getRun(agentId, runId) }
 
-    suspend fun listRuns(agentId: String, limit: Int = 50): List<Run> {
-        return wrap { api.listRuns(agentId, limit).items }
+    suspend fun listRuns(agentId: String, limit: Int = 100): List<Run> {
+        return wrap {
+            val out = ArrayList<Run>()
+            var cursor: String? = null
+            repeat(5) {
+                val page = api.listRuns(agentId, limit, cursor)
+                out += page.items
+                val next = page.nextCursor?.takeIf { it.isNotBlank() }
+                if (next == null || page.items.isEmpty()) return@wrap out
+                cursor = next
+            }
+            out
+        }
     }
 
     suspend fun archive(agentId: String) = wrap { api.archiveAgent(agentId) }

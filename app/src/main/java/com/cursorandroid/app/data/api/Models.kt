@@ -1,6 +1,13 @@
 package com.cursorandroid.app.data.api
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 
 @Serializable
 data class MeResponse(
@@ -164,6 +171,8 @@ data class Run(
     val durationMs: Long? = null,
     val result: String? = null,
     val git: GitState? = null,
+    @Serializable(with = FlexiblePromptSerializer::class)
+    val prompt: Prompt? = null,
 )
 
 @Serializable
@@ -696,3 +705,21 @@ fun isCreatingStatus(status: String?): Boolean =
 fun Run.isTerminal(): Boolean = isTerminalStatus(status)
 
 fun Run.isActive(): Boolean = isLiveStatus(status)
+
+internal object FlexiblePromptSerializer : KSerializer<Prompt> {
+    override val descriptor = Prompt.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: Prompt) {
+        encoder.encodeSerializableValue(Prompt.serializer(), value)
+    }
+
+    override fun deserialize(decoder: Decoder): Prompt {
+        val json = decoder as? JsonDecoder ?: return Prompt.serializer().deserialize(decoder)
+        val el = json.decodeJsonElement()
+        return when {
+            el is JsonPrimitive && el.isString -> Prompt(el.content)
+            el is JsonObject -> json.json.decodeFromJsonElement(Prompt.serializer(), el)
+            else -> Prompt("")
+        }
+    }
+}

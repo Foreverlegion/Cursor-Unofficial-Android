@@ -102,6 +102,7 @@ import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
+import com.cursorandroid.app.data.repo.mergeRunTranscript
 import com.cursorandroid.app.data.repo.mergeTranscript
 import com.cursorandroid.app.data.api.isTerminal
 import com.cursorandroid.app.data.notify.RunWatchScheduler
@@ -492,43 +493,42 @@ class ThreadViewModel(
         )
     }
 
+    private var probedPrompts = false
+
     private suspend fun mergeServerRuns() {
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
-        val existing = lines.associateBy { it.id }.toMutableMap()
-        val merged = lines.toMutableList()
-        for (item in runs.asReversed()) {
-            val full = if (item.isTerminal() && item.result.isNullOrBlank()) {
-                runCatching { container.repo.getRun(agentId, item.id) }.getOrDefault(item)
-            } else {
-                item
-            }
-            val assistantId = "assistant-${full.id}"
-            if (full.result.isNullOrBlank()) continue
-            if (coversAssistant(merged, full.id, full.result)) continue
-            val line = TranscriptLine(assistantId, "assistant", full.result, full.id)
-            if (insertAssistant(merged, line, full.id)) {
-                existing[assistantId] = line
+        var filled = runs.map { item -> hydrateRun(item, force = false) }
+        var merged = mergeRunTranscript(lines, filled)
+        val hasUser = merged.any { it.kind == "user" }
+        val hasPrompt = filled.any { !it.prompt?.text.isNullOrBlank() }
+        if (!hasUser && !hasPrompt && !probedPrompts && filled.isNotEmpty()) {
+            probedPrompts = true
+            val sample = listOfNotNull(filled.lastOrNull(), filled.firstOrNull()).distinctBy { it.id }
+            val probed = sample.map { hydrateRun(it, force = true) }
+            if (probed.any { !it.prompt?.text.isNullOrBlank() }) {
+                filled = filled.map { item ->
+                    probed.firstOrNull { it.id == item.id } ?: hydrateRun(item, force = true)
+                }
+                merged = mergeRunTranscript(lines, filled)
             }
         }
         if (merged != lines) {
-            lines = coalesceTranscript(merged)
+            lines = merged
             persist()
         }
     }
 
-    private fun insertAssistant(merged: MutableList<TranscriptLine>, line: TranscriptLine, runId: String): Boolean {
-        val userIdx = merged.indexOfLast { it.kind == "user" && (it.runId == runId || it.id == "user-$runId") }
-        if (userIdx < 0) {
-            merged.add(line)
-            return true
-        }
-        var at = userIdx + 1
-        while (at < merged.size && merged[at].kind == "tool") {
-            at += 1
-        }
-        if (at < merged.size && coversAssistant(listOf(merged[at]), runId, line.text)) return false
-        merged.add(at, line)
-        return true
+    private suspend fun hydrateRun(item: Run, force: Boolean): Run {
+        val needResult = item.isTerminal() && item.result.isNullOrBlank()
+        if (!force && !needResult) return item
+        val full = runCatching { container.repo.getRun(agentId, item.id) }.getOrDefault(item)
+        return item.copy(
+            result = full.result ?: item.result,
+            prompt = full.prompt ?: item.prompt,
+            status = full.status ?: item.status,
+            createdAt = full.createdAt ?: item.createdAt,
+            git = full.git ?: item.git,
+        )
     }
 
     private fun coversAssistant(items: List<TranscriptLine>, runId: String, result: String?): Boolean {

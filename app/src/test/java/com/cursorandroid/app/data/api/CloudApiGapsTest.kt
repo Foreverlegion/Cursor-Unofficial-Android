@@ -67,6 +67,21 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun runDecodesObjectOrStringPrompt() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val objectPrompt = json.decodeFromString<Run>(
+            """{"id":"r1","prompt":{"text":"from pc"}}""",
+        )
+        assertEquals("from pc", objectPrompt.prompt?.text)
+        val stringPrompt = json.decodeFromString<Run>(
+            """{"id":"r2","prompt":"plain"}""",
+        )
+        assertEquals("plain", stringPrompt.prompt?.text)
+        val missing = json.decodeFromString<Run>("""{"id":"r3","result":"ok"}""")
+        assertNull(missing.prompt)
+    }
+
+    @Test
     fun workerPoolLineShowsLoad() {
         val pool = WorkerPool(
             poolName = "gpu",

@@ -102,6 +102,45 @@ class ConversationStoreTest {
     }
 
     @Test
+    fun clipDropsToolsBeforeUserMessages() {
+        val user = line("user-r1", "user", "keep me", "r1")
+        val assistant = line("assistant-r1", "assistant", "reply", "r1")
+        val tools = (1..8).map { i ->
+            TranscriptLine(id = "tool-$i", kind = "tool", text = "call $i", runId = "r1")
+        }
+
+        val clipped = clipTranscript(listOf(user) + tools + assistant, maxLines = 4)
+
+        assertEquals(listOf("user", "assistant"), clipped.filter { it.kind == "user" || it.kind == "assistant" }.map { it.kind })
+        assertEquals("keep me", clipped.single { it.kind == "user" }.text)
+        assertEquals(4, clipped.size)
+    }
+
+    @Test
+    fun mergeRunTranscriptInsertsUserPrompts() {
+        val assistant = line("assistant-r2", "assistant", "done", "r2")
+        val runs = listOf(
+            com.cursorandroid.app.data.api.Run(
+                id = "r2",
+                createdAt = "2026-09-13T10:02:00.000Z",
+                result = "done",
+                prompt = com.cursorandroid.app.data.api.Prompt("second"),
+            ),
+            com.cursorandroid.app.data.api.Run(
+                id = "r1",
+                createdAt = "2026-09-13T10:00:00.000Z",
+                result = "first reply",
+                prompt = com.cursorandroid.app.data.api.Prompt("[client=cursor-android]\n\nfirst"),
+            ),
+        )
+
+        val merged = mergeRunTranscript(listOf(assistant), runs)
+
+        assertEquals(listOf("user", "assistant", "user", "assistant"), merged.map { it.kind })
+        assertEquals(listOf("first", "second"), merged.filter { it.kind == "user" }.map { it.text })
+    }
+
+    @Test
     fun mergeDoesNotLiftOrphanThinkingToTheTop() {
         val user = line("user-r2", "user", "next", "r2")
         val assistant = line("assistant-r2", "assistant", "done", "r2")
