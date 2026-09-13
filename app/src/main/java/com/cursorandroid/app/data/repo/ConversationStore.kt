@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.edit
+import com.cursorandroid.app.data.api.ConversationMessage
 import com.cursorandroid.app.data.api.Run
 import com.cursorandroid.app.data.api.isLiveStatus
 import kotlinx.serialization.Serializable
@@ -440,6 +441,58 @@ internal fun mergeRunTranscript(
         }
     }
     return mergeTranscript(lines, extra)
+}
+
+internal fun mergeConversationTranscript(
+    local: List<TranscriptLine>,
+    messages: List<ConversationMessage>,
+): List<TranscriptLine> {
+    if (messages.isEmpty()) return coalesceTranscript(local)
+    val used = BooleanArray(local.size)
+    val out = ArrayList<TranscriptLine>(local.size + messages.size)
+
+    fun take(kind: String, text: String): TranscriptLine? {
+        val needle = visibleUserText(text)
+        val idx = local.indices.firstOrNull { i ->
+            !used[i] && local[i].kind == kind && visibleUserText(local[i].text) == needle
+        } ?: return null
+        used[idx] = true
+        return local[idx]
+    }
+
+    messages.forEachIndexed { index, msg ->
+        val kind = msg.transcriptKind() ?: return@forEachIndexed
+        val text = visibleUserText(msg.text.orEmpty())
+        if (text.isEmpty()) return@forEachIndexed
+        out += take(kind, text) ?: TranscriptLine("$kind-conv-$index", kind, text)
+    }
+
+    local.forEachIndexed { i, line ->
+        if (used[i]) return@forEachIndexed
+        when (line.kind) {
+            "user" -> out += line
+            "assistant" -> {
+                val text = line.text.trim()
+                if (text.isNotEmpty() && out.none { it.kind == "assistant" && it.text.trim() == text }) {
+                    insertAfterRun(out, line)
+                }
+            }
+            else -> insertAfterRun(out, line)
+        }
+    }
+    return coalesceTranscript(out)
+}
+
+private fun insertAfterRun(out: MutableList<TranscriptLine>, line: TranscriptLine) {
+    val run = line.runId?.takeIf { it.isNotBlank() }
+    if (run != null) {
+        val at = out.indexOfLast { it.runId == run || it.id.endsWith("-$run") }
+        if (at >= 0) {
+            out.add(at + 1, line)
+            return
+        }
+    }
+    out += line
 }
 
 @Serializable

@@ -176,6 +176,28 @@ data class Run(
 )
 
 @Serializable
+data class ConversationMessage(
+    val id: String? = null,
+    val type: String? = null,
+    val text: String? = null,
+) {
+    fun transcriptKind(): String? {
+        val key = type?.trim()?.lowercase().orEmpty()
+        return when (key) {
+            "user_message", "user", "human" -> "user"
+            "assistant_message", "assistant", "ai" -> "assistant"
+            else -> null
+        }
+    }
+}
+
+@Serializable
+data class AgentConversation(
+    val id: String? = null,
+    val messages: List<ConversationMessage> = emptyList(),
+)
+
+@Serializable
 data class RunListResponse(
     val items: List<Run> = emptyList(),
     val nextCursor: String? = null,

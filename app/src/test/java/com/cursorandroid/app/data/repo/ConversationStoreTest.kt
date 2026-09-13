@@ -141,6 +141,46 @@ class ConversationStoreTest {
     }
 
     @Test
+    fun conversationFillsMissingUserMessages() {
+        val assistant = line("assistant-r1", "assistant", "I'll add the README.", "r1")
+        val messages = listOf(
+            com.cursorandroid.app.data.api.ConversationMessage(
+                type = "user_message",
+                text = "[client=cursor-android]\n\nAdd a README",
+            ),
+            com.cursorandroid.app.data.api.ConversationMessage(
+                type = "assistant_message",
+                text = "I'll add the README.",
+            ),
+            com.cursorandroid.app.data.api.ConversationMessage(
+                type = "user_message",
+                text = "Also add troubleshooting",
+            ),
+        )
+
+        val merged = mergeConversationTranscript(listOf(assistant), messages)
+
+        assertEquals(listOf("user", "assistant", "user"), merged.map { it.kind })
+        assertEquals(listOf("Add a README", "Also add troubleshooting"), merged.filter { it.kind == "user" }.map { it.text })
+        assertEquals("r1", merged.single { it.kind == "assistant" }.runId)
+    }
+
+    @Test
+    fun conversationKeepsRepeatedUserTextAndLocalQueue() {
+        val queued = TranscriptLine(id = "user-local-1", kind = "user", text = "next", queued = true)
+        val messages = listOf(
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = "ok"),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "assistant_message", text = "done"),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = "ok"),
+        )
+
+        val merged = mergeConversationTranscript(listOf(queued), messages)
+
+        assertEquals(listOf("ok", "ok", "next"), merged.filter { it.kind == "user" }.map { it.text })
+        assertEquals(true, merged.last { it.kind == "user" }.queued)
+    }
+
+    @Test
     fun mergeDoesNotLiftOrphanThinkingToTheTop() {
         val user = line("user-r2", "user", "next", "r2")
         val assistant = line("assistant-r2", "assistant", "done", "r2")

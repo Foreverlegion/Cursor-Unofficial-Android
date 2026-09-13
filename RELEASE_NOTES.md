@@ -1,6 +1,6 @@
 # 1.0.20
 
-Show your messages in every thread, including chats started on PC or Cloud. The app now reads run prompts from the API and will not drop older user bubbles when a long tool trace is saved.
+Show your messages in every thread, including chats started on PC or Cloud. The app now loads the agent conversation (`GET /v0/agents/{id}/conversation`) so user prompts come back from the server, not only from this phone. Long tool traces no longer clip those bubbles away.
 
 In-app Update only offers a published APK. It no longer labels main's next version as ready and then installs the previous build, and it opens the system installer directly so the prompt is not lost.
 
