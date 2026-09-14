@@ -47,6 +47,7 @@ import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
 import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.cloudCreateTarget
+import com.cursorandroid.app.data.api.gitPath
 import com.cursorandroid.app.data.api.machineCreateTarget
 import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.api.namedCloudEnvironments
@@ -224,7 +225,7 @@ fun NewAgentScreen(
                 if (picked != null) {
                     envName = picked.name
                     selectedWorkerId = picked.workerId
-                    if (repoUrl.isBlank()) picked.boundRepo()?.let { repoUrl = it }
+                    picked.boundRepo()?.let { repoUrl = it }
                 }
                 workOnBranch = true
             }
@@ -250,8 +251,9 @@ fun NewAgentScreen(
         }
     }
 
-    LaunchedEffect(provider, providerRepos, createRepo) {
+    LaunchedEffect(provider, providerRepos, createRepo, envType) {
         if (createRepo) return@LaunchedEffect
+        if (envType == "machine") return@LaunchedEffect
         if (providerRepos.none { it.url == repoUrl }) {
             repoUrl = providerRepos.firstOrNull()?.url.orEmpty()
             repoQuery = ""
@@ -648,6 +650,7 @@ fun NewAgentScreen(
                         OutlinedTextField(
                             value = when {
                                 selectedRepo != null -> selectedRepo.displayName()
+                                repoUrl.isNotBlank() -> gitPath(repoUrl).ifBlank { repoUrl }
                                 loadingRepos -> "Loading repos…"
                                 else -> "Select a repo"
                             },
@@ -1032,7 +1035,7 @@ fun NewAgentScreen(
                         }
                     },
                     enabled = (prompt.isNotBlank() || attaches.any { it.ok }) && !loading && when (envType) {
-                        "machine" -> envName.isNotBlank() && repoUrl.isNotBlank()
+                        "machine" -> envName.isNotBlank() && repoUrl.isNotBlank() && startingRef.isNotBlank()
                         "cloud" -> {
                             if (cloudFromEnv) {
                                 envName.trim().isNotBlank()

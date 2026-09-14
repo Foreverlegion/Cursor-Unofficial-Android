@@ -1,6 +1,6 @@
 # 1.0.22
 
-New agent on a Machine now sends a repository with the worker name. The public Cloud Agents API rejects a repo-less private-worker start. The form pre-fills the worker's registered repo when it has one, and you can pick another checkout the PC already has. Commit-on-branch defaults on for machines.
+New agent on a Machine now sends a repository with the worker name. The public Cloud Agents API rejects a repo-less private-worker start. The form pre-fills the worker's registered repo when it has one, and you can pick another checkout the PC already has. It does not silently pick your first GitHub repo. Commit-on-branch defaults on for machines. Start stays disabled until both repo and branch are set.
 
 ---
 

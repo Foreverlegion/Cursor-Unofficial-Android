@@ -49,6 +49,11 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun gitPathShowsWorkerRepoWhenNotInCatalog() {
+        assertEquals("acme/app", gitPath("https://github.com/acme/app"))
+    }
+
+    @Test
     fun workerDecodesBoundRepoAndWorkspace() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val worker = json.decodeFromString<Worker>(
