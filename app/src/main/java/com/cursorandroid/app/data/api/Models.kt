@@ -408,8 +408,33 @@ fun prettyProvider(hostOrId: String): String {
         key.contains("gitlab") -> "GitLab"
         key.contains("bitbucket") -> "Bitbucket"
         key.contains("dev.azure") || key.contains("visualstudio") -> "Azure DevOps"
-        else -> hostOrId
+        key.contains("origin.cursor") || key == "origin" -> "Origin"
+        else -> hostOrId.trim().ifBlank { hostOrId }
     }
+}
+
+fun repoKey(url: String): String = url.trim().lowercase().removeSuffix(".git")
+
+fun matchRepo(repos: List<RepositoryItem>, url: String): RepositoryItem? {
+    val key = repoKey(url)
+    if (key.isEmpty()) return null
+    return repos.firstOrNull { repoKey(it.url) == key }
+}
+
+fun listedProviders(repos: List<RepositoryItem>): List<String> {
+    return repos.map { it.providerLabel() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sortedWith(compareBy<String> { providerRank(it) }.thenBy { it.lowercase() })
+}
+
+fun providerRank(label: String): Int = when (label) {
+    "GitHub" -> 0
+    "GitLab" -> 1
+    "Bitbucket" -> 2
+    "Azure DevOps" -> 3
+    "Origin" -> 4
+    else -> 5
 }
 
 fun AgentSummary.sortKey(): String = updatedAt ?: createdAt ?: ""

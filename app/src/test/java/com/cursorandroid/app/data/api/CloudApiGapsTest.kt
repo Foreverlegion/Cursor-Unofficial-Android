@@ -54,6 +54,18 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun listedProvidersComeFromTheCatalogNotGithubOnly() {
+        val repos = listOf(
+            RepositoryItem(url = "https://gitlab.com/acme/app", provider = "gitlab"),
+            RepositoryItem(url = "https://origin.cursor.com/acme/app.git", provider = "origin"),
+            RepositoryItem(url = "https://github.com/acme/app", provider = "github"),
+        )
+        assertEquals(listOf("GitHub", "GitLab", "Origin"), listedProviders(repos))
+        assertEquals(repos[1], matchRepo(repos, "https://origin.cursor.com/acme/app"))
+        assertEquals("Origin", prettyProvider("origin.cursor.com"))
+    }
+
+    @Test
     fun workerDecodesBoundRepoAndWorkspace() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val worker = json.decodeFromString<Worker>(

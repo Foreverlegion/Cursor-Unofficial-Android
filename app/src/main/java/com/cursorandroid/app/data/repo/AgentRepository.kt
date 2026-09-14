@@ -250,13 +250,27 @@ class AgentRepository(
     suspend fun repositories(force: Boolean = false): List<RepositoryItem> {
         if (!force && catalog.reposFresh()) return catalog.repos()
         val found = coroutineScope {
-            val github = async { runCatching { wrap { api.repositories().items } }.getOrDefault(emptyList()) }
-            val extras = listOf("gitlab", "bitbucket", "azure").map { provider ->
+            val first = listOf(null, "github", "gitlab", "bitbucket", "azure", "origin").map { provider ->
                 async {
-                    runCatching { wrap { api.repositories(provider = provider).items } }.getOrDefault(emptyList())
+                    runCatching {
+                        if (provider == null) wrap { api.repositories().items }
+                        else wrap { api.repositories(provider = provider).items }
+                    }.getOrDefault(emptyList())
                 }
+            }.flatMap { it.await() }
+            val seen = first.mapNotNull { it.provider?.trim()?.lowercase()?.takeIf { id -> id.isNotEmpty() } }.toHashSet()
+            val extraIds = seen.filterNot { it in KNOWN_REPO_PROVIDERS }
+            if (extraIds.isEmpty()) {
+                first
+            } else {
+                val more = extraIds.map { provider ->
+                    async {
+                        runCatching { wrap { api.repositories(provider = provider).items } }
+                            .getOrDefault(emptyList())
+                    }
+                }.flatMap { it.await() }
+                first + more
             }
-            (listOf(github) + extras).flatMap { it.await() }
         }
         val merged = found
             .distinctBy { it.url.trim().lowercase().removeSuffix(".git") }
@@ -513,6 +527,8 @@ class AgentRepository(
                 val project = URLEncoder.encode(path, Charsets.UTF_8.name())
                 "https://$host/api/v4/projects/$project/repository/branches?per_page=100"
             }
+            host.contains("bitbucket") ->
+                "https://api.bitbucket.org/2.0/repositories/$path/refs/branches?pagelen=100"
             else -> return emptyList()
         }
         if (!SafeLinks.isHttps(url)) return emptyList()
@@ -528,7 +544,12 @@ class AgentRepository(
             }
         }.getOrNull().orEmpty()
         if (body.isBlank()) return emptyList()
-        val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray ?: return emptyList()
+        val parsed = runCatching { json.parseToJsonElement(body) }.getOrNull() ?: return emptyList()
+        val root = when (parsed) {
+            is JsonArray -> parsed
+            is JsonObject -> parsed["values"] as? JsonArray ?: parsed["items"] as? JsonArray ?: return emptyList()
+            else -> return emptyList()
+        }
         return root.mapNotNull { el ->
             (el as? JsonObject)?.get("name")?.jsonPrimitive?.contentOrNull
         }
@@ -547,6 +568,7 @@ class AgentRepository(
 
     companion object {
         private val DEFAULT_BRANCHES = listOf("main", "master", "develop")
+        private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
     }
