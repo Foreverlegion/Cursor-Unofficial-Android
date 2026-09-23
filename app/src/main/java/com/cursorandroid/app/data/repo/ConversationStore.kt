@@ -290,55 +290,37 @@ internal fun coalesceTranscript(lines: List<TranscriptLine>): List<TranscriptLin
         keys[key] = out.size
         out += line
     }
-    return orderThinkingAfterAssistant(out)
+    return orderThinkingBeforeAssistant(out)
 }
 
-internal fun orderThinkingAfterAssistant(lines: List<TranscriptLine>): List<TranscriptLine> {
-    val pending = LinkedHashMap<String, TranscriptLine>()
+internal fun orderThinkingBeforeAssistant(lines: List<TranscriptLine>): List<TranscriptLine> {
     val out = ArrayList<TranscriptLine>(lines.size)
-
-    fun runOf(line: TranscriptLine): String? {
-        line.runId?.takeIf { it.isNotBlank() }?.let { return it }
-        return when (line.kind) {
-            "thinking" -> line.id.removePrefix("think-").takeIf { line.id.startsWith("think-") && it.isNotBlank() }
-            "assistant" -> line.id.removePrefix("assistant-").takeIf {
-                line.id.startsWith("assistant-") && it.isNotBlank()
-            }
-            else -> null
-        }
-    }
-
-    fun hasAssistant(run: String): Boolean {
-        return out.any { line ->
-            line.kind == "assistant" && (line.runId == run || line.id == "assistant-$run")
-        }
-    }
-
-    fun flushPending() {
-        if (pending.isEmpty()) return
-        out.addAll(pending.values)
-        pending.clear()
-    }
-
     for (line in lines) {
-        when (line.kind) {
-            "thinking" -> {
-                val run = runOf(line) ?: line.id
-                if (hasAssistant(run)) insertAfterRun(out, line) else pending[run] = line
-            }
-            "assistant" -> {
-                out += line
-                runOf(line)?.let { pending.remove(it) }?.let { out += it }
-            }
-            "user", "notice" -> {
-                flushPending()
-                out += line
-            }
-            else -> out += line
+        if (line.kind != "thinking") {
+            out += line
+            continue
         }
+        val run = line.runId?.takeIf { it.isNotBlank() }
+            ?: line.id.removePrefix("think-").takeIf { line.id.startsWith("think-") && it.isNotBlank() }
+        val at = if (run == null) {
+            -1
+        } else {
+            out.indexOfLast { existing ->
+                existing.kind == "assistant" && (existing.runId == run || existing.id == "assistant-$run")
+            }
+        }
+        if (at >= 0) out.add(at, line) else out += line
     }
-    flushPending()
-    return out
+    return pinStartupNotice(out)
+}
+
+internal fun pinStartupNotice(lines: List<TranscriptLine>): List<TranscriptLine> {
+    val idx = lines.indexOfFirst { it.id == FirstChatNotice.ID }
+    if (idx <= 0) return lines
+    val pinned = ArrayList<TranscriptLine>(lines.size)
+    pinned += lines[idx]
+    lines.forEachIndexed { i, line -> if (i != idx) pinned += line }
+    return pinned
 }
 
 internal fun mergeTranscript(

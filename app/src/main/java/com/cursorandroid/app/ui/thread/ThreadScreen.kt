@@ -101,6 +101,7 @@ import com.cursorandroid.app.data.api.isCloudEnvType
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
+import com.cursorandroid.app.data.repo.FirstChatNotice
 import com.cursorandroid.app.data.repo.coalesceTranscript
 import com.cursorandroid.app.data.repo.mergeConversationTranscript
 import com.cursorandroid.app.data.repo.mergeRunTranscript
@@ -1436,7 +1437,6 @@ internal fun groupChatRows(
 ): List<ChatRow> {
     val rows = ArrayList<ChatRow>(lines.size)
     val pendingTools = ArrayList<TranscriptLine>()
-    val pendingThink = LinkedHashMap<String, TranscriptLine>()
 
     fun flushTools() {
         if (pendingTools.isEmpty()) return
@@ -1446,38 +1446,24 @@ internal fun groupChatRows(
         pendingTools.clear()
     }
 
-    fun thinkKey(line: TranscriptLine): String {
+    fun thinkRun(line: TranscriptLine): String? {
         return line.runId?.takeIf { it.isNotBlank() }
             ?: line.id.removePrefix("think-").takeIf { line.id.startsWith("think-") && it.isNotBlank() }
-            ?: line.id
-    }
-
-    fun asstKey(line: TranscriptLine): String? {
-        return line.runId?.takeIf { it.isNotBlank() }
-            ?: line.id.removePrefix("assistant-").takeIf { line.id.startsWith("assistant-") && it.isNotBlank() }
-    }
-
-    fun hasAssistant(run: String): Boolean {
-        return rows.any { row ->
-            row is ChatRow.Message && row.line.kind == "assistant" &&
-                (row.line.runId == run || row.line.id == "assistant-$run")
-        }
     }
 
     fun emitThink(line: TranscriptLine) {
-        if (showThinking && line.text.isNotBlank()) {
-            rows += ChatRow.Message(line)
+        if (!showThinking || line.text.isBlank()) return
+        val run = thinkRun(line)
+        val at = if (run == null) {
+            -1
+        } else {
+            rows.indexOfLast { row ->
+                row is ChatRow.Message && row.line.kind == "assistant" &&
+                    (row.line.runId == run || row.line.id == "assistant-$run")
+            }
         }
-    }
-
-    fun flushThink(run: String? = null) {
-        if (run != null) {
-            pendingThink.remove(run)?.let(::emitThink)
-            return
-        }
-        if (pendingThink.isEmpty()) return
-        pendingThink.values.forEach(::emitThink)
-        pendingThink.clear()
+        val row = ChatRow.Message(line)
+        if (at >= 0) rows.add(at, row) else rows += row
     }
 
     for (line in lines) {
@@ -1485,18 +1471,7 @@ internal fun groupChatRows(
             "tool" -> if (showTools) pendingTools += line
             "thinking" -> {
                 flushTools()
-                val run = thinkKey(line)
-                if (hasAssistant(run)) emitThink(line) else pendingThink[run] = line
-            }
-            "assistant" -> {
-                flushTools()
-                rows += ChatRow.Message(line)
-                flushThink(asstKey(line))
-            }
-            "user", "notice" -> {
-                flushTools()
-                flushThink()
-                rows += ChatRow.Message(line)
+                emitThink(line)
             }
             else -> {
                 flushTools()
@@ -1505,7 +1480,12 @@ internal fun groupChatRows(
         }
     }
     flushTools()
-    flushThink()
+    val noticeAt = rows.indexOfFirst { row ->
+        row is ChatRow.Message && row.line.id == FirstChatNotice.ID
+    }
+    if (noticeAt > 0) {
+        rows.add(0, rows.removeAt(noticeAt))
+    }
     return rows
 }
 

@@ -6,16 +6,16 @@ import org.junit.Test
 class ConversationStoreTest {
 
     @Test
-    fun coalesceMovesThinkingBelowAssistant() {
+    fun coalesceKeepsThinkingAboveAssistant() {
         val user = line("user-r1", "user", "rename the repo", "r1")
         val think = line("think-r1", "thinking", "plan for the rename", "r1")
         val assistant = line("assistant-r1", "assistant", "I'll point the project at the new URL.", "r1")
 
-        val ordered = coalesceTranscript(listOf(user, think, assistant))
+        val ordered = coalesceTranscript(listOf(user, assistant, think))
 
-        assertEquals(listOf("user", "assistant", "thinking"), ordered.map { it.kind })
-        assertEquals(assistant.text, ordered[1].text)
-        assertEquals(think.text, ordered[2].text)
+        assertEquals(listOf("user", "thinking", "assistant"), ordered.map { it.kind })
+        assertEquals(think.text, ordered[1].text)
+        assertEquals(assistant.text, ordered[2].text)
     }
 
     @Test
@@ -41,17 +41,17 @@ class ConversationStoreTest {
     }
 
     @Test
-    fun mergeDoesNotParkThinkingAboveTheReply() {
+    fun mergeKeepsThinkingAboveTheReply() {
         val user = line("user-r1", "user", "rename", "r1")
         val think = line("think-r1", "thinking", "long plan", "r1")
         val assistant = line("assistant-r1", "assistant", "I'll update the URL.", "r1")
 
         val merged = mergeTranscript(
-            memory = listOf(user, assistant),
+            memory = listOf(user, assistant, think),
             disk = listOf(user, think, assistant),
         )
 
-        assertEquals(listOf("user", "assistant", "thinking"), merged.map { it.kind })
+        assertEquals(listOf("user", "thinking", "assistant"), merged.map { it.kind })
     }
 
     @Test
@@ -189,9 +189,29 @@ class ConversationStoreTest {
 
         val ordered = coalesceTranscript(listOf(user1, assistant1, user2, think1))
 
-        assertEquals(listOf("user", "assistant", "thinking", "user"), ordered.map { it.kind })
-        assertEquals("r1", ordered[2].runId)
+        assertEquals(listOf("user", "thinking", "assistant", "user"), ordered.map { it.kind })
+        assertEquals("r1", ordered[1].runId)
         assertEquals("r2", ordered[3].runId)
+    }
+
+    @Test
+    fun startupNoticeStaysAtTopAfterEachMerge() {
+        val notice = FirstChatNotice.line("cloud")
+        val user = line("user-r1", "user", "hello", "r1")
+        val assistant = line("assistant-r1", "assistant", "hi", "r1")
+        val sunk = coalesceTranscript(listOf(user, assistant, notice))
+        assertEquals(FirstChatNotice.ID, sunk.first().id)
+
+        val messages = listOf(
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = "hello"),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "assistant_message", text = "hi"),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = "again"),
+        )
+        val merged = mergeConversationTranscript(listOf(notice, user, assistant), messages)
+
+        assertEquals(FirstChatNotice.ID, merged.first().id)
+        assertEquals(listOf("hello", "again"), merged.filter { it.kind == "user" }.map { it.text })
+        assertEquals("assistant", merged[2].kind)
     }
 
     @Test
