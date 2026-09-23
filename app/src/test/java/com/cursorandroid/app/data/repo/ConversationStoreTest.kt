@@ -181,6 +181,20 @@ class ConversationStoreTest {
     }
 
     @Test
+    fun lateThinkingStaysWithItsOwnTurn() {
+        val user1 = line("user-r1", "user", "first", "r1")
+        val assistant1 = line("assistant-r1", "assistant", "reply 1", "r1")
+        val user2 = line("user-r2", "user", "second", "r2")
+        val think1 = line("think-r1", "thinking", "old plan", "r1")
+
+        val ordered = coalesceTranscript(listOf(user1, assistant1, user2, think1))
+
+        assertEquals(listOf("user", "assistant", "thinking", "user"), ordered.map { it.kind })
+        assertEquals("r1", ordered[2].runId)
+        assertEquals("r2", ordered[3].runId)
+    }
+
+    @Test
     fun mergeDoesNotLiftOrphanThinkingToTheTop() {
         val user = line("user-r2", "user", "next", "r2")
         val assistant = line("assistant-r2", "assistant", "done", "r2")

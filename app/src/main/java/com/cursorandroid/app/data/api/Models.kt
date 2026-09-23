@@ -279,6 +279,12 @@ data class BranchListResponse(
 }
 
 @Serializable
+data class WorkerLabel(
+    val key: String? = null,
+    val value: String? = null,
+)
+
+@Serializable
 data class Worker(
     val workerId: String,
     val name: String? = null,
@@ -290,6 +296,7 @@ data class Worker(
     val userId: Int? = null,
     val connectedAtMs: Long? = null,
     val activeBcId: String? = null,
+    val labels: List<WorkerLabel> = emptyList(),
 ) {
     fun displayName(): String {
         return name?.takeIf { it.isNotBlank() }
@@ -298,10 +305,12 @@ data class Worker(
             ?: workerId
     }
 
+    fun boundRepo(): String? = repoUrl?.trim()?.takeIf { it.isNotEmpty() }
+
     fun detail(): String {
         return listOfNotNull(
             workspaceRootPath?.takeIf { it.isNotBlank() },
-            repoUrl?.takeIf { it.isNotBlank() },
+            boundRepo(),
         ).firstOrNull().orEmpty()
     }
 }
@@ -362,7 +371,11 @@ data class Computer(
     val inUse: Boolean = false,
     val detail: String? = null,
     val workerId: String? = null,
-)
+    val repoUrl: String? = null,
+    val workspaceRootPath: String? = null,
+) {
+    fun boundRepo(): String? = repoUrl?.trim()?.takeIf { it.isNotEmpty() }
+}
 
 fun gitHost(url: String): String {
     return url.trim()
@@ -395,8 +408,33 @@ fun prettyProvider(hostOrId: String): String {
         key.contains("gitlab") -> "GitLab"
         key.contains("bitbucket") -> "Bitbucket"
         key.contains("dev.azure") || key.contains("visualstudio") -> "Azure DevOps"
-        else -> hostOrId
+        key.contains("origin.cursor") || key == "origin" -> "Origin"
+        else -> hostOrId.trim().ifBlank { hostOrId }
     }
+}
+
+fun repoKey(url: String): String = url.trim().lowercase().removeSuffix(".git")
+
+fun matchRepo(repos: List<RepositoryItem>, url: String): RepositoryItem? {
+    val key = repoKey(url)
+    if (key.isEmpty()) return null
+    return repos.firstOrNull { repoKey(it.url) == key }
+}
+
+fun listedProviders(repos: List<RepositoryItem>): List<String> {
+    return repos.map { it.providerLabel() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sortedWith(compareBy<String> { providerRank(it) }.thenBy { it.lowercase() })
+}
+
+fun providerRank(label: String): Int = when (label) {
+    "GitHub" -> 0
+    "GitLab" -> 1
+    "Bitbucket" -> 2
+    "Azure DevOps" -> 3
+    "Origin" -> 4
+    else -> 5
 }
 
 fun AgentSummary.sortKey(): String = updatedAt ?: createdAt ?: ""
@@ -573,6 +611,27 @@ fun cloudCreateTarget(
             prUrl = pull,
         ),
     )
+}
+
+fun machineCreateTarget(
+    machineName: String,
+    repoUrl: String,
+    startingRef: String?,
+): Pair<Env, List<Repo>?>? {
+    val name = machineName.trim()
+    if (name.isEmpty()) return null
+    val repo = repoUrl.trim()
+    val repos = if (repo.isEmpty()) {
+        null
+    } else {
+        listOf(
+            Repo(
+                url = repo,
+                startingRef = startingRef?.trim()?.takeIf { it.isNotEmpty() },
+            ),
+        )
+    }
+    return Env(type = "machine", name = name) to repos
 }
 
 fun ModelItem.defaultParams(): List<ModelParam> {

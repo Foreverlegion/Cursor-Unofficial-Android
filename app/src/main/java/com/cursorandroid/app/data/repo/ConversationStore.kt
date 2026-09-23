@@ -324,7 +324,7 @@ internal fun orderThinkingAfterAssistant(lines: List<TranscriptLine>): List<Tran
         when (line.kind) {
             "thinking" -> {
                 val run = runOf(line) ?: line.id
-                if (hasAssistant(run)) out += line else pending[run] = line
+                if (hasAssistant(run)) insertAfterRun(out, line) else pending[run] = line
             }
             "assistant" -> {
                 out += line
