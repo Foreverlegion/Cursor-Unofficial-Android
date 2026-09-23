@@ -47,6 +47,12 @@ import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
 import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.cloudCreateTarget
+import com.cursorandroid.app.data.api.gitHost
+import com.cursorandroid.app.data.api.gitPath
+import com.cursorandroid.app.data.api.listedProviders
+import com.cursorandroid.app.data.api.machineCreateTarget
+import com.cursorandroid.app.data.api.matchRepo
+import com.cursorandroid.app.data.api.prettyProvider
 import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.api.namedCloudEnvironments
 import com.cursorandroid.app.data.api.selection
@@ -103,6 +109,7 @@ fun NewAgentScreen(
     var modelMenu by remember { mutableStateOf(false) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var computerMenu by remember { mutableStateOf(false) }
+    var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var pools by remember { mutableStateOf(container.catalog.pools()) }
     var poolMenu by remember { mutableStateOf(false) }
     var providerMenu by remember { mutableStateOf(false) }
@@ -127,21 +134,17 @@ fun NewAgentScreen(
     var draftReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val providers = remember(repos) {
-        (listOf("GitHub") + repos.map { it.providerLabel() }).distinct().sortedWith(
-            compareBy<String> {
-                when (it) {
-                    "GitHub" -> 0
-                    "GitLab" -> 1
-                    else -> 2
-                }
-            }.thenBy { it },
-        )
-    }
+    val providers = remember(repos) { listedProviders(repos) }
     val providerRepos = remember(repos, provider) {
         repos.filter { provider.isBlank() || it.providerLabel() == provider }
     }
-    val selectedRepo = providerRepos.firstOrNull { it.url == repoUrl }
+    val selectedRepo = remember(repos, repoUrl) { matchRepo(repos, repoUrl) }
+    fun adoptRepo(url: String) {
+        repoUrl = url
+        val item = matchRepo(repos, url)
+        val label = item?.providerLabel() ?: prettyProvider(gitHost(url))
+        if (label.isNotBlank()) provider = label
+    }
     val cloudEnvs = remember(repos, envName) {
         container.catalog.agents().namedCloudEnvironments(container.catalog.cloudEnvs() + listOf(envName))
     }
@@ -215,8 +218,16 @@ fun NewAgentScreen(
         scope.launch {
             computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
             pools = runCatching { container.repo.listPools() }.getOrDefault(pools)
-            if (envType == "machine" && envName.isBlank()) {
-                computers.firstOrNull { it.online }?.let { envName = it.name }
+            if (envType == "machine") {
+                val picked = computers.firstOrNull { it.name.equals(envName, ignoreCase = true) && it.online }
+                    ?: computers.firstOrNull { it.name.equals(envName, ignoreCase = true) }
+                    ?: computers.firstOrNull { it.online }
+                if (picked != null) {
+                    envName = picked.name
+                    selectedWorkerId = picked.workerId
+                    picked.boundRepo()?.let { adoptRepo(it) }
+                }
+                workOnBranch = true
             }
             if (envType == "pool" && envName.isBlank()) {
                 pools.firstOrNull()?.let { envName = it.poolName }
@@ -227,9 +238,14 @@ fun NewAgentScreen(
         loadingRepos = false
     }
 
-    LaunchedEffect(providers) {
-        if (provider.isBlank() || provider !in providers) {
-            provider = providers.firstOrNull().orEmpty()
+    LaunchedEffect(providers, envType) {
+        if (providers.isEmpty()) return@LaunchedEffect
+        if (provider.isBlank()) {
+            provider = providers.first()
+            return@LaunchedEffect
+        }
+        if (envType != "machine" && provider !in providers) {
+            provider = providers.first()
         }
     }
 
@@ -240,8 +256,9 @@ fun NewAgentScreen(
         }
     }
 
-    LaunchedEffect(provider, providerRepos, createRepo) {
+    LaunchedEffect(provider, providerRepos, createRepo, envType) {
         if (createRepo) return@LaunchedEffect
+        if (envType == "machine") return@LaunchedEffect
         if (providerRepos.none { it.url == repoUrl }) {
             repoUrl = providerRepos.firstOrNull()?.url.orEmpty()
             repoQuery = ""
@@ -317,7 +334,14 @@ fun NewAgentScreen(
                 Text("Target", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = envType == "cloud", onClick = { envType = "cloud" }, label = { Text("Cloud") })
-                    FilterChip(selected = envType == "machine", onClick = { envType = "machine" }, label = { Text("Machine") })
+                    FilterChip(
+                        selected = envType == "machine",
+                        onClick = {
+                            envType = "machine"
+                            workOnBranch = true
+                        },
+                        label = { Text("Machine") },
+                    )
                     FilterChip(selected = envType == "pool", onClick = { envType = "pool" }, label = { Text("Pool") })
                 }
                 if (envType == "cloud") {
@@ -603,6 +627,8 @@ fun NewAgentScreen(
                                     },
                                     onClick = {
                                         envName = computer.name
+                                        selectedWorkerId = computer.workerId
+                                        computer.boundRepo()?.let { adoptRepo(it) }
                                         computerMenu = false
                                     },
                                 )
@@ -612,6 +638,8 @@ fun NewAgentScreen(
                                     text = { Text("${computer.name} · offline") },
                                     onClick = {
                                         envName = computer.name
+                                        selectedWorkerId = computer.workerId
+                                        computer.boundRepo()?.let { adoptRepo(it) }
                                         computerMenu = false
                                     },
                                 )
@@ -619,10 +647,124 @@ fun NewAgentScreen(
                         }
                     }
                     Text(
-                        "Online machines you are signed into. The PC must stay awake with Remote Control or a My Machines worker.",
+                        "Online machines you are signed into. The PC must stay awake with Remote Control or a My Machines worker. The public API needs a repo on the request, even when the checkout is already on the PC.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
+                        OutlinedTextField(
+                            value = provider.ifBlank { if (loadingRepos) "Loading…" else "Any source" },
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Source") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
+                            if (providers.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("No connected sources yet") },
+                                    onClick = { providerMenu = false },
+                                    enabled = false,
+                                )
+                            }
+                            providers.forEach { name ->
+                                DropdownMenuItem(
+                                    text = { Text(name) },
+                                    onClick = {
+                                        provider = name
+                                        providerMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = repoUrl,
+                        onValueChange = { repoUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Repository URL") },
+                        placeholder = { Text("https://github.com/org/repo") },
+                        singleLine = true,
+                        supportingText = {
+                            Text("Any HTTPS git URL the Cloud Agents API accepts, including GitLab, Bitbucket, Azure, or Origin.")
+                        },
+                    )
+                    ExposedDropdownMenuBox(expanded = repoMenu, onExpandedChange = { repoMenu = it }) {
+                        OutlinedTextField(
+                            value = when {
+                                selectedRepo != null -> selectedRepo.displayName()
+                                repoUrl.isNotBlank() -> gitPath(repoUrl).ifBlank { repoUrl }
+                                loadingRepos -> "Loading repos…"
+                                else -> "Select a repo"
+                            },
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Repository") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = repoMenu) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(expanded = repoMenu, onDismissRequest = { repoMenu = false }) {
+                            if (providerRepos.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("No repos for this source") },
+                                    onClick = { repoMenu = false },
+                                    enabled = false,
+                                )
+                            }
+                            providerRepos.forEach { repo ->
+                                DropdownMenuItem(
+                                    text = { Text(repo.displayName()) },
+                                    onClick = {
+                                        adoptRepo(repo.url)
+                                        repoMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    ExposedDropdownMenuBox(expanded = branchMenu, onExpandedChange = { branchMenu = it }) {
+                        OutlinedTextField(
+                            value = startingRef,
+                            onValueChange = { startingRef = it },
+                            enabled = repoUrl.isNotBlank(),
+                            label = { Text("Branch") },
+                            placeholder = {
+                                Text(if (loadingBranches) "Loading branches…" else "main")
+                            },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchMenu) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryEditable)
+                                .fillMaxWidth(),
+                            singleLine = true,
+                        )
+                        ExposedDropdownMenu(expanded = branchMenu, onDismissRequest = { branchMenu = false }) {
+                            if (branches.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("No branches found") },
+                                    onClick = { branchMenu = false },
+                                    enabled = false,
+                                )
+                            }
+                            branches.forEach { name ->
+                                DropdownMenuItem(
+                                    text = { Text(name) },
+                                    onClick = {
+                                        startingRef = name
+                                        branchMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = workOnBranch, onCheckedChange = { workOnBranch = it })
+                        Text("Commit on this branch")
+                    }
                 } else {
                     ExposedDropdownMenuBox(expanded = poolMenu, onExpandedChange = { poolMenu = it }) {
                         OutlinedTextField(
@@ -849,22 +991,39 @@ fun NewAgentScreen(
                                 } else {
                                     null
                                 }
+                                val computer = computers.firstOrNull {
+                                    !selectedWorkerId.isNullOrBlank() && it.workerId == selectedWorkerId
+                                } ?: computers.firstOrNull { it.name.equals(envName.trim(), ignoreCase = true) }
+                                val machineRepo = repo.ifBlank { computer?.boundRepo().orEmpty() }
+                                val machineTarget = if (envType == "machine") {
+                                    if (machineRepo.isBlank()) {
+                                        error = "Pick a repository the machine has checked out. A machine start with no repo is rejected."
+                                        return@launch
+                                    }
+                                    machineCreateTarget(envName, machineRepo, branch.ifBlank { null })
+                                } else {
+                                    null
+                                }
                                 val picked = models.firstOrNull { it.id == modelId }
                                 val body = CreateAgentRequest(
                                     prompt = Attachments.prompt(prompt, ready),
                                     model = picked?.selection(modelParams),
                                     name = named,
-                                    env = if (envType == "cloud") {
-                                        cloudTarget?.first
-                                    } else {
-                                        Env(type = envType, name = envName.trim().ifBlank { null })
+                                    env = when (envType) {
+                                        "cloud" -> cloudTarget?.first
+                                        "machine" -> machineTarget?.first
+                                        else -> Env(type = envType, name = envName.trim().ifBlank { null })
                                     },
-                                    repos = if (envType == "cloud") {
-                                        cloudTarget?.second
-                                    } else {
-                                        null
+                                    repos = when (envType) {
+                                        "cloud" -> cloudTarget?.second
+                                        "machine" -> machineTarget?.second
+                                        else -> null
                                     },
-                                    workOnCurrentBranch = if (envType == "cloud" && !cloudFromEnv) workOnBranch else null,
+                                    workOnCurrentBranch = when {
+                                        envType == "cloud" && !cloudFromEnv -> workOnBranch
+                                        envType == "machine" -> workOnBranch
+                                        else -> null
+                                    },
                                     autoCreatePR = if (envType == "cloud") autoPr else null,
                                     skipReviewerRequest = if (envType == "cloud" && autoPr && skipReviewer) true else null,
                                     mode = mode,
@@ -923,7 +1082,7 @@ fun NewAgentScreen(
                         }
                     },
                     enabled = (prompt.isNotBlank() || attaches.any { it.ok }) && !loading && when (envType) {
-                        "machine" -> envName.isNotBlank()
+                        "machine" -> envName.isNotBlank() && repoUrl.isNotBlank() && startingRef.isNotBlank()
                         "cloud" -> {
                             if (cloudFromEnv) {
                                 envName.trim().isNotBlank()
