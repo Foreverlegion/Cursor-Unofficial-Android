@@ -181,6 +181,25 @@ class ConversationStoreTest {
     }
 
     @Test
+    fun conversationPrefersRemoteMessageIds() {
+        val local = line("user-m1", "user", "Add a README", "r1")
+        val messages = listOf(
+            com.cursorandroid.app.data.api.ConversationMessage(
+                id = "m1",
+                type = "user_message",
+                text = "Add a README",
+            ),
+            com.cursorandroid.app.data.api.ConversationMessage(
+                id = "m2",
+                type = "assistant_message",
+                text = "I'll add the README.",
+            ),
+        )
+        val merged = mergeConversationTranscript(listOf(local), messages)
+        assertEquals(listOf("user-m1", "assistant-m2"), merged.map { it.id })
+    }
+
+    @Test
     fun lateThinkingStaysWithItsOwnTurn() {
         val user1 = line("user-r1", "user", "first", "r1")
         val assistant1 = line("assistant-r1", "assistant", "reply 1", "r1")

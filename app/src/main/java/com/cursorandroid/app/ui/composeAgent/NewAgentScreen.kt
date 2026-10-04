@@ -1064,6 +1064,7 @@ fun NewAgentScreen(
                                     created.agent.id,
                                     created.run.id,
                                     created.agent.name,
+                                    created.run.status,
                                 )
                                 container.notifier.notifyIfNeeded(
                                     created.agent.id,

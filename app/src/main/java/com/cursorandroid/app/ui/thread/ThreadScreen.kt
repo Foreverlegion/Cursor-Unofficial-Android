@@ -176,6 +176,7 @@ class ThreadViewModel(
     private var sendingId: String? = null
     private var appContext: android.content.Context? = null
     private val refreshLock = Mutex()
+    private val lineGate = Any()
 
     init {
         viewModelScope.launch { refresh() }
@@ -188,7 +189,9 @@ class ThreadViewModel(
                 try {
                     error = null
                     val snap = container.conversations.loadSnap(agentId)
-                    lines = mergeTranscript(lines, snap.lines)
+                    synchronized(lineGate) {
+                        lines = mergeTranscript(lines, snap.lines)
+                    }
                     restoreQueue()
                     loadLocalArtifacts()
                     restoreRun(snap)
@@ -433,7 +436,7 @@ class ThreadViewModel(
             streamedRunId = created.id
             markUserSent(next.id, created.id)
             appContext?.let { ctx ->
-                RunWatchScheduler.watch(ctx, agentId, created.id, agent?.name)
+                RunWatchScheduler.watch(ctx, agentId, created.id, agent?.name, created.status)
             }
             container.notifier.notifyIfNeeded(agentId, agent?.name, created.id, created.status, null)
             startStream(created.id, replay = false)
@@ -534,19 +537,24 @@ class ThreadViewModel(
                 merged = mergeRunTranscript(lines, filled)
             }
         }
-        if (merged != lines) {
-            lines = merged
-            persist()
+        synchronized(lineGate) {
+            val latest = mergeRunTranscript(lines, filled)
+            if (latest != lines) {
+                lines = latest
+                persist()
+            }
         }
     }
 
     private suspend fun mergeConversationHistory() {
         val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return
         if (convo.messages.isEmpty()) return
-        val merged = mergeConversationTranscript(lines, convo.messages)
-        if (merged != lines) {
-            lines = merged
-            persist()
+        synchronized(lineGate) {
+            val merged = mergeConversationTranscript(lines, convo.messages)
+            if (merged != lines) {
+                lines = merged
+                persist()
+            }
         }
     }
 
@@ -796,15 +804,17 @@ class ThreadViewModel(
         queued: Boolean = false,
         thumbs: List<String> = emptyList(),
     ) {
-        val next = lines.toMutableList()
-        val idx = next.indexOfFirst { existing ->
-            existing.id == id ||
-                (kind == "assistant" && runId != null && existing.kind == "assistant" && existing.runId == runId)
+        synchronized(lineGate) {
+            val next = lines.toMutableList()
+            val idx = next.indexOfFirst { existing ->
+                existing.id == id ||
+                    (kind == "assistant" && runId != null && existing.kind == "assistant" && existing.runId == runId)
+            }
+            val existingThumbs = next.getOrNull(idx)?.thumbs.orEmpty()
+            val line = TranscriptLine(id, kind, text, runId, queued, thumbs.ifEmpty { existingThumbs })
+            if (idx >= 0) next[idx] = line else next.add(line)
+            lines = coalesceTranscript(next)
         }
-        val existingThumbs = next.getOrNull(idx)?.thumbs.orEmpty()
-        val line = TranscriptLine(id, kind, text, runId, queued, thumbs.ifEmpty { existingThumbs })
-        if (idx >= 0) next[idx] = line else next.add(line)
-        lines = coalesceTranscript(next)
         persist()
     }
 
@@ -921,11 +931,11 @@ fun ThreadScreen(
         groupChatRows(vm.lines, showTools, showThinking)
     }
     val currentRunId = vm.run?.id
-    val hasReply = currentRunId != null && rows.any { row ->
-        row is ChatRow.Message && row.line.kind == "assistant" &&
-            (row.line.runId == currentRunId || row.line.id == "assistant-$currentRunId")
+    val liveThink = remember(vm.lines, currentRunId, working) {
+        liveThinkingLine(vm.lines, currentRunId, working)
     }
-    val showTyping = working && !hasReply
+    val showLiveThink = showThinking && liveThink != null
+    val showTyping = working && !showLiveThink
     val waitText = if (showTyping) {
         waitCopy(
             receiving = vm.receiving,
@@ -1005,7 +1015,7 @@ fun ThreadScreen(
 
     var stickToBottom by remember(agentId) { mutableStateOf(true) }
     var programmaticScroll by remember(agentId) { mutableStateOf(false) }
-    val growKey = threadScrollKey(rows)
+    val growKey = threadScrollKey(rows, liveThink, showTyping)
 
     suspend fun snapToBottom() {
         programmaticScroll = true
@@ -1204,7 +1214,11 @@ fun ThreadScreen(
                             )
                         }
                     }
-                    if (showTyping) {
+                    if (liveThink != null && showThinking) {
+                        item(key = "live-think") {
+                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
+                        }
+                    } else if (showTyping) {
                         item(key = "typing") {
                             TypingBubble(detail = waitText)
                         }
@@ -1413,20 +1427,37 @@ internal sealed class ChatRow {
     data class Tools(val id: String, val tools: List<TranscriptLine>) : ChatRow()
 }
 
-internal fun threadScrollKey(rows: List<ChatRow>): String {
+internal fun threadScrollKey(
+    rows: List<ChatRow>,
+    liveThink: TranscriptLine? = null,
+    showTyping: Boolean = false,
+): String {
     val last = when (val row = rows.lastOrNull()) {
         is ChatRow.Message -> "${row.line.id}:${row.line.text.length}"
         is ChatRow.Tools -> "tools-${row.id}-${row.tools.size}-${row.tools.lastOrNull()?.text?.length ?: 0}"
         null -> "empty"
     }
-    val think = rows.filterIsInstance<ChatRow.Message>()
-        .lastOrNull { it.line.kind == "thinking" }
-        ?.let { "${it.line.id}:${it.line.text.length}" }
-        .orEmpty()
+    val think = liveThink?.let { "${it.id}:${it.text.length}" }.orEmpty()
     val tools = rows.filterIsInstance<ChatRow.Tools>().lastOrNull()
         ?.let { "${it.id}:${it.tools.size}" }
         .orEmpty()
-    return "$last|$think|$tools|${rows.size}"
+    return "$last|$think|$tools|${rows.size}|$showTyping"
+}
+
+internal fun liveThinkingLine(
+    lines: List<TranscriptLine>,
+    runId: String?,
+    working: Boolean,
+): TranscriptLine? {
+    if (!working) return null
+    val think = if (runId.isNullOrBlank()) {
+        lines.lastOrNull { it.kind == "thinking" }
+    } else {
+        lines.lastOrNull { line ->
+            line.kind == "thinking" && (line.runId == runId || line.id == "think-$runId")
+        }
+    }
+    return think?.takeIf { it.text.isNotBlank() }
 }
 
 internal fun groupChatRows(
@@ -1436,7 +1467,6 @@ internal fun groupChatRows(
 ): List<ChatRow> {
     val rows = ArrayList<ChatRow>(lines.size)
     val pendingTools = ArrayList<TranscriptLine>()
-    val pendingThink = LinkedHashMap<String, TranscriptLine>()
 
     fun flushTools() {
         if (pendingTools.isEmpty()) return
@@ -1446,56 +1476,12 @@ internal fun groupChatRows(
         pendingTools.clear()
     }
 
-    fun thinkKey(line: TranscriptLine): String {
-        return line.runId?.takeIf { it.isNotBlank() }
-            ?: line.id.removePrefix("think-").takeIf { line.id.startsWith("think-") && it.isNotBlank() }
-            ?: line.id
-    }
-
-    fun asstKey(line: TranscriptLine): String? {
-        return line.runId?.takeIf { it.isNotBlank() }
-            ?: line.id.removePrefix("assistant-").takeIf { line.id.startsWith("assistant-") && it.isNotBlank() }
-    }
-
-    fun hasAssistant(run: String): Boolean {
-        return rows.any { row ->
-            row is ChatRow.Message && row.line.kind == "assistant" &&
-                (row.line.runId == run || row.line.id == "assistant-$run")
-        }
-    }
-
-    fun emitThink(line: TranscriptLine) {
-        if (showThinking && line.text.isNotBlank()) {
-            rows += ChatRow.Message(line)
-        }
-    }
-
-    fun flushThink(run: String? = null) {
-        if (run != null) {
-            pendingThink.remove(run)?.let(::emitThink)
-            return
-        }
-        if (pendingThink.isEmpty()) return
-        pendingThink.values.forEach(::emitThink)
-        pendingThink.clear()
-    }
-
     for (line in lines) {
         when (line.kind) {
             "tool" -> if (showTools) pendingTools += line
-            "thinking" -> {
+            "thinking" -> flushTools()
+            "assistant", "user", "notice" -> {
                 flushTools()
-                val run = thinkKey(line)
-                if (hasAssistant(run)) emitThink(line) else pendingThink[run] = line
-            }
-            "assistant" -> {
-                flushTools()
-                rows += ChatRow.Message(line)
-                flushThink(asstKey(line))
-            }
-            "user", "notice" -> {
-                flushTools()
-                flushThink()
                 rows += ChatRow.Message(line)
             }
             else -> {
@@ -1505,7 +1491,6 @@ internal fun groupChatRows(
         }
     }
     flushTools()
-    flushThink()
     return rows
 }
 
