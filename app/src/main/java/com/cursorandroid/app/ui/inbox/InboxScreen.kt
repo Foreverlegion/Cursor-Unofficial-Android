@@ -567,147 +567,151 @@ private fun AgentList(
         .sortedByDescending { it.sortKey() }
     val favorites = newest.filter { it.id in favoriteIds }
     val rest = newest.filter { it.id !in favoriteIds }
-    when {
-        error != null && items.isEmpty() -> {
-            Text(
-                error,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
-        items.isEmpty() && !refreshing -> {
-            Text(
-                "No agents yet. Start one on a cloud VM or a named machine.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
-        else -> {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 88.dp),
-            ) {
-                item(key = "search") {
-                    Box(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            OutlinedTextField(
-                                value = query,
-                                onValueChange = onQueryChange,
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Search chats") },
-                                singleLine = true,
-                            )
-                            Row(
-                                modifier = Modifier.padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                FilterChip(
-                                    selected = workingOnly,
-                                    onClick = { onWorkingOnly(!workingOnly) },
-                                    label = { Text("Working") },
-                                )
-                                FilterChip(
-                                    selected = showArchived,
-                                    onClick = { onShowArchived(!showArchived) },
-                                    label = { Text("Archived") },
-                                )
-                                FilterChip(
-                                    selected = showHidden,
-                                    onClick = { onShowHidden(!showHidden) },
-                                    label = { Text("Hidden") },
-                                )
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 88.dp),
+    ) {
+        item(key = "search") {
+            Box(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Search chats") },
+                        singleLine = true,
+                    )
+                    Row(
+                        modifier = Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = workingOnly,
+                            onClick = { onWorkingOnly(!workingOnly) },
+                            label = { Text("Working") },
+                        )
+                        FilterChip(
+                            selected = showArchived,
+                            onClick = { onShowArchived(!showArchived) },
+                            label = { Text("Archived") },
+                        )
+                        FilterChip(
+                            selected = showHidden,
+                            onClick = { onShowHidden(!showHidden) },
+                            label = { Text("Hidden") },
+                        )
+                    }
+                }
+                if (selecting) {
+                    Surface(
+                        modifier = Modifier.matchParentSize(),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 6.dp,
+                        shadowElevation = 6.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = { stopSelecting() }) {
+                                Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
                             }
-                        }
-                        if (selecting) {
-                            Surface(
-                                modifier = Modifier.matchParentSize(),
-                                color = MaterialTheme.colorScheme.surface,
-                                tonalElevation = 6.dp,
-                                shadowElevation = 6.dp,
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    IconButton(onClick = { stopSelecting() }) {
-                                        Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
-                                    }
-                                    Text(
-                                        if (checkedIds.isEmpty()) "Select chats" else "${checkedIds.size} selected",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.weight(1f),
+                            Text(
+                                if (checkedIds.isEmpty()) "Select chats" else "${checkedIds.size} selected",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Box {
+                                TextButton(
+                                    onClick = { bulkMenu = true },
+                                    enabled = checkedIds.isNotEmpty(),
+                                ) { Text("Bulk actions") }
+                                DropdownMenu(expanded = bulkMenu, onDismissRequest = { bulkMenu = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Favorite") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onFavoriteIds(checkedIds, true)
+                                            stopSelecting()
+                                        },
                                     )
-                                    Box {
-                                        TextButton(
-                                            onClick = { bulkMenu = true },
-                                            enabled = checkedIds.isNotEmpty(),
-                                        ) { Text("Bulk actions") }
-                                        DropdownMenu(expanded = bulkMenu, onDismissRequest = { bulkMenu = false }) {
-                                            DropdownMenuItem(
-                                                text = { Text("Favorite") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onFavoriteIds(checkedIds, true)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Unfavorite") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onFavoriteIds(checkedIds, false)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Hide") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onHideIds(checkedIds, true)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Unhide") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onHideIds(checkedIds, false)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Archive") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onArchiveIds(checkedIds, true)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Unarchive") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onArchiveIds(checkedIds, false)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Delete") },
-                                                onClick = {
-                                                    bulkMenu = false
-                                                    onDeleteIds(checkedIds)
-                                                    stopSelecting()
-                                                },
-                                            )
-                                        }
-                                    }
+                                    DropdownMenuItem(
+                                        text = { Text("Unfavorite") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onFavoriteIds(checkedIds, false)
+                                            stopSelecting()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Hide") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onHideIds(checkedIds, true)
+                                            stopSelecting()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Unhide") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onHideIds(checkedIds, false)
+                                            stopSelecting()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Archive") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onArchiveIds(checkedIds, true)
+                                            stopSelecting()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Unarchive") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onArchiveIds(checkedIds, false)
+                                            stopSelecting()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            onDeleteIds(checkedIds)
+                                            stopSelecting()
+                                        },
+                                    )
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+        when {
+            error != null && items.isEmpty() -> {
+                item(key = "error") {
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
+            }
+            newest.isEmpty() && !refreshing -> {
+                item(key = "empty") {
+                    Text(
+                        inboxEmptyCopy(showHidden, showArchived, workingOnly, query),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
+            }
+            else -> {
                 if (favorites.isNotEmpty()) {
                     item(key = "hdr-fav") {
                         SectionLabel("Favorites")
@@ -768,14 +772,14 @@ private fun AgentList(
                     )
                     HorizontalDivider()
                 }
-                if (canLoadMore) {
-                    item(key = "more") {
-                        TextButton(
-                            onClick = onLoadMore,
-                            modifier = Modifier.padding(16.dp),
-                        ) { Text("Load older chats") }
-                    }
-                }
+            }
+        }
+        if (canLoadMore) {
+            item(key = "more") {
+                TextButton(
+                    onClick = onLoadMore,
+                    modifier = Modifier.padding(16.dp),
+                ) { Text("Load older chats") }
             }
         }
     }
