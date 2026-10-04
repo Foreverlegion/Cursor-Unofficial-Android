@@ -285,7 +285,8 @@ internal fun coalesceTranscript(lines: List<TranscriptLine>): List<TranscriptLin
         }
         if (line.kind == "assistant") {
             val text = line.text.trim()
-            if (text.isNotEmpty() && !assistantText.add(text)) continue
+            val run = line.runId?.takeIf { it.isNotBlank() } ?: runIdFromId(line)
+            if (run == null && text.isNotEmpty() && !assistantText.add(text)) continue
         }
         keys[key] = out.size
         out += line
@@ -464,7 +465,26 @@ internal fun mergeConversationTranscript(
         val kind = msg.transcriptKind() ?: return@forEachIndexed
         val text = visibleUserText(msg.text.orEmpty())
         if (text.isEmpty()) return@forEachIndexed
-        out += take(kind, text) ?: TranscriptLine("$kind-conv-$index", kind, text)
+        val remoteId = msg.id?.trim()?.takeIf { it.isNotEmpty() }
+        val taken = if (remoteId != null) {
+            val idx = local.indices.firstOrNull { i ->
+                !used[i] && local[i].kind == kind &&
+                    (local[i].id == "$kind-$remoteId" || local[i].id == remoteId)
+            }
+            if (idx != null) {
+                used[idx] = true
+                local[idx]
+            } else {
+                take(kind, text)
+            }
+        } else {
+            take(kind, text)
+        }
+        out += taken ?: TranscriptLine(
+            id = if (remoteId != null) "$kind-$remoteId" else "$kind-conv-$index",
+            kind = kind,
+            text = text,
+        )
     }
 
     local.forEachIndexed { i, line ->

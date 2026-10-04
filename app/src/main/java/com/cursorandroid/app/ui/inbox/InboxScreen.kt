@@ -121,13 +121,18 @@ fun InboxScreen(
     val context = LocalContext.current
     var reloadJob by remember { mutableStateOf<Job?>(null) }
 
-    fun applyAgents(agents: List<AgentSummary>, cursor: String?) {
+    fun applyAgents(agents: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
         items = agents
         nextCursor = cursor
         container.catalog.saveAgents(agents)
         live = container.conversations.liveStatuses()
         container.notices.reconcile(agents, live, container.chatTitles())
-        RunWatchScheduler.watchActive(context.applicationContext, agents)
+        container.notifier.acknowledgeKnown(agents)
+        if (watch) {
+            RunWatchScheduler.watchActive(context.applicationContext, agents)
+        } else {
+            RunWatchScheduler.rememberStatuses(context.applicationContext, agents)
+        }
     }
 
     fun reload(showSpinner: Boolean = true) {
@@ -136,36 +141,35 @@ fun InboxScreen(
             if (showSpinner) refreshing = true
             error = null
             try {
-                var latest = items
-                var first = true
-                container.repo.walkInboxPages { page ->
+                val page = container.repo.listAgentsPage(includeArchived = true)
+                ensureActive()
+                val incoming = container.repo.hydrateStatuses(page.entries())
+                var latest = mergeInboxAgents(items, incoming)
+                applyAgents(latest, page.nextCursor, watch = true)
+                refreshing = false
+                metas = container.chats.snapshot()
+                scope.launch {
+                    runCatching { container.repo.refreshGitSnaps(latest) }
+                    git = container.catalog.gitSnaps()
+                }
+                val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
+                computers = next
+                container.catalog.saveComputers(next)
+                var cursor = page.nextCursor
+                while (!cursor.isNullOrBlank()) {
                     ensureActive()
-                    val incoming = if (first) {
-                        container.repo.hydrateStatuses(page.entries())
-                    } else {
-                        page.entries()
-                    }
-                    latest = mergeInboxAgents(latest, incoming)
-                    applyAgents(latest, page.nextCursor)
-                    if (first) {
-                        first = false
-                        refreshing = false
-                        metas = container.chats.snapshot()
-                        scope.launch {
-                            runCatching { container.repo.refreshGitSnaps(latest) }
-                            git = container.catalog.gitSnaps()
-                        }
-                        val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
-                        computers = next
-                        container.catalog.saveComputers(next)
-                    }
+                    val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor)
+                    if (more.entries().isEmpty()) break
+                    latest = mergeInboxAgents(latest, more.entries())
+                    applyAgents(latest, more.nextCursor, watch = false)
+                    cursor = more.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
                 }
                 val marked = runCatching {
                     val active = container.repo.listAllAgents(includeArchived = false)
                     markCloudArchived(latest, active.entries())
                 }.getOrNull()
                 if (marked != null) {
-                    applyAgents(marked, nextCursor)
+                    applyAgents(marked, nextCursor, watch = true)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -190,12 +194,12 @@ fun InboxScreen(
         while (true) {
             delay(5_000)
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
-            if (reloadJob?.isActive == true) continue
+            if (reloadJob?.isActive == true && refreshing) continue
             try {
                 val page = container.repo.listAgentsPage(includeArchived = true)
                 val incoming = container.repo.hydrateStatuses(page.entries())
                 val agents = mergeInboxAgents(items, incoming)
-                applyAgents(agents, page.nextCursor ?: nextCursor)
+                applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
                 metas = container.chats.snapshot()
                 val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
                 if (next != null) {

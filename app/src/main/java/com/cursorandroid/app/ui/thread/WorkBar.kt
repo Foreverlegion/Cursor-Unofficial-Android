@@ -1,6 +1,7 @@
 package com.cursorandroid.app.ui.thread
 
 import com.cursorandroid.app.data.api.isCreatingStatus
+import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isRemoteEnvType
 import com.cursorandroid.app.data.repo.TranscriptLine
 
@@ -12,6 +13,7 @@ internal fun showWorkBar(
     runStatus: String?,
 ): Boolean {
     if (receiving || busy) return true
+    if (isLiveStatus(agentStatus) || isLiveStatus(runStatus)) return true
     if (isCreatingStatus(agentStatus) || isCreatingStatus(runStatus)) return true
     val lastUser = lines.indexOfLast { it.kind == "user" }
     if (lastUser < 0) return false
@@ -26,9 +28,11 @@ internal fun waitCopy(
     envType: String?,
 ): String? {
     if (receiving) return null
-    val creating = isCreatingStatus(agentStatus) || isCreatingStatus(runStatus)
-    val live = creating || agentStatus.equals("ACTIVE", ignoreCase = true)
-    if (!live) return null
+    if (!isLiveStatus(agentStatus) && !isLiveStatus(runStatus) &&
+        !isCreatingStatus(agentStatus) && !isCreatingStatus(runStatus)
+    ) {
+        return null
+    }
     return if (isRemoteEnvType(envType)) {
         "Waiting for the PC. Keep Cursor open with Remote Control."
     } else {

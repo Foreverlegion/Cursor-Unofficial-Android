@@ -775,6 +775,19 @@ data class GitSnap(
     }
 }
 
+private val LIVE_STATUSES = setOf(
+    "CREATING",
+    "RUNNING",
+    "ACTIVE",
+    "PENDING",
+    "WAITING",
+    "QUEUED",
+    "STARTING",
+    "WORKING",
+    "THINKING",
+    "STREAMING",
+)
+
 fun isTerminalStatus(status: String?): Boolean {
     val s = status?.uppercase().orEmpty()
     return s == "FINISHED" || s == "ERROR" || s == "CANCELLED" || s == "EXPIRED" || s == "ARCHIVED"
@@ -782,7 +795,7 @@ fun isTerminalStatus(status: String?): Boolean {
 
 fun isLiveStatus(status: String?): Boolean {
     val s = status?.uppercase().orEmpty()
-    return s.isNotEmpty() && !isTerminalStatus(s)
+    return s in LIVE_STATUSES
 }
 
 fun isCreatingStatus(status: String?): Boolean =
