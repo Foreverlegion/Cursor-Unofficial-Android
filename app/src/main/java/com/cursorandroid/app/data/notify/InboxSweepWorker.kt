@@ -25,7 +25,7 @@ class InboxSweepWorker(
                 val status = run.status?.uppercase()
                 val previous = seen.getString(runId, null)?.uppercase()
                 if (run.isActive()) {
-                    RunWatchScheduler.watch(applicationContext, agent.id, run.id, agent.name)
+                    RunWatchScheduler.watch(applicationContext, agent.id, run.id, agent.name, run.status)
                 } else if (run.isTerminal() && isLiveStatus(previous)) {
                     app.container.notifier.notifyIfNeeded(
                         agent.id,

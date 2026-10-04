@@ -1,3 +1,15 @@
+# 1.0.23
+
+Thinking and typing sit at the bottom of the thread while a run is live. Finished Thinking rows no longer stick in the scroll backlog between older messages.
+
+Pull-to-refresh and background inbox sync no longer treat IDLE chats as live runs. That was watching every idle chat, firing a pile of finish notifications, and blocking quiet list updates. Refresh now merges the first page immediately, pages older chats in place, and only watches runs that are actually working.
+
+Hidden, Archived, and Working stay on screen when they empty the inbox, so you can turn them off. Turning on Hidden with no hidden chats used to hide the filter and every chat until you reinstalled.
+
+Conversation merge keeps remote message ids and does not collapse two different runs that share the same reply text.
+
+---
+
 # 1.0.22
 
 New agent on a Machine now sends a repository with the worker name. The public Cloud Agents API rejects a repo-less private-worker start. The form pre-fills the worker's registered repo when it has one, and you can pick or paste any HTTPS git URL the API accepts (GitHub, GitLab, Bitbucket, Azure DevOps, Origin, or another connected source). It does not silently pick your first GitHub repo. Commit-on-branch defaults on for machines. Start stays disabled until both repo and branch are set.

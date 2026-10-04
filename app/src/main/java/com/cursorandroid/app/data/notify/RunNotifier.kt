@@ -11,6 +11,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.edit
 import com.cursorandroid.app.MainActivity
 import com.cursorandroid.app.R
+import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import com.cursorandroid.app.data.repo.LocalChatStore
 
@@ -80,6 +82,19 @@ class RunNotifier(
             .setDeleteIntent(dismissShade(context, noticeId, notifyId))
             .build()
         NotifyShade.post(context, notifyId, notification)
+    }
+
+    fun acknowledgeKnown(agents: List<AgentSummary>) {
+        synchronized(seen) {
+            seen.edit(commit = true) {
+                agents.forEach { agent ->
+                    val runId = agent.latestRunId ?: return@forEach
+                    if (!isLiveStatus(agent.status)) {
+                        putBoolean(runId, true)
+                    }
+                }
+            }
+        }
     }
 
     fun notifyIfNeeded(agentId: String, agentName: String?, runId: String, status: String?, result: String?) {

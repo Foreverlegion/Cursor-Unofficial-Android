@@ -10,15 +10,24 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import java.util.concurrent.TimeUnit
 
 object RunWatchScheduler {
-    fun watch(context: Context, agentId: String, runId: String, agentName: String?) {
+    fun watch(
+        context: Context,
+        agentId: String,
+        runId: String,
+        agentName: String?,
+        status: String? = null,
+    ) {
         val app = context.applicationContext
+        val recorded = status?.uppercase()?.takeIf { it.isNotBlank() } ?: "RUNNING"
+        if (!isLiveStatus(recorded)) return
         app.getSharedPreferences("run_status_seen", Context.MODE_PRIVATE)
             .edit()
-            .putString(runId, "RUNNING")
+            .putString(runId, recorded)
             .apply()
         val already = RunWatchStore.all(app).any { it.runId == runId }
         RunWatchStore.add(app, WatchItem(agentId, runId, agentName))
@@ -27,10 +36,22 @@ object RunWatchScheduler {
         ensureSweep(app)
     }
 
+    fun rememberStatuses(context: Context, agents: List<AgentSummary>) {
+        val prefs = context.applicationContext.getSharedPreferences("run_status_seen", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            agents.forEach { agent ->
+                val runId = agent.latestRunId ?: return@forEach
+                val status = agent.status?.uppercase() ?: return@forEach
+                putString(runId, status)
+            }
+        }.apply()
+    }
+
     fun watchActive(context: Context, agents: List<AgentSummary>) {
+        rememberStatuses(context, agents)
         agents.filter { it.isWorking() }.forEach { agent ->
             val runId = agent.latestRunId ?: return@forEach
-            watch(context, agent.id, runId, agent.name)
+            watch(context, agent.id, runId, agent.name, agent.status)
         }
     }
 

@@ -22,6 +22,17 @@ class InboxAgentsTest {
     }
 
     @Test
+    fun idleIsNotALiveRun() {
+        assertTrue(!isLiveStatus("IDLE"))
+        assertTrue(!isLiveStatus("FINISHED"))
+        assertTrue(isLiveStatus("RUNNING"))
+        assertTrue(isLiveStatus("CREATING"))
+        assertTrue(isLiveStatus("ACTIVE"))
+        assertTrue(!agent("idle", status = "IDLE").isWorking())
+        assertTrue(agent("run", status = "RUNNING").isWorking())
+    }
+
+    @Test
     fun mergeReplacesStaleIdleWithActive() {
         val stale = agent("a", status = "IDLE")
         val fresh = agent("a", status = "ACTIVE")
