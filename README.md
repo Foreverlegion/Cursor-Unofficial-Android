@@ -24,7 +24,7 @@ A sideloaded APK that lets you run and follow Cloud Agent work from Android:
 - Notifications when a run finishes or needs approval, including per-chat mute
 - MCP servers you configure on the phone (HTTP or stdio for cloud VMs)
 - Create a GitHub repo from New agent if you add a GitHub token
-- Settings backup, and optional auto-update from this repo's GitHub releases
+- Settings backup
 
 The phone does **not** run the agent. The work happens on Cursor's cloud VMs or on a machine you already signed into. This app is a remote control and inbox.
 
@@ -49,7 +49,7 @@ The phone does **not** run the agent. The work happens on Cursor's cloud VMs or 
 
 Play Protect may scan a sideloaded APK. That is Google, not this app. You can install anyway or turn Play Protect off yourself.
 
-After the first install, Settings → Update (or auto-update) pulls newer APKs from the same releases page.
+Play installs update from the Play Store. This app does not download or install APKs.
 
 ## Sign in
 
