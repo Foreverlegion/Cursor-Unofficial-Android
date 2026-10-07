@@ -15,7 +15,7 @@ class InboxSweepWorker(
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as? CursorAndroidApp ?: return Result.failure()
-        if (!app.container.store.hasKey()) return Result.success()
+        if (app.container.store.demoMode || !app.container.store.hasKey()) return Result.success()
         val seen = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return try {
             val agents = app.container.repo.listAgents()

@@ -67,6 +67,7 @@ import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.AutoUpdateScheduler
+import com.cursorandroid.app.data.repo.FeedbackPolicy
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import java.text.NumberFormat
@@ -86,7 +87,9 @@ fun SettingsScreen(
     showBack: Boolean,
     onBack: () -> Unit,
     onSignedOut: () -> Unit,
+    onSessionChanged: () -> Unit = {},
     onAppearanceChanged: () -> Unit = {},
+    openAccountTick: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     var overview by remember { mutableStateOf<AccountOverview?>(null) }
@@ -135,6 +138,9 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         overview = runCatching { container.repo.accountOverview() }.getOrNull()
         modelItems = runCatching { container.repo.models() }.getOrDefault(emptyList())
+    }
+    LaunchedEffect(openAccountTick) {
+        if (openAccountTick > 0) tab = SettingsTab.Account
     }
 
     if (showBack) BackHandler(onBack = onBack)
@@ -263,6 +269,7 @@ fun SettingsScreen(
                         )
                         SettingsTab.Account -> AccountTab(
                             container = container,
+                            operator = FeedbackPolicy.isOperator(overview?.me?.userEmail),
                             autoUpdate = autoUpdate,
                             onAutoUpdate = { on ->
                                 autoUpdate = on
@@ -282,8 +289,13 @@ fun SettingsScreen(
                             },
                             onSignedOut = {
                                 RunWatchScheduler.stop(context.applicationContext)
-                                container.store.clear()
-                                onSignedOut()
+                                if (container.store.demoMode) {
+                                    container.store.demoMode = false
+                                    if (container.store.hasKey()) onSessionChanged() else onSignedOut()
+                                } else {
+                                    container.store.clear()
+                                    onSignedOut()
+                                }
                             },
                         )
                     }
@@ -532,6 +544,7 @@ private fun ConnectionsTab(
 @Composable
 private fun AccountTab(
     container: AppContainer,
+    operator: Boolean,
     autoUpdate: Boolean,
     onAutoUpdate: (Boolean) -> Unit,
     onImported: () -> Unit,
@@ -554,7 +567,7 @@ private fun AccountTab(
     ) {
         SettingsTransfer(container = container, onImported = onImported)
     }
-    FeedbackSection(container = container)
+    FeedbackSection(container = container, operator = operator)
     Section(title = "Session") {
         Button(onClick = onSignedOut, modifier = Modifier.fillMaxWidth()) {
             Text("Sign out")

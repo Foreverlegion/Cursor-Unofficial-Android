@@ -45,6 +45,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -341,6 +342,21 @@ class AgentRepository(
         privateRepo: Boolean,
         description: String?,
     ): RepositoryItem {
+        if (store.demoMode) {
+            val slug = name.trim().ifBlank { "demo-repo" }
+            val created = RepositoryItem(
+                url = "https://github.com/example/$slug",
+                provider = "github",
+                defaultBranch = "main",
+                name = slug,
+            )
+            val next = (listOf(created) + catalog.repos())
+                .distinctBy { it.url.trim().lowercase().removeSuffix(".git") }
+                .sortedBy { it.displayName().lowercase() }
+            catalog.saveRepos(next)
+            catalog.saveBranches(created.url, listOf("main"))
+            return created
+        }
         val created = withContext(Dispatchers.IO) {
             GithubRepos.create(store.githubToken.orEmpty(), name, privateRepo, description)
         }
@@ -408,6 +424,9 @@ class AgentRepository(
     }
 
     fun stream(agentId: String, runId: String, lastEventId: String? = null): Flow<StreamEvent> {
+        if (store.demoMode) {
+            return flow { emit(StreamEvent.Done) }
+        }
         return sse.stream(agentId, runId, apiKey(), lastEventId)
     }
 
@@ -547,6 +566,7 @@ class AgentRepository(
     }
 
     private fun publicJson(url: String): kotlinx.serialization.json.JsonElement? {
+        if (store.demoMode) return null
         if (!SafeLinks.isHttps(url)) return null
         val request = Request.Builder()
             .url(url)
