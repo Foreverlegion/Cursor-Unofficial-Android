@@ -1,3 +1,15 @@
+# 1.0.24
+
+Inbox and agent threads follow the Play listing layout. Status pills are Done, Running, Needs approval, and Failed, from real agent and run states. The inbox bar and Settings sit above the Android system navigation bar.
+
+New Agent can start on a saved cloud environment and can show that environment's build status. An any-repo pool can take more than one repository. Machine, the default pool, and repo-backed pools still take one.
+
+Install counting is gone. This build does not ping an install ledger.
+
+Privacy policy: https://foreverlegion.github.io/Cursor-Unofficial-Android/privacy.html
+
+---
+
 # 1.0.23
 
 Thinking and typing sit at the bottom of the thread while a run is live. Finished Thinking rows no longer stick in the scroll backlog between older messages.
