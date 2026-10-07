@@ -1,6 +1,6 @@
 # 1.0.27
 
-Owner tools in Settings match the public GitHub login Foreverlegion. The privacy policy contact is that GitHub profile and this project's issues.
+Owner tools in Settings match the public GitHub login Foreverlegion. The in-app Ban button is shown only for that login. The privacy policy contact is that GitHub profile and this project's issues.
 
 ---
 
