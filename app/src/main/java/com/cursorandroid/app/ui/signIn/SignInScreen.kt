@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -33,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.screenInsets
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.ClientOrigin
 import com.cursorandroid.app.data.repo.SafeLinks
@@ -66,7 +66,7 @@ fun SignInScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .imePadding()
+            .screenInsets()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,

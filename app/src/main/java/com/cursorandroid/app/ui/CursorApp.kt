@@ -28,7 +28,6 @@ import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.AutoUpdateScheduler
-import com.cursorandroid.app.data.repo.InstallPulseScheduler
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.ReleaseNotes
@@ -138,7 +137,6 @@ private fun CursorAppContent(
     LaunchedEffect(signedIn) {
         if (signedIn) RunWatchScheduler.resume(context.applicationContext)
         AutoUpdateScheduler.sync(context.applicationContext, container.store.autoUpdate)
-        InstallPulseScheduler.sync(context.applicationContext)
     }
     LaunchedEffect(signedIn, container.store.autoUpdate) {
         if (!signedIn || !container.store.autoUpdate) return@LaunchedEffect
@@ -325,7 +323,7 @@ private fun CursorAppContent(
 
 @Composable
 private fun EmptyDetail() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().screenInsets(), contentAlignment = Alignment.Center) {
         Text(
             "Select an agent, or start a new one.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,

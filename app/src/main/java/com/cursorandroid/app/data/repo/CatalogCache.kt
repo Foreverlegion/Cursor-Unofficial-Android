@@ -3,6 +3,7 @@ package com.cursorandroid.app.data.repo
 import android.content.Context
 import androidx.core.content.edit
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.RepositoryItem
@@ -22,6 +23,7 @@ class CatalogCache(context: Context) {
     fun repos(): List<RepositoryItem> = readList("repos")
     fun pools(): List<WorkerPool> = readList("pools")
     fun cloudEnvs(): List<String> = readList("cloud_envs")
+    fun savedEnvironments(): List<CloudEnvironment> = readList("saved_environments")
 
     fun saveAgents(items: List<AgentSummary>) = write("agents", items)
     fun saveComputers(items: List<Computer>) = write("computers", items)
@@ -33,6 +35,23 @@ class CatalogCache(context: Context) {
         if (next.isEmpty() || next.equals("Cloud", ignoreCase = true)) return
         val merged = (cloudEnvs() + next).distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
         write("cloud_envs", merged)
+    }
+
+    fun rememberEnvironment(env: CloudEnvironment) {
+        if (env.id.isBlank() && env.name.isBlank()) return
+        val current = savedEnvironments()
+        val next = if (env.id.isBlank()) {
+            current.filterNot { it.name.equals(env.name, ignoreCase = true) } + env
+        } else {
+            current.filterNot { it.id == env.id } + env
+        }
+        write("saved_environments", next.sortedBy { it.name.lowercase() })
+        if (env.name.isNotBlank()) rememberCloudEnv(env.name)
+    }
+
+    fun forgetEnvironment(id: String) {
+        if (id.isBlank()) return
+        write("saved_environments", savedEnvironments().filterNot { it.id == id })
     }
 
     fun gitSnaps(): Map<String, GitSnap> {

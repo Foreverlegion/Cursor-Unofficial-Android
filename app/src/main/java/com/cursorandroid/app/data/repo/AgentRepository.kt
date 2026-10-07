@@ -9,7 +9,15 @@ import com.cursorandroid.app.data.api.AgentUsageRow
 import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.TokenUsage
 import com.cursorandroid.app.data.api.Computer
+import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.CreateAgentRequest
+import com.cursorandroid.app.data.api.CreateEnvironmentRequest
+import com.cursorandroid.app.data.api.EnvRepo
+import com.cursorandroid.app.data.api.EnvironmentActiveBuild
+import com.cursorandroid.app.data.api.EnvironmentBuild
+import com.cursorandroid.app.data.api.EnvironmentBuildList
+import com.cursorandroid.app.data.api.MAX_ENV_REPOS
+import com.cursorandroid.app.data.api.environmentOwner
 import com.cursorandroid.app.data.api.WorkerPool
 import com.cursorandroid.app.data.api.WorkersSummaryResponse
 import com.cursorandroid.app.data.api.CreateAgentResponse
@@ -59,6 +67,55 @@ class AgentRepository(
     fun apiKey(): String = store.apiKey.orEmpty()
 
     suspend fun me(): MeResponse = wrap { api.me() }
+
+    suspend fun createCloudEnvironment(
+        name: String,
+        repoUrls: List<String>,
+        environmentJson: String,
+        owner: String = "personal",
+    ): CloudEnvironment {
+        val repos = repoUrls
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .take(MAX_ENV_REPOS)
+            .map { EnvRepo(it) }
+        val created = wrap {
+            api.createEnvironment(
+                CreateEnvironmentRequest(
+                    owner = environmentOwner(owner),
+                    name = name.trim(),
+                    repos = repos,
+                    environmentJson = environmentJson.trim(),
+                ),
+            )
+        }
+        catalog.rememberEnvironment(created)
+        return created
+    }
+
+    suspend fun getCloudEnvironment(id: String): CloudEnvironment {
+        val env = wrap { api.getEnvironment(id) }
+        catalog.rememberEnvironment(env)
+        return env
+    }
+
+    suspend fun deleteCloudEnvironment(id: String) {
+        wrap { api.deleteEnvironment(id) }
+        catalog.forgetEnvironment(id)
+    }
+
+    suspend fun listEnvironmentBuilds(id: String, cursor: String? = null): EnvironmentBuildList {
+        return wrap { api.listEnvironmentBuilds(id, cursor) }
+    }
+
+    suspend fun getEnvironmentBuild(id: String, buildId: String): EnvironmentBuild {
+        return wrap { api.getEnvironmentBuild(id, buildId) }
+    }
+
+    suspend fun activeEnvironmentBuild(id: String): EnvironmentActiveBuild {
+        return wrap { api.activeEnvironmentBuild(id) }
+    }
 
     suspend fun listAgents(includeArchived: Boolean = true, cursor: String? = null): List<AgentSummary> {
         return if (cursor == null) {

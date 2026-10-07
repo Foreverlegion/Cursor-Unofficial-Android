@@ -1,0 +1,48 @@
+name: preview-apk
+
+on:
+  push:
+    branches:
+      - "Backend/**"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-android-build
+        with:
+          cache-read-only: "true"
+      - name: Restore keystore
+        env:
+          CURSOR_ANDROID_KEYSTORE_BASE64: ${{ secrets.CURSOR_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$CURSOR_ANDROID_KEYSTORE_BASE64" ]; then
+            echo "No signing keystore configured"
+            exit 0
+          fi
+          mkdir -p app/signing
+          printf '%s' "$CURSOR_ANDROID_KEYSTORE_BASE64" | base64 -d > app/signing/stable.p12
+      - name: Assemble preview APK
+        env:
+          CURSOR_ANDROID_STORE_PASSWORD: ${{ secrets.CURSOR_ANDROID_STORE_PASSWORD }}
+          CURSOR_ANDROID_KEY_PASSWORD: ${{ secrets.CURSOR_ANDROID_KEY_PASSWORD }}
+          CURSOR_ANDROID_KEY_ALIAS: ${{ secrets.CURSOR_ANDROID_KEY_ALIAS }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 9.3.1
+          fi
+          if [ -f app/signing/stable.p12 ]; then
+            ./gradlew --no-daemon :app:assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk cursor-android-preview.apk
+          else
+            ./gradlew --no-daemon :app:assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk cursor-android-preview.apk
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cursor-android-preview
+          path: cursor-android-preview.apk
+          if-no-files-found: error

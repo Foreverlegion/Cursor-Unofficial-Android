@@ -39,3 +39,22 @@ internal fun waitCopy(
         "Starting this run."
     }
 }
+
+internal fun workActivityLine(
+    receiving: Boolean,
+    agentStatus: String?,
+    runStatus: String?,
+    envType: String?,
+    toolName: String?,
+): String {
+    val detail = when {
+        !toolName.isNullOrBlank() -> toolName
+        receiving -> "writing"
+        isRemoteEnvType(envType) &&
+            (isLiveStatus(agentStatus) || isLiveStatus(runStatus) ||
+                isCreatingStatus(agentStatus) || isCreatingStatus(runStatus)) -> "waiting for the PC"
+        isCreatingStatus(agentStatus) || isCreatingStatus(runStatus) -> "starting"
+        else -> "…"
+    }
+    return "Agent working · $detail"
+}

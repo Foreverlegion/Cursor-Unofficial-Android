@@ -1,5 +1,8 @@
 package com.cursorandroid.app.ui.inbox
 
+import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.isRemoteEnvType
+
 enum class InboxTab {
     Agents,
     Envs,
@@ -8,10 +11,30 @@ enum class InboxTab {
 
     val title: String
         get() = when (this) {
-            Agents -> "Agents"
-            Envs -> "ENVs"
+            Agents -> "Cloud"
+            Envs -> "Pool"
             Remote -> "Remote"
         }
+
+    fun composeTarget(): String = when (this) {
+        Agents -> "cloud"
+        Envs -> "pool"
+        Remote -> "machine"
+    }
+}
+
+fun inboxHome(type: String?): InboxTab = when {
+    isRemoteEnvType(type) -> InboxTab.Remote
+    type?.trim()?.equals("pool", ignoreCase = true) == true -> InboxTab.Envs
+    else -> InboxTab.Agents
+}
+
+fun List<AgentSummary>.forInboxTab(tab: InboxTab, visible: List<InboxTab>): List<AgentSummary> {
+    if (visible.size <= 1) return this
+    return filter { agent ->
+        val home = inboxHome(agent.env?.type)
+        home == tab || (home !in visible && tab == InboxTab.Agents)
+    }
 }
 
 object InboxTabs {
