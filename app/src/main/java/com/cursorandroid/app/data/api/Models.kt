@@ -122,14 +122,53 @@ data class EnvRepo(
 )
 
 @Serializable
+data class EnvironmentRepoFile(
+    val url: String? = null,
+    val path: String? = null,
+)
+
+@Serializable
 data class CloudEnvironment(
     val id: String = "",
     val name: String = "",
     val owner: String? = null,
     val repos: List<EnvRepo> = emptyList(),
     val environmentJson: String? = null,
+    val repoFile: EnvironmentRepoFile? = null,
+    val versionId: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
+)
+
+@Serializable
+data class EnvironmentBuildFailure(
+    val type: String? = null,
+    val code: String? = null,
+)
+
+@Serializable
+data class EnvironmentBuild(
+    val id: String,
+    val environmentId: String? = null,
+    val status: String? = null,
+    val trigger: String? = null,
+    val draft: Boolean? = null,
+    val failure: EnvironmentBuildFailure? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+    val completedAt: String? = null,
+)
+
+@Serializable
+data class EnvironmentBuildList(
+    val items: List<EnvironmentBuild> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
+data class EnvironmentActiveBuild(
+    val type: String = "",
+    val buildId: String? = null,
 )
 
 @Serializable
@@ -627,6 +666,77 @@ fun WorkerPool.acceptsManyRepos(): Boolean {
 fun environmentConfigJson(install: String?): String {
     val script = install?.trim()?.takeIf { it.isNotEmpty() } ?: "true"
     return buildJsonObject { put("install", script) }.toString()
+}
+
+fun environmentOwner(raw: String?): String {
+    return if (raw.equals("team", ignoreCase = true)) "team" else "personal"
+}
+
+fun resolvedEnvironmentJson(raw: String?): String {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty()) return environmentConfigJson(null)
+    return text
+}
+
+data class EnvironmentChoice(
+    val name: String,
+    val id: String?,
+    val owner: String?,
+    val repoCount: Int,
+    val fromApi: Boolean,
+)
+
+fun EnvironmentChoice.menuLabel(): String {
+    if (!fromApi) return "$name · past chat"
+    val who = when (owner?.lowercase()) {
+        "team" -> "team"
+        "personal" -> "personal"
+        else -> "saved"
+    }
+    val count = if (repoCount == 1) "1 repo" else "$repoCount repos"
+    return "$name · $who · $count"
+}
+
+fun environmentChoices(
+    saved: List<CloudEnvironment>,
+    scraped: List<String>,
+): List<EnvironmentChoice> {
+    val real = saved
+        .filter { it.name.isNotBlank() }
+        .distinctBy { it.id.ifBlank { it.name.lowercase() } }
+        .sortedBy { it.name.lowercase() }
+        .map { env ->
+            EnvironmentChoice(
+                name = env.name,
+                id = env.id.takeIf { it.isNotBlank() },
+                owner = env.owner,
+                repoCount = env.repos.size,
+                fromApi = env.id.isNotBlank(),
+            )
+        }
+    val taken = real.map { it.name.lowercase() }.toSet()
+    val past = scraped.map { it.trim() }.filter { it.isNotEmpty() && it.lowercase() !in taken }
+        .distinctBy { it.lowercase() }
+        .sortedBy { it.lowercase() }
+        .map { name ->
+            EnvironmentChoice(name = name, id = null, owner = null, repoCount = 0, fromApi = false)
+        }
+    return real + past
+}
+
+fun activeBuildSummary(active: EnvironmentActiveBuild?, latest: EnvironmentBuild?): String {
+    val boot = when (active?.type) {
+        "build" -> active.buildId?.let { "Boots from $it" } ?: "Boots from a build"
+        "universal_image" -> "Boots from the default image"
+        else -> null
+    }
+    val build = latest?.let { item ->
+        val status = item.status ?: "unknown"
+        val draft = if (item.draft == true) " draft" else ""
+        val fail = item.failure?.code?.let { " ($it)" }.orEmpty()
+        "Latest ${item.id} $status$draft$fail"
+    }
+    return listOfNotNull(boot, build).joinToString(" · ")
 }
 
 fun assembleRepos(

@@ -49,6 +49,21 @@ interface CursorApi {
     @HTTP(method = "DELETE", path = "v1/environments/{id}", hasBody = false)
     suspend fun deleteEnvironment(@Path("id") id: String)
 
+    @GET("v1/environments/{id}/builds")
+    suspend fun listEnvironmentBuilds(
+        @Path("id") id: String,
+        @Query("cursor") cursor: String? = null,
+    ): EnvironmentBuildList
+
+    @GET("v1/environments/{id}/builds/active")
+    suspend fun activeEnvironmentBuild(@Path("id") id: String): EnvironmentActiveBuild
+
+    @GET("v1/environments/{id}/builds/{buildId}")
+    suspend fun getEnvironmentBuild(
+        @Path("id") id: String,
+        @Path("buildId") buildId: String,
+    ): EnvironmentBuild
+
     @GET("v1/agents/{id}/runs")
     suspend fun listRuns(
         @Path("id") id: String,

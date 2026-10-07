@@ -55,6 +55,11 @@ import com.cursorandroid.app.data.api.matchRepo
 import com.cursorandroid.app.data.api.prettyProvider
 import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.api.namedCloudEnvironments
+import com.cursorandroid.app.data.api.environmentChoices
+import com.cursorandroid.app.data.api.environmentConfigJson
+import com.cursorandroid.app.data.api.environmentOwner
+import com.cursorandroid.app.data.api.resolvedEnvironmentJson
+import com.cursorandroid.app.data.api.activeBuildSummary
 import com.cursorandroid.app.data.api.poolAgentRepos
 import com.cursorandroid.app.data.api.acceptsManyRepos
 import com.cursorandroid.app.data.api.selection
@@ -122,13 +127,19 @@ fun NewAgentScreen(
     var saveEnvironment by remember { mutableStateOf(false) }
     var environmentName by remember { mutableStateOf("") }
     var envInstall by remember { mutableStateOf("") }
+    var savedEnvs by remember { mutableStateOf(container.catalog.savedEnvironments()) }
+    var selectedEnvId by remember { mutableStateOf<String?>(null) }
+    var envStatus by remember { mutableStateOf("") }
+    var envOwner by remember { mutableStateOf("personal") }
+    var envJson by remember { mutableStateOf("") }
+    var createEnvRepos by remember { mutableStateOf(listOf<String>()) }
+    var envBusy by remember { mutableStateOf(false) }
     var createRepo by remember { mutableStateOf(false) }
     var newRepoName by remember { mutableStateOf("") }
     var newRepoPrivate by remember { mutableStateOf(true) }
     var cloudFromEnv by remember {
         mutableStateOf(!initialEnvName.isNullOrBlank() && initialEnvType == "cloud")
     }
-    var cloudEnvMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
@@ -151,9 +162,10 @@ fun NewAgentScreen(
         val label = item?.providerLabel() ?: prettyProvider(gitHost(url))
         if (label.isNotBlank()) provider = label
     }
-    val cloudEnvs = remember(repos, envName) {
-        container.catalog.agents().namedCloudEnvironments(container.catalog.cloudEnvs() + listOf(envName))
-    }
+    val cloudChoices = environmentChoices(
+        savedEnvs,
+        container.catalog.agents().namedCloudEnvironments(container.catalog.cloudEnvs() + listOf(envName)),
+    )
 
     LaunchedEffect(resetTick) {
         val saved = container.drafts.load(DraftStore.NEW_AGENT)
@@ -186,6 +198,16 @@ fun NewAgentScreen(
         saveEnvironment = saved.saveEnvironment
         if (saved.environmentName.isNotBlank()) environmentName = saved.environmentName
         if (saved.envInstall.isNotBlank()) envInstall = saved.envInstall
+        if (saved.envOwner.isNotBlank()) envOwner = environmentOwner(saved.envOwner)
+        if (saved.environmentJson.isNotBlank()) envJson = saved.environmentJson
+        if (saved.createEnvRepos.isNotEmpty()) createEnvRepos = saved.createEnvRepos
+        savedEnvs = container.catalog.savedEnvironments()
+        selectedEnvId = if (!initialEnvName.isNullOrBlank() && initialEnvType == "cloud") {
+            savedEnvs.firstOrNull { it.id.isNotBlank() && it.name.equals(envName, ignoreCase = true) }?.id
+        } else {
+            saved.selectedEnvId.takeIf { it.isNotBlank() }
+                ?: savedEnvs.firstOrNull { it.id.isNotBlank() && it.name.equals(envName, ignoreCase = true) }?.id
+        }
         if (saved.modelParams.isNotEmpty()) modelParams = saved.modelParams
         subagents = saved.resolvedSubagents()
         draftReady = true
@@ -194,7 +216,8 @@ fun NewAgentScreen(
     LaunchedEffect(
         agentName, prompt, modelId, modelParams, mode, attaches, envType, envName, provider, repoUrl,
         startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, extraRepos,
-        saveEnvironment, environmentName, envInstall, draftReady,
+        saveEnvironment, environmentName, envInstall, envOwner, selectedEnvId, envJson,
+        createEnvRepos, draftReady,
     ) {
         if (!draftReady) return@LaunchedEffect
         val first = subagents.firstOrNull()
@@ -224,8 +247,40 @@ fun NewAgentScreen(
                 saveEnvironment = saveEnvironment,
                 environmentName = environmentName,
                 envInstall = envInstall,
+                envOwner = envOwner,
+                selectedEnvId = selectedEnvId.orEmpty(),
+                environmentJson = envJson,
+                createEnvRepos = createEnvRepos,
             ),
         )
+    }
+
+    LaunchedEffect(selectedEnvId) {
+        val id = selectedEnvId?.takeIf { it.isNotBlank() }
+        if (id == null) {
+            envStatus = ""
+            return@LaunchedEffect
+        }
+        envStatus = "Loading builds…"
+        val detail = runCatching { container.repo.getCloudEnvironment(id) }.getOrNull()
+        if (selectedEnvId != id) return@LaunchedEffect
+        if (detail != null) {
+            savedEnvs = container.catalog.savedEnvironments()
+            if (detail.name.isNotBlank()) envName = detail.name
+        }
+        val active = runCatching { container.repo.activeEnvironmentBuild(id) }.getOrNull()
+        val listed = runCatching { container.repo.listEnvironmentBuilds(id) }.getOrNull()
+        if (selectedEnvId != id) return@LaunchedEffect
+        var latest = listed?.items?.firstOrNull()
+        val activeId = active?.buildId
+        if (!activeId.isNullOrBlank() && latest?.id != activeId) {
+            latest = runCatching { container.repo.getEnvironmentBuild(id, activeId) }.getOrNull() ?: latest
+        }
+        if (selectedEnvId != id) return@LaunchedEffect
+        envStatus = when {
+            active == null && listed == null -> "Build status unavailable"
+            else -> activeBuildSummary(active, latest).ifBlank { "No build yet" }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -373,40 +428,80 @@ fun NewAgentScreen(
                         )
                     }
                     if (cloudFromEnv) {
-                        ExposedDropdownMenuBox(expanded = cloudEnvMenu, onExpandedChange = { cloudEnvMenu = it }) {
-                            OutlinedTextField(
-                                value = envName,
-                                onValueChange = { envName = it },
-                                modifier = Modifier
-                                    .menuAnchor(MenuAnchorType.PrimaryEditable)
-                                    .fillMaxWidth(),
-                                label = { Text("Environment") },
-                                placeholder = { Text("Name of the saved environment") },
-                                supportingText = {
-                                    Text("Saved environment: snapshot, secrets, and repos. Do not also pick a repo.")
-                                },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cloudEnvMenu) },
-                                singleLine = true,
-                            )
-                            ExposedDropdownMenu(expanded = cloudEnvMenu, onDismissRequest = { cloudEnvMenu = false }) {
-                                if (cloudEnvs.isEmpty()) {
-                                    DropdownMenuItem(
-                                        text = { Text("Type a saved environment name") },
-                                        onClick = { cloudEnvMenu = false },
-                                        enabled = false,
-                                    )
+                        SavedEnvironmentPanel(
+                            choices = cloudChoices,
+                            name = envName,
+                            onName = { typed ->
+                                envName = typed
+                                selectedEnvId = cloudChoices.firstOrNull {
+                                    it.fromApi && it.name.equals(typed.trim(), ignoreCase = true)
+                                }?.id
+                            },
+                            selectedId = selectedEnvId,
+                            onPicked = { choice ->
+                                envName = choice.name
+                                selectedEnvId = choice.id
+                            },
+                            status = envStatus,
+                            onDelete = selectedEnvId?.let { id ->
+                                {
+                                    scope.launch {
+                                        envBusy = true
+                                        error = null
+                                        try {
+                                            container.repo.deleteCloudEnvironment(id)
+                                            savedEnvs = container.catalog.savedEnvironments()
+                                            if (selectedEnvId == id) {
+                                                selectedEnvId = null
+                                                envName = ""
+                                                envStatus = ""
+                                            }
+                                        } catch (e: Exception) {
+                                            error = e.message ?: "Delete failed"
+                                        } finally {
+                                            envBusy = false
+                                        }
+                                    }
                                 }
-                                cloudEnvs.forEach { name ->
-                                    DropdownMenuItem(
-                                        text = { Text(name) },
-                                        onClick = {
-                                            envName = name
-                                            cloudEnvMenu = false
-                                        },
-                                    )
+                            },
+                            createName = environmentName,
+                            onCreateName = { environmentName = it },
+                            owner = envOwner,
+                            onOwner = { envOwner = it },
+                            catalogRepos = repos,
+                            repoUrls = createEnvRepos,
+                            onRepoUrls = { createEnvRepos = it },
+                            environmentJson = envJson,
+                            onEnvironmentJson = { envJson = it },
+                            busy = envBusy || loading,
+                            onCreate = {
+                                scope.launch {
+                                    val savedName = environmentName.trim()
+                                    if (savedName.isBlank()) {
+                                        error = "Name the environment."
+                                        return@launch
+                                    }
+                                    envBusy = true
+                                    error = null
+                                    try {
+                                        val made = container.repo.createCloudEnvironment(
+                                            savedName,
+                                            createEnvRepos,
+                                            resolvedEnvironmentJson(envJson),
+                                            envOwner,
+                                        )
+                                        savedEnvs = container.catalog.savedEnvironments()
+                                        envName = made.name.ifBlank { savedName }
+                                        selectedEnvId = made.id.takeIf { it.isNotBlank() }
+                                        environmentName = ""
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Create failed"
+                                    } finally {
+                                        envBusy = false
+                                    }
                                 }
-                            }
-                        }
+                            },
+                        )
                     } else {
                     ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
                         OutlinedTextField(
@@ -514,6 +609,8 @@ fun NewAgentScreen(
                         onName = { environmentName = it },
                         install = envInstall,
                         onInstall = { envInstall = it },
+                        owner = envOwner,
+                        onOwner = { envOwner = it },
                     )
                     if (createRepo && repoUrl.isBlank()) {
                         val sanitized = GithubRepos.sanitizeName(newRepoName)
@@ -1030,11 +1127,14 @@ fun NewAgentScreen(
                                     val made = container.repo.createCloudEnvironment(
                                         savedName,
                                         listOf(repo) + extraRepos,
-                                        envInstall,
+                                        environmentConfigJson(envInstall),
+                                        envOwner,
                                     )
-                                    container.catalog.rememberCloudEnv(made.name)
+                                    savedEnvs = container.catalog.savedEnvironments()
+                                    selectedEnvId = made.id.takeIf { it.isNotBlank() }
+                                    container.catalog.rememberCloudEnv(made.name.ifBlank { savedName })
                                     launchFromEnv = true
-                                    launchEnvName = made.name
+                                    launchEnvName = made.name.ifBlank { savedName }
                                 }
                                 val tip = if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank() && branch.isNotBlank()) {
                                     runCatching { container.repo.branchTip(repo, branch) }.getOrNull()

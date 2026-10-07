@@ -40,6 +40,10 @@ data class ChatDraft(
     val saveEnvironment: Boolean = false,
     val environmentName: String = "",
     val envInstall: String = "",
+    val envOwner: String = "",
+    val selectedEnvId: String = "",
+    val environmentJson: String = "",
+    val createEnvRepos: List<String> = emptyList(),
 ) {
     fun isEmpty(): Boolean {
         return text.isBlank() &&
@@ -64,7 +68,11 @@ data class ChatDraft(
             extraRepos.isEmpty() &&
             !saveEnvironment &&
             environmentName.isBlank() &&
-            envInstall.isBlank()
+            envInstall.isBlank() &&
+            envOwner.isBlank() &&
+            selectedEnvId.isBlank() &&
+            environmentJson.isBlank() &&
+            createEnvRepos.isEmpty()
     }
 
     fun resolvedSubagents(): List<DraftSubagent> {
