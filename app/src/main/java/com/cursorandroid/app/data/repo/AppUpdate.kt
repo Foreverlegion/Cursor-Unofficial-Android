@@ -196,6 +196,10 @@ object AppUpdate {
         return resolveRemote(published, gradle)
     }
 
+    internal fun isUpdateRelease(draft: Boolean, prerelease: Boolean, hasApk: Boolean): Boolean {
+        return !draft && !prerelease && hasApk
+    }
+
     fun resolveRemote(published: Remote?, gradle: Remote?): Remote {
         if (published != null) return published
         if (gradle != null) return gradle
@@ -277,8 +281,11 @@ object AppUpdate {
         }.getOrNull() ?: return null
         val release = json.decodeFromString<List<GhRelease>>(body)
             .firstOrNull { release ->
-                !release.draft &&
-                    release.assets.any { it.name.endsWith(".apk", ignoreCase = true) }
+                isUpdateRelease(
+                    draft = release.draft,
+                    prerelease = release.prerelease,
+                    hasApk = release.assets.any { it.name.endsWith(".apk", ignoreCase = true) },
+                )
             } ?: return null
         val asset = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
             ?: return null
@@ -372,6 +379,7 @@ object AppUpdate {
     @Serializable
     private data class GhRelease(
         val draft: Boolean = false,
+        val prerelease: Boolean = false,
         val tag_name: String? = null,
         val name: String? = null,
         val body: String? = null,

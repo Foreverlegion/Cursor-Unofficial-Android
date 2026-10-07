@@ -12,37 +12,39 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,8 +56,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.cursorandroid.app.ui.status.PlayColors
+import com.cursorandroid.app.ui.status.StatusPill
+import com.cursorandroid.app.ui.status.agentCardSubtitle
+import com.cursorandroid.app.ui.status.relativeAge
+import com.cursorandroid.app.ui.status.runIndicator
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,9 +74,7 @@ import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
-import com.cursorandroid.app.data.api.hostedEnvs
 import com.cursorandroid.app.data.api.isArchived
-import com.cursorandroid.app.data.api.remoteEnvs
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.api.markCloudArchived
@@ -211,24 +218,39 @@ fun InboxScreen(
         }
     }
 
+    val approvalIds = notices.mapNotNull { notice ->
+        notice.agentId.takeIf { notice.kind == "approval" }
+    }.toSet()
     Scaffold(
         modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                ),
                 title = {
-                    Text(tab.title)
+                    Text("Agents", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 },
                 actions = {
-                    IconButton(onClick = onSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                    Button(
+                        onClick = { onCompose(tab.composeTarget(), null) },
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PlayColors.Teal,
+                            contentColor = PlayColors.TealInk,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(end = 12.dp),
+                    ) {
+                        Text("+ New", fontWeight = FontWeight.SemiBold)
                     }
                 },
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { onCompose("cloud", null) }) {
-                Icon(Icons.Outlined.Add, contentDescription = "New agent")
-            }
+        bottomBar = {
+            InboxBottomNav(onSettings = onSettings)
         },
     ) { padding ->
         Column(
@@ -253,25 +275,23 @@ fun InboxScreen(
                     ids.forEach { container.notifier.rememberDismissed(it) }
                 },
             )
-            if (tabs.size > 1) {
-                PrimaryTabRow(selectedTabIndex = tabs.indexOf(tab).coerceAtLeast(0)) {
-                    tabs.forEach { item ->
-                        Tab(
-                            selected = tab == item,
-                            onClick = { selectedTab = item },
-                            text = { Text(item.title) },
-                        )
-                    }
-                }
-            }
+            InboxTabStrip(
+                tabs = tabs,
+                selected = tab,
+                onSelect = { selectedTab = it },
+            )
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = { reload(showSpinner = true) },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                if (tab == InboxTab.Agents) {
+                val listed = items.visibleInbox(showArchived, hiddenIds, showHidden).forInboxTab(tab, tabs)
+                run {
                     AgentList(
-                        items = items.visibleInbox(showArchived, hiddenIds, showHidden),
+                        items = listed,
+                        approvalIds = approvalIds,
+                        computers = if (tab == InboxTab.Remote) computers else emptyList(),
+                        onSelectComputer = { onCompose("machine", it.name) },
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
@@ -371,30 +391,6 @@ fun InboxScreen(
                         },
                         onDelete = { deleteIds = listOf(it.id) },
                         onDeleteIds = { deleteIds = it.toList() },
-                    )
-                } else if (tab == InboxTab.Envs) {
-                    EnvList(
-                        envs = items.visibleInbox(showArchived, hiddenIds, showHidden).hostedEnvs(),
-                        refreshing = refreshing,
-                        onOpen = { env ->
-                            env.latestId?.let(onSelect)
-                        },
-                        onCompose = { env ->
-                            onCompose(env.composeType(), env.composeName())
-                        },
-                    )
-                } else {
-                    RemotePane(
-                        computers = computers,
-                        envs = items.visibleInbox(showArchived, hiddenIds, showHidden).remoteEnvs(),
-                        refreshing = refreshing,
-                        onOpenEnv = { env ->
-                            env.latestId?.let(onSelect)
-                        },
-                        onComposeEnv = { env ->
-                            onCompose(env.composeType(), env.composeName())
-                        },
-                        onSelectComputer = { onCompose("machine", it.name) },
                     )
                 }
             }
@@ -497,6 +493,9 @@ private fun NoticeTray(
 @Composable
 private fun AgentList(
     items: List<AgentSummary>,
+    approvalIds: Set<String>,
+    computers: List<Computer>,
+    onSelectComputer: (Computer) -> Unit,
     selectedId: String?,
     metas: Map<String, ChatMeta>,
     git: Map<String, GitSnap>,
@@ -573,7 +572,7 @@ private fun AgentList(
     val rest = newest.filter { it.id !in favoriteIds }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 88.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item(key = "search") {
             Box(Modifier.fillMaxWidth()) {
@@ -706,7 +705,7 @@ private fun AgentList(
                     )
                 }
             }
-            newest.isEmpty() && !refreshing -> {
+            newest.isEmpty() && computers.isEmpty() && !refreshing -> {
                 item(key = "empty") {
                     Text(
                         inboxEmptyCopy(showHidden, showArchived, workingOnly, query),
@@ -716,6 +715,12 @@ private fun AgentList(
                 }
             }
             else -> {
+                if (computers.isNotEmpty()) {
+                    item(key = "machines") { SectionLabel("Machines") }
+                    items(computers, key = { "pc:${it.workerId ?: it.name}" }) { computer ->
+                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
+                    }
+                }
                 if (favorites.isNotEmpty()) {
                     item(key = "hdr-fav") {
                         SectionLabel("Favorites")
@@ -725,6 +730,7 @@ private fun AgentList(
                             agent = agent,
                             title = metas[agent.id]?.title,
                             git = git[agent.id],
+                            needsApproval = agent.id in approvalIds,
                             selected = agent.id == selectedId,
                             favorite = true,
                             hidden = metas[agent.id]?.hidden == true,
@@ -744,7 +750,6 @@ private fun AgentList(
                             onUnarchive = { onUnarchive(agent) },
                             onDelete = { onDelete(agent) },
                         )
-                        HorizontalDivider()
                     }
                     item(key = "hdr-all") {
                         SectionLabel("All")
@@ -755,6 +760,7 @@ private fun AgentList(
                         agent = agent,
                         title = metas[agent.id]?.title,
                         git = git[agent.id],
+                        needsApproval = agent.id in approvalIds,
                         selected = agent.id == selectedId,
                         favorite = false,
                         hidden = metas[agent.id]?.hidden == true,
@@ -774,7 +780,6 @@ private fun AgentList(
                         onUnarchive = { onUnarchive(agent) },
                         onDelete = { onDelete(agent) },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -817,7 +822,7 @@ private fun EnvList(
         else -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 88.dp),
+                contentPadding = PaddingValues(bottom = 24.dp),
             ) {
                 items(envs, key = { "${it.type}:${it.name}" }) { env ->
                     EnvRow(env = env, onOpen = { onOpen(env) }, onCompose = { onCompose(env) })
@@ -893,7 +898,7 @@ private fun RemotePane(
         else -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 88.dp),
+                contentPadding = PaddingValues(bottom = 24.dp),
             ) {
                 if (extraOnline.isNotEmpty()) {
                     item(key = "online") { SectionLabel("Online") }
@@ -958,6 +963,7 @@ private fun AgentRow(
     agent: AgentSummary,
     title: String?,
     git: GitSnap?,
+    needsApproval: Boolean,
     selected: Boolean,
     favorite: Boolean,
     hidden: Boolean,
@@ -975,19 +981,33 @@ private fun AgentRow(
     onUnarchive: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val env = agent.env?.type?.lowercase() ?: "cloud"
     val name = title?.takeIf { it.isNotBlank() } ?: agent.name?.ifBlank { null } ?: agent.id
     var menu by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val gitLine = git?.line().orEmpty()
     val archived = agent.isArchived()
-    Box(modifier = Modifier.fillMaxWidth()) {
+    val indicator = runIndicator(agent.status, approvalPending = needsApproval)
+    val subtitle = buildString {
+        append(agentCardSubtitle(agent.env?.type, agent.env?.name, git?.repoUrl))
+        if (muted) append(" · muted")
+        git?.line()?.takeIf { it.isNotBlank() }?.let {
+            append(" · ")
+            append(it)
+        }
+    }
+    val whenLabel = relativeAge(agent.updatedAt ?: agent.createdAt)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (selected) Color(0xFF24302E) else PlayColors.Card)
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(start = if (selecting) 4.dp else 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
         ) {
             if (selecting) {
                 Checkbox(checked = checked, onCheckedChange = null)
@@ -995,38 +1015,41 @@ private fun AgentRow(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
                 )
-                Text(
-                    buildString {
-                        append(agent.status ?: "UNKNOWN")
-                        append(" · ")
-                        append(env)
-                        agent.env?.name?.let { append(" · "); append(it) }
-                        if (muted) append(" · muted")
-                        if (gitLine.isNotBlank()) {
-                            append(" · ")
-                            append(gitLine)
-                        }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PlayColors.Muted,
+                    )
+                }
+                if (whenLabel.isNotBlank()) {
+                    Text(
+                        whenLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PlayColors.Muted,
+                    )
+                }
                 val prUrl = git?.prUrl
                 if (!prUrl.isNullOrBlank()) {
                     Text(
                         "Open PR",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = PlayColors.Teal,
                         modifier = Modifier.clickable {
                             SafeLinks.open(context, prUrl)
                         },
                     )
                 }
             }
-            IconButton(onClick = { menu = true }) {
-                Icon(Icons.Outlined.MoreVert, contentDescription = "More")
+            Column(horizontalAlignment = Alignment.End) {
+                StatusPill(indicator)
+                IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
+                }
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -1078,6 +1101,74 @@ private fun AgentRow(
                     menu = false
                     onDelete()
                 },
+            )
+        }
+    }
+}
+
+@Composable
+private fun InboxTabStrip(
+    tabs: List<InboxTab>,
+    selected: InboxTab,
+    onSelect: (InboxTab) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        tabs.forEach { item ->
+            val active = item == selected
+            Column(
+                modifier = Modifier
+                    .clickable { onSelect(item) }
+                    .padding(top = 4.dp, bottom = 8.dp),
+            ) {
+                Text(
+                    item.title,
+                    color = if (active) PlayColors.Teal else PlayColors.Muted,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .height(2.dp)
+                        .width(if (active) 28.dp else 0.dp)
+                        .background(PlayColors.Teal),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InboxBottomNav(onSettings: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = PlayColors.Card,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            Text(
+                "Inbox",
+                color = PlayColors.Teal,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                "Settings",
+                color = PlayColors.Muted,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.clickable(onClick = onSettings),
             )
         }
     }

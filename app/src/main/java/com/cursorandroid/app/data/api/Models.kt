@@ -7,7 +7,9 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.put
 
 @Serializable
 data class MeResponse(
@@ -112,6 +114,30 @@ data class CustomSubagent(
     val description: String,
     val prompt: String,
     val model: String? = null,
+)
+
+@Serializable
+data class EnvRepo(
+    val url: String,
+)
+
+@Serializable
+data class CloudEnvironment(
+    val id: String = "",
+    val name: String = "",
+    val owner: String? = null,
+    val repos: List<EnvRepo> = emptyList(),
+    val environmentJson: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class CreateEnvironmentRequest(
+    val owner: String,
+    val name: String,
+    val repos: List<EnvRepo>,
+    val environmentJson: String,
 )
 
 @Serializable
@@ -590,27 +616,62 @@ fun List<AgentSummary>.namedCloudEnvironments(extra: List<String> = emptyList())
         .sortedBy { it.lowercase() }
 }
 
+const val MAX_AGENT_REPOS = 20
+const val MAX_ENV_REPOS = 100
+
+fun WorkerPool.acceptsManyRepos(): Boolean {
+    if (!repoUrl.isNullOrBlank()) return false
+    return !poolName.equals("default", ignoreCase = true)
+}
+
+fun environmentConfigJson(install: String?): String {
+    val script = install?.trim()?.takeIf { it.isNotEmpty() } ?: "true"
+    return buildJsonObject { put("install", script) }.toString()
+}
+
+fun assembleRepos(
+    primaryUrl: String,
+    extraUrls: List<String>,
+    startingRef: String?,
+    prUrl: String?,
+    max: Int = MAX_AGENT_REPOS,
+): List<Repo> {
+    val pull = prUrl?.trim()?.takeIf { it.isNotEmpty() }
+    val ref = if (pull == null) startingRef?.trim()?.takeIf { it.isNotEmpty() } else null
+    val urls = buildList {
+        val primary = primaryUrl.trim()
+        if (primary.isNotEmpty()) add(primary)
+        extraUrls.forEach { raw ->
+            val url = raw.trim()
+            if (url.isNotEmpty()) add(url)
+        }
+    }.distinctBy { it.lowercase() }.take(max.coerceAtLeast(0))
+    return urls.mapIndexed { index, url ->
+        if (index == 0) Repo(url = url, startingRef = ref, prUrl = pull) else Repo(url = url)
+    }
+}
+
+fun poolAgentRepos(pool: WorkerPool?, urls: List<String>): List<Repo>? {
+    val max = if (pool?.acceptsManyRepos() == true) MAX_AGENT_REPOS else 1
+    val repos = assembleRepos("", urls, null, null, max)
+    return repos.ifEmpty { null }
+}
+
 fun cloudCreateTarget(
     fromSavedEnv: Boolean,
     envName: String,
     repoUrl: String,
     startingRef: String?,
     prUrl: String? = null,
+    extraRepoUrls: List<String> = emptyList(),
 ): Pair<Env?, List<Repo>?> {
     val name = envName.trim()
     if (fromSavedEnv && name.isNotBlank()) {
         return Env(type = "cloud", name = name) to null
     }
-    val repo = repoUrl.trim()
-    if (repo.isBlank()) return null to null
-    val pull = prUrl?.trim()?.takeIf { it.isNotEmpty() }
-    return null to listOf(
-        Repo(
-            url = repo,
-            startingRef = if (pull == null) startingRef?.trim()?.takeIf { it.isNotEmpty() } else null,
-            prUrl = pull,
-        ),
-    )
+    val repos = assembleRepos(repoUrl, extraRepoUrls, startingRef, prUrl)
+    if (repos.isEmpty()) return null to null
+    return null to repos
 }
 
 fun machineCreateTarget(

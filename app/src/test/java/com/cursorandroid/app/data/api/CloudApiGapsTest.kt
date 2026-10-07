@@ -25,6 +25,43 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun cloudCreateTargetSendsSeveralReposUntilANamedEnv() {
+        val (env, repos) = cloudCreateTarget(
+            fromSavedEnv = false,
+            envName = "",
+            repoUrl = "https://github.com/acme/app",
+            startingRef = "main",
+            extraRepoUrls = listOf(
+                "https://github.com/acme/api",
+                "https://github.com/acme/app",
+            ),
+        )
+        assertNull(env)
+        assertEquals(2, repos!!.size)
+        assertEquals("https://github.com/acme/app", repos[0].url)
+        assertEquals("main", repos[0].startingRef)
+        assertEquals("https://github.com/acme/api", repos[1].url)
+        assertNull(repos[1].startingRef)
+        val named = cloudCreateTarget(true, "web", "https://github.com/acme/app", "main", extraRepoUrls = listOf("https://github.com/acme/api"))
+        assertEquals("web", named.first?.name)
+        assertNull(named.second)
+    }
+
+    @Test
+    fun anyRepoPoolTakesManyAndDefaultTakesOne() {
+        val any = WorkerPool(poolName = "sandbox")
+        val bound = WorkerPool(poolName = "gpu", repoUrl = "https://github.com/acme/app")
+        val fallback = WorkerPool(poolName = "default")
+        assertTrue(any.acceptsManyRepos())
+        assertTrue(!bound.acceptsManyRepos())
+        assertTrue(!fallback.acceptsManyRepos())
+        assertEquals(2, poolAgentRepos(any, listOf("https://github.com/acme/app", "https://github.com/acme/api"))!!.size)
+        assertEquals(1, poolAgentRepos(fallback, listOf("https://github.com/acme/app", "https://github.com/acme/api"))!!.size)
+        assertEquals("""{"install":"pnpm install"}""", environmentConfigJson("pnpm install"))
+        assertEquals("""{"install":"true"}""", environmentConfigJson(" "))
+    }
+
+    @Test
     fun cloudCreateTargetKeepsBranchWithoutPr() {
         val (_, repos) = cloudCreateTarget(false, "", "https://github.com/acme/app", "develop")
         val repo = repos!!.single()

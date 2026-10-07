@@ -44,18 +44,21 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.FormatQuote
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
@@ -70,9 +73,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -106,6 +112,7 @@ import com.cursorandroid.app.data.repo.mergeConversationTranscript
 import com.cursorandroid.app.data.repo.mergeRunTranscript
 import com.cursorandroid.app.data.repo.mergeTranscript
 import com.cursorandroid.app.data.api.isTerminal
+import com.cursorandroid.app.data.notify.ApprovalCopy
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.data.repo.TranscriptLine
@@ -128,6 +135,13 @@ import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import com.cursorandroid.app.ui.chat.VoiceButton
+import com.cursorandroid.app.ui.status.PlayColors
+import com.cursorandroid.app.ui.status.foreground
+import com.cursorandroid.app.ui.status.runIndicator
+import com.cursorandroid.app.ui.status.shortRepo
+import com.cursorandroid.app.ui.status.threadSubtitle
+import com.cursorandroid.app.ui.status.toolCallParts
+import com.cursorandroid.app.ui.status.toolCallText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -164,6 +178,8 @@ class ThreadViewModel(
         private set
     var behind by mutableStateOf<RepoBehind?>(null)
         private set
+    var approvalPending by mutableStateOf(false)
+        private set
 
     private var streamJob: Job? = null
     private var pollJob: Job? = null
@@ -172,6 +188,7 @@ class ThreadViewModel(
     private var thinkingBuf = StringBuilder()
     private var lastEventId: String? = null
     private var streamedRunId: String? = null
+    private val pendingApprovals = HashSet<String>()
     private val outbound = ArrayList<QueuedOutbound>()
     private var sendingId: String? = null
     private var appContext: android.content.Context? = null
@@ -655,10 +672,11 @@ class ThreadViewModel(
                         }
                         is StreamEvent.ToolCall -> {
                             receiving = true
+                            noteToolApproval(event.callId, event.status)
                             upsert(
                                 event.callId ?: "tool-$runId-${event.name}",
                                 "tool",
-                                "${event.name ?: "tool"} ${event.status ?: ""}".trim(),
+                                toolCallText(event.name, event.args),
                                 runId,
                             )
                             container.notifier.notifyApproval(
@@ -675,6 +693,7 @@ class ThreadViewModel(
                             run = run?.copy(status = event.status) ?: run
                         }
                         is StreamEvent.Result -> {
+                            clearApprovals()
                             run = run?.copy(status = event.status, result = event.text)
                             if (!event.text.isNullOrBlank()) {
                                 upsert("assistant-$runId", "assistant", event.text, runId)
@@ -695,6 +714,7 @@ class ThreadViewModel(
                             }
                         }
                         StreamEvent.Done -> {
+                            clearApprovals()
                             streaming = false
                             receiving = false
                             val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
@@ -758,6 +778,7 @@ class ThreadViewModel(
                 val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
                 run = latest
                 if (!latest.isActive()) {
+                    clearApprovals()
                     streaming = false
                     receiving = false
                     if (!latest.result.isNullOrBlank()) {
@@ -859,6 +880,17 @@ class ThreadViewModel(
             text == "stream_canceled"
     }
 
+    private fun noteToolApproval(callId: String?, status: String?) {
+        val id = callId?.takeIf { it.isNotBlank() } ?: return
+        if (ApprovalCopy.isPending(status)) pendingApprovals += id else pendingApprovals -= id
+        approvalPending = pendingApprovals.isNotEmpty()
+    }
+
+    private fun clearApprovals() {
+        pendingApprovals.clear()
+        approvalPending = false
+    }
+
     override fun onCleared() {
         persistNow()
         streamJob?.cancel()
@@ -924,6 +956,24 @@ fun ThreadScreen(
     )
     val canKill = isLiveStatus(vm.agent?.status) || vm.run?.isActive() == true
     val title = localTitle ?: vm.agent?.name ?: "Agent"
+    val indicator = runIndicator(
+        agentStatus = vm.agent?.status,
+        runStatus = vm.run?.status,
+        approvalPending = vm.approvalPending,
+    )
+    val repoLabel = shortRepo(vm.run?.git?.branches?.firstOrNull()?.repoUrl)
+        ?: shortRepo(container.catalog.gitSnaps()[agentId]?.repoUrl)
+        ?: shortRepo(vm.agent?.repos?.firstOrNull()?.url)
+        ?: vm.agent?.env?.name?.takeIf { it.isNotBlank() }
+    val subtitle = threadSubtitle(repoLabel, indicator)
+    val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
+    val activity = workActivityLine(
+        receiving = vm.receiving,
+        agentStatus = vm.agent?.status,
+        runStatus = vm.run?.status,
+        envType = vm.agent?.env?.type,
+        toolName = if (working) latestTool else null,
+    )
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
@@ -1047,7 +1097,18 @@ fun ThreadScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    Column {
+                        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+                        Text(
+                            subtitle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = indicator.foreground(),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                },
                 navigationIcon = {
                     if (showBack) {
                         IconButton(onClick = onBack) {
@@ -1147,7 +1208,7 @@ fun ThreadScreen(
                 .imePadding(),
         ) {
             if (working) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                WorkingBar(activity)
             }
             if (vm.error != null) {
                 Text(
@@ -1309,7 +1370,10 @@ fun ThreadScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(PlayColors.Card)
+                    .padding(start = 4.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AttachButton(items = attaches, onItems = { attaches = it })
@@ -1322,10 +1386,16 @@ fun ThreadScreen(
                     value = draft,
                     onValueChange = { draft = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text(if (working) "steer" else "chat", maxLines = 1) },
+                    placeholder = { Text("Send a follow-up...", maxLines = 1) },
                     maxLines = 4,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                    ),
                 )
-                IconButton(
+                Button(
                     onClick = {
                         val ready = attaches.filter { it.ok }
                         if (draft.isNotBlank() || ready.isNotEmpty()) {
@@ -1346,11 +1416,16 @@ fun ThreadScreen(
                         }
                     },
                     enabled = draft.isNotBlank() || attaches.any { it.ok },
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PlayColors.Teal,
+                        contentColor = PlayColors.TealInk,
+                        disabledContainerColor = PlayColors.Teal.copy(alpha = 0.35f),
+                        disabledContentColor = PlayColors.TealInk.copy(alpha = 0.6f),
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 ) {
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.Send,
-                                    contentDescription = if (working) "Steer" else "Send",
-                                )
+                    Text("Send", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1513,26 +1588,14 @@ private fun TranscriptBubble(
     }
     val isUser = line.kind == "user"
     val align = if (isUser) Alignment.End else Alignment.Start
-    val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val bubbleColor = if (isUser) PlayColors.UserBubble else PlayColors.AgentBubble
+    val textColor = Color.White
     val shape = if (isUser) {
         RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp)
     } else {
         RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
     }
-    val label = when {
-        line.kind == "user" && line.queued -> "You · queued"
-        line.kind == "user" -> "You"
-        else -> "Agent"
-    }
+    val label = if (line.kind == "user" && line.queued) "Queued" else null
     var menu by remember(line.id) { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val copyText = line.text.trim()
@@ -1541,12 +1604,14 @@ private fun TranscriptBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align,
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
+        if (label != null) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
         Box {
             Box(
                 modifier = Modifier
@@ -1728,75 +1793,81 @@ private fun ToolCallsBlock(
     tools: List<TranscriptLine>,
     onCopy: (String) -> Unit = {},
 ) {
-    var open by remember(tools.firstOrNull()?.id ?: "tools") { mutableStateOf(false) }
     var menu by remember(tools.firstOrNull()?.id ?: "tools") { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val copyText = tools.joinToString("\n") { it.text }.trim()
-    val title = if (tools.size == 1) {
-        tools.first().text
-    } else {
-        "${tools.size} tool calls"
-    }
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-        Box {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 520.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .combinedClickable(
-                    onClick = { open = !open },
-                    onLongClick = {
-                        if (copyText.isBlank()) return@combinedClickable
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menu = true
-                    },
-                )
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Tools",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                Icon(
-                    imageVector = if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (open) "Collapse tools" else "Expand tools",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (open) {
-                Column(
-                    modifier = Modifier.padding(top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    tools.forEach { tool ->
-                        Text(
-                            tool.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        tools.forEach { tool ->
+            val (name, path) = toolCallParts(tool.text)
+            Box {
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 520.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(PlayColors.Card)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                if (copyText.isBlank()) return@combinedClickable
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                menu = true
+                            },
                         )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Settings,
+                        contentDescription = null,
+                        tint = PlayColors.Muted,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(name, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                        if (!path.isNullOrBlank()) {
+                            Text(
+                                path,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = PlayColors.Muted,
+                            )
+                        }
                     }
                 }
             }
         }
-            MessageClipMenu(
-                expanded = menu,
-                onDismiss = { menu = false },
-                copyText = copyText,
-                quoteText = null,
-                onCopy = onCopy,
-                onQuote = {},
-            )
-        }
+        MessageClipMenu(
+            expanded = menu,
+            onDismiss = { menu = false },
+            copyText = copyText,
+            quoteText = null,
+            onCopy = onCopy,
+            onQuote = {},
+        )
+    }
+}
+
+@Composable
+private fun WorkingBar(text: String) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(PlayColors.Card)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(PlayColors.Teal),
+        )
+        Text(text, color = Color.White, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

@@ -55,6 +55,8 @@ import com.cursorandroid.app.data.api.matchRepo
 import com.cursorandroid.app.data.api.prettyProvider
 import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.api.namedCloudEnvironments
+import com.cursorandroid.app.data.api.poolAgentRepos
+import com.cursorandroid.app.data.api.acceptsManyRepos
 import com.cursorandroid.app.data.api.selection
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.RepositoryItem
@@ -116,6 +118,10 @@ fun NewAgentScreen(
     var repoMenu by remember { mutableStateOf(false) }
     var branchMenu by remember { mutableStateOf(false) }
     var repoQuery by remember { mutableStateOf("") }
+    var extraRepos by remember { mutableStateOf(listOf<String>()) }
+    var saveEnvironment by remember { mutableStateOf(false) }
+    var environmentName by remember { mutableStateOf("") }
+    var envInstall by remember { mutableStateOf("") }
     var createRepo by remember { mutableStateOf(false) }
     var newRepoName by remember { mutableStateOf("") }
     var newRepoPrivate by remember { mutableStateOf(true) }
@@ -176,6 +182,10 @@ fun NewAgentScreen(
         if (saved.workOnBranch != null) workOnBranch = saved.workOnBranch
         if (saved.skipReviewer != null) skipReviewer = saved.skipReviewer
         if (saved.prUrl.isNotBlank()) prUrl = saved.prUrl
+        if (saved.extraRepos.isNotEmpty()) extraRepos = saved.extraRepos
+        saveEnvironment = saved.saveEnvironment
+        if (saved.environmentName.isNotBlank()) environmentName = saved.environmentName
+        if (saved.envInstall.isNotBlank()) envInstall = saved.envInstall
         if (saved.modelParams.isNotEmpty()) modelParams = saved.modelParams
         subagents = saved.resolvedSubagents()
         draftReady = true
@@ -183,7 +193,8 @@ fun NewAgentScreen(
 
     LaunchedEffect(
         agentName, prompt, modelId, modelParams, mode, attaches, envType, envName, provider, repoUrl,
-        startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, draftReady,
+        startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, extraRepos,
+        saveEnvironment, environmentName, envInstall, draftReady,
     ) {
         if (!draftReady) return@LaunchedEffect
         val first = subagents.firstOrNull()
@@ -209,6 +220,10 @@ fun NewAgentScreen(
                 prUrl = prUrl,
                 modelParams = modelParams,
                 subagents = subagents,
+                extraRepos = extraRepos,
+                saveEnvironment = saveEnvironment,
+                environmentName = environmentName,
+                envInstall = envInstall,
             ),
         )
     }
@@ -479,12 +494,27 @@ fun NewAgentScreen(
                                         createRepo = false
                                         newRepoName = ""
                                         repoUrl = repo.url
+                                        extraRepos = extraRepos.filterNot { it.equals(repo.url, ignoreCase = true) }
                                         repoMenu = false
                                     },
                                 )
                             }
                         }
                     }
+                    ExtraReposField(
+                        repos = providerRepos,
+                        selected = extraRepos,
+                        primaryUrl = repoUrl,
+                        onSelected = { extraRepos = it },
+                    )
+                    SaveEnvironmentField(
+                        save = saveEnvironment,
+                        onSave = { saveEnvironment = it },
+                        name = environmentName,
+                        onName = { environmentName = it },
+                        install = envInstall,
+                        onInstall = { envInstall = it },
+                    )
                     if (createRepo && repoUrl.isBlank()) {
                         val sanitized = GithubRepos.sanitizeName(newRepoName)
                         val hasToken = !container.store.githubToken.isNullOrBlank()
@@ -798,10 +828,19 @@ fun NewAgentScreen(
                         }
                     }
                     Text(
-                        "Self-hosted pool from List Pools. Unknown names fail with 400.",
+                        "Self-hosted pool from List Pools. Unknown names fail with 400. Any-repo pools can take several repos. The default pool and repo-backed pools take one.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    val selectedPool = pools.firstOrNull { it.poolName.equals(envName.trim(), ignoreCase = true) }
+                    if (selectedPool?.acceptsManyRepos() == true) {
+                        ExtraReposField(
+                            repos = repos,
+                            selected = extraRepos,
+                            primaryUrl = "",
+                            onSelected = { extraRepos = it },
+                        )
+                    }
                 }
 
                 ExposedDropdownMenuBox(expanded = modelMenu, onExpandedChange = { modelMenu = it }) {
@@ -975,6 +1014,28 @@ fun NewAgentScreen(
                                 }
                                 val repo = repoUrl.trim()
                                 val branch = startingRef.trim()
+                                val selectedPool = pools.firstOrNull { it.poolName.equals(envName.trim(), ignoreCase = true) }
+                                if (envType == "pool" && extraRepos.size > 1 && selectedPool?.acceptsManyRepos() != true) {
+                                    error = "This pool accepts one repo. Name an any-repo pool to send several."
+                                    return@launch
+                                }
+                                var launchFromEnv = cloudFromEnv
+                                var launchEnvName = envName
+                                if (envType == "cloud" && !cloudFromEnv && saveEnvironment) {
+                                    val savedName = environmentName.trim()
+                                    if (savedName.isBlank()) {
+                                        error = "Name the environment."
+                                        return@launch
+                                    }
+                                    val made = container.repo.createCloudEnvironment(
+                                        savedName,
+                                        listOf(repo) + extraRepos,
+                                        envInstall,
+                                    )
+                                    container.catalog.rememberCloudEnv(made.name)
+                                    launchFromEnv = true
+                                    launchEnvName = made.name
+                                }
                                 val tip = if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank() && branch.isNotBlank()) {
                                     runCatching { container.repo.branchTip(repo, branch) }.getOrNull()
                                 } else {
@@ -982,15 +1043,17 @@ fun NewAgentScreen(
                                 }
                                 val cloudTarget = if (envType == "cloud") {
                                     cloudCreateTarget(
-                                        cloudFromEnv,
-                                        envName,
+                                        launchFromEnv,
+                                        launchEnvName,
                                         repo,
                                         tip?.sha ?: branch.ifBlank { null },
                                         prUrl,
+                                        extraRepoUrls = if (launchFromEnv) emptyList() else extraRepos,
                                     )
                                 } else {
                                     null
                                 }
+                                val pooledRepos = if (envType == "pool") poolAgentRepos(selectedPool, extraRepos) else null
                                 val computer = computers.firstOrNull {
                                     !selectedWorkerId.isNullOrBlank() && it.workerId == selectedWorkerId
                                 } ?: computers.firstOrNull { it.name.equals(envName.trim(), ignoreCase = true) }
@@ -1017,10 +1080,10 @@ fun NewAgentScreen(
                                     repos = when (envType) {
                                         "cloud" -> cloudTarget?.second
                                         "machine" -> machineTarget?.second
-                                        else -> null
+                                        else -> pooledRepos
                                     },
                                     workOnCurrentBranch = when {
-                                        envType == "cloud" && !cloudFromEnv -> workOnBranch
+                                        envType == "cloud" && !launchFromEnv -> workOnBranch
                                         envType == "machine" -> workOnBranch
                                         else -> null
                                     },
@@ -1034,8 +1097,8 @@ fun NewAgentScreen(
                                 if (named != null) {
                                     container.chats.setTitle(created.agent.id, named)
                                 }
-                                if (envType == "cloud" && cloudFromEnv) {
-                                    container.catalog.rememberCloudEnv(envName)
+                                if (envType == "cloud" && launchFromEnv) {
+                                    container.catalog.rememberCloudEnv(launchEnvName)
                                 }
                                 if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank()) {
                                     container.chats.setRepoBase(

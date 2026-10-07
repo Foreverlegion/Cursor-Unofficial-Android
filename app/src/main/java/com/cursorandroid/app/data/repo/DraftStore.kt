@@ -36,6 +36,10 @@ data class ChatDraft(
     val prUrl: String = "",
     val modelParams: List<ModelParam> = emptyList(),
     val subagents: List<DraftSubagent> = emptyList(),
+    val extraRepos: List<String> = emptyList(),
+    val saveEnvironment: Boolean = false,
+    val environmentName: String = "",
+    val envInstall: String = "",
 ) {
     fun isEmpty(): Boolean {
         return text.isBlank() &&
@@ -56,7 +60,11 @@ data class ChatDraft(
             skipReviewer == null &&
             prUrl.isBlank() &&
             modelParams.isEmpty() &&
-            subagents.isEmpty()
+            subagents.isEmpty() &&
+            extraRepos.isEmpty() &&
+            !saveEnvironment &&
+            environmentName.isBlank() &&
+            envInstall.isBlank()
     }
 
     fun resolvedSubagents(): List<DraftSubagent> {

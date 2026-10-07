@@ -350,11 +350,11 @@ private fun ProfileTab(
     }
     Section(
         title = "Inbox tabs",
-        detail = "Agents always stays. Hide the others if you only use chats.",
+        detail = "Cloud always stays. Hide Pool or Remote if you do not use them. Hidden tabs fold back into Cloud.",
     ) {
         PrefSwitch(
-            title = "ENVs",
-            detail = "Active cloud and pool environments.",
+            title = "Pool",
+            detail = "Pool chats.",
             checked = showInboxEnvs,
             onCheckedChange = onShowInboxEnvs,
         )
@@ -526,7 +526,7 @@ private fun ConnectionsTab(
     }
     Section(
         title = "Remote Control",
-        detail = "On the PC: Cursor 3.9.8+, Agents Window, Settings > Agents > Remote Control, then /remote-control. Local remotes show under Remote, not ENVs. To start new work on a named machine, use New agent > Machine.",
+        detail = "On the PC: Cursor 3.9.8+, Agents Window, Settings > Agents > Remote Control, then /remote-control. Local remotes show under Remote. To start new work on a named machine, use New agent > Machine.",
     ) {}
 }
 

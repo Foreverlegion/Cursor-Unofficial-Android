@@ -1,6 +1,7 @@
 package com.cursorandroid.app.ui.thread
 
 import com.cursorandroid.app.data.repo.TranscriptLine
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,6 +34,18 @@ class WorkBarTest {
                 agentStatus = "ACTIVE",
                 runStatus = "RUNNING",
             ),
+        )
+    }
+
+    @Test
+    fun workBarNamesTheLiveTool() {
+        assertEquals(
+            "Agent working · read_file",
+            workActivityLine(false, "RUNNING", "RUNNING", "cloud", "read_file"),
+        )
+        assertEquals(
+            "Agent working · starting",
+            workActivityLine(false, "CREATING", null, "cloud", null),
         )
     }
 }
