@@ -79,10 +79,14 @@ class BugReportTest {
     }
 
     @Test
-    fun operatorIsTheOwnerEmailOnly() {
+    fun operatorIsTheOwnerGithubLoginOnly() {
         assertTrue(FeedbackPolicy.isOperator("Foreverlegion"))
+        assertTrue(FeedbackPolicy.isOperator("foreverlegion"))
+        assertTrue(FeedbackPolicy.isOperator(" @Foreverlegion "))
+        assertFalse(FeedbackPolicy.isOperator("someone"))
         assertFalse(FeedbackPolicy.isOperator("someone@example.com"))
         assertFalse(FeedbackPolicy.isOperator(null))
+        assertFalse(FeedbackPolicy.isOperator(""))
     }
 
     @Test

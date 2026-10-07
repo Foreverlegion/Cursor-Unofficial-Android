@@ -67,7 +67,10 @@ import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.FeedbackPolicy
+import com.cursorandroid.app.data.repo.GithubRepos
 import com.cursorandroid.app.data.repo.SafeLinks
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import java.text.NumberFormat
 import java.util.Locale
@@ -104,6 +107,7 @@ fun SettingsScreen(
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
     var tab by remember { mutableStateOf(SettingsTab.Profile) }
+    var githubLogin by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val lifeState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     var unrestrictedBattery by remember { mutableStateOf(BatteryExemption.isExempt(context)) }
@@ -138,6 +142,12 @@ fun SettingsScreen(
     }
     LaunchedEffect(openAccountTick) {
         if (openAccountTick > 0) tab = SettingsTab.Account
+    }
+    LaunchedEffect(tab) {
+        if (tab != SettingsTab.Account) return@LaunchedEffect
+        githubLogin = withContext(Dispatchers.IO) {
+            runCatching { GithubRepos.authenticatedLogin(container.store.githubToken) }.getOrNull()
+        }
     }
 
     if (showBack) BackHandler(onBack = onBack)
@@ -266,7 +276,7 @@ fun SettingsScreen(
                         )
                         SettingsTab.Account -> AccountTab(
                             container = container,
-                            operator = FeedbackPolicy.isOperator(overview?.me?.userEmail),
+                            operator = FeedbackPolicy.isOperator(githubLogin),
                             onImported = { reloadLocal() },
                             onSignedOut = {
                                 RunWatchScheduler.stop(context.applicationContext)

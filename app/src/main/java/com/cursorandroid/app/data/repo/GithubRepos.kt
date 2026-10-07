@@ -31,6 +31,17 @@ object GithubRepos {
         }
         .build()
 
+    fun authenticatedLogin(token: String?): String? {
+        val key = token?.trim().orEmpty()
+        if (key.isEmpty()) return null
+        val (code, raw) = runCatching { gh(key, "GET", "/user") }.getOrNull() ?: return null
+        if (code !in 200..299) return null
+        return runCatching { json.decodeFromString<GhUser>(raw).login }
+            .getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
     fun sanitizeName(raw: String): String {
         return raw.trim()
             .replace(Regex("\\s+"), "-")
@@ -202,6 +213,11 @@ object GithubRepos {
             else -> detail ?: "GitHub HTTP $code"
         }
     }
+
+    @Serializable
+    private data class GhUser(
+        val login: String? = null,
+    )
 
     @Serializable
     private data class CreateBody(

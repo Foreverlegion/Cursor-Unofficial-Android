@@ -1,3 +1,9 @@
+# 1.0.27
+
+Owner tools in Settings match the public GitHub login Foreverlegion. The privacy policy contact is that GitHub profile and this project's issues.
+
+---
+
 # 1.0.26
 
 Play upload no longer declares a permission to install other apps. The in-app APK installer is gone. Play installs update from the Play Store.

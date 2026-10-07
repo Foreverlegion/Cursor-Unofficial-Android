@@ -6,7 +6,7 @@ package com.cursorandroid.app.data.repo
  * without putting a name, email, key, device, or install id in what Op reads.
  */
 object FeedbackPolicy {
-    const val OWNER_EMAIL = "Foreverlegion"
+    const val OWNER_GITHUB_LOGIN = "Foreverlegion"
     const val LABEL_FEEDBACK = "feedback"
     const val LABEL_BANNED = "banned"
     const val BUTTON_BUG = "Report bug"
@@ -26,8 +26,10 @@ object FeedbackPolicy {
         }
     }
 
-    fun isOperator(email: String?): Boolean {
-        return email?.trim()?.equals(OWNER_EMAIL, ignoreCase = true) == true
+    fun isOperator(login: String?): Boolean {
+        val handle = login?.trim()?.removePrefix("@") ?: return false
+        if (handle.isEmpty()) return false
+        return handle.equals(OWNER_GITHUB_LOGIN, ignoreCase = true)
     }
 
     fun isBannedLabel(name: String?): Boolean {
