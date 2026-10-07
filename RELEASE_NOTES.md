@@ -1,3 +1,11 @@
+# 1.0.26
+
+Play upload no longer declares a permission to install other apps. The in-app APK installer is gone. Play installs update from the Play Store.
+
+Unrestricted battery stays so finish and approval notifications are not frozen in the background.
+
+---
+
 # 1.0.25
 
 First browser sign-in saves one API key named cursor-android. Later sign-ins reuse it.

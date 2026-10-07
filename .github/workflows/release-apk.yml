@@ -32,7 +32,8 @@ jobs:
           fi
           mkdir -p app/signing
           printf '%s' "$CURSOR_ANDROID_KEYSTORE_BASE64" | base64 -d > app/signing/stable.p12
-      - run: |
+      - id: built
+        run: |
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
             gradle wrapper --gradle-version 9.3.1
           fi
@@ -41,7 +42,10 @@ jobs:
             echo "Release keystore missing"
             exit 1
           fi
-          cp app/build/outputs/bundle/release/app-release.aab cursor-android-bundle.aab
+          name=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          file="cursor-android-${name}.aab"
+          cp app/build/outputs/bundle/release/app-release.aab "$file"
+          echo "aab=$file" >> "$GITHUB_OUTPUT"
         env:
           CURSOR_ANDROID_STORE_PASSWORD: ${{ secrets.CURSOR_ANDROID_STORE_PASSWORD }}
           CURSOR_ANDROID_KEY_PASSWORD: ${{ secrets.CURSOR_ANDROID_KEY_PASSWORD }}
@@ -50,8 +54,13 @@ jobs:
           CURSOR_ANDROID_ISSUES_TOKEN: ${{ secrets.CURSOR_ANDROID_ISSUES_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
+          name: ${{ steps.built.outputs.aab }}
+          path: ${{ steps.built.outputs.aab }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
           name: cursor-android-bundle
-          path: cursor-android-bundle.aab
+          path: ${{ steps.built.outputs.aab }}
           if-no-files-found: error
       - id: ver
         run: |
@@ -94,12 +103,14 @@ jobs:
           tag="${{ steps.ver.outputs.tag }}"
           title="${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }})"
           apk=app/build/outputs/apk/release/app-release.apk
+          aab="${{ steps.built.outputs.aab }}"
           test -f "$apk"
+          test -f "$aab"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$apk" --clobber
+            gh release upload "$tag" "$apk" "$aab" --clobber
             gh release edit "$tag" --title "$title" --notes-file RELEASE_NOTES.md
           elif git ls-remote --exit-code origin "refs/tags/$tag"; then
-            gh release create "$tag" "$apk" --title "$title" --notes-file RELEASE_NOTES.md --verify-tag --latest
+            gh release create "$tag" "$apk" "$aab" --title "$title" --notes-file RELEASE_NOTES.md --verify-tag --latest
           else
-            gh release create "$tag" "$apk" --title "$title" --notes-file RELEASE_NOTES.md --latest --target "$GITHUB_SHA"
+            gh release create "$tag" "$apk" "$aab" --title "$title" --notes-file RELEASE_NOTES.md --latest --target "$GITHUB_SHA"
           fi

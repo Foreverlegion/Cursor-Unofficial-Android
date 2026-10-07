@@ -46,7 +46,8 @@ jobs:
           name: cursor-android-preview
           path: cursor-android-preview.apk
           if-no-files-found: error
-      - name: Bundle signed release
+      - id: bundle
+        name: Bundle signed release
         env:
           CURSOR_ANDROID_STORE_PASSWORD: ${{ secrets.CURSOR_ANDROID_STORE_PASSWORD }}
           CURSOR_ANDROID_KEY_PASSWORD: ${{ secrets.CURSOR_ANDROID_KEY_PASSWORD }}
@@ -62,9 +63,17 @@ jobs:
             exit 1
           fi
           ./gradlew --no-daemon :app:bundleRelease
-          cp app/build/outputs/bundle/release/app-release.aab cursor-android-bundle.aab
+          name=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          file="cursor-android-${name}.aab"
+          cp app/build/outputs/bundle/release/app-release.aab "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.file }}
+          path: ${{ steps.bundle.outputs.file }}
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: cursor-android-bundle
-          path: cursor-android-bundle.aab
+          path: ${{ steps.bundle.outputs.file }}
           if-no-files-found: error

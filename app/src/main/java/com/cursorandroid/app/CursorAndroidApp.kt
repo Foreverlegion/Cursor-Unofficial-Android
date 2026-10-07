@@ -7,7 +7,6 @@ import androidx.work.WorkManager
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
-import com.cursorandroid.app.data.repo.AutoUpdateScheduler
 
 class CursorAndroidApp : Application() {
     lateinit var container: AppContainer
@@ -21,12 +20,13 @@ class CursorAndroidApp : Application() {
         if (container.store.hasKey()) {
             RunWatchScheduler.resume(this)
         }
-        AutoUpdateScheduler.sync(this, false)
         FeedbackReplyScheduler.sync(this)
         // Older builds enqueued these. Cancel them so they stop pinging.
         val work = WorkManager.getInstance(this)
         work.cancelUniqueWork("install-pulse")
         work.cancelUniqueWork("install-pulse-now")
+        work.cancelUniqueWork("auto-update")
+        work.cancelUniqueWork("auto-update-now")
     }
 
     private object ForegroundCallbacks : ActivityLifecycleCallbacks {

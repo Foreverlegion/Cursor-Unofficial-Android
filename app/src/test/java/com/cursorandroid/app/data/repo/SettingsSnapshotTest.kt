@@ -18,12 +18,12 @@ class SettingsSnapshotTest {
 
     @Test
     fun oldExportGetsDefaultAppearance() {
-        val snap = json.decodeFromString<SettingsSnapshot>("""{"version":1}""")
+        val snap = json.decodeFromString<SettingsSnapshot>(
+            """{"version":1,"autoUpdate":true,"skippedUpdateCode":117}""",
+        )
         assertEquals(0xFFF54E00.toInt(), snap.themeColor)
         assertTrue(snap.showInboxEnvs)
         assertTrue(snap.showInboxRemote)
-        assertEquals(false, snap.autoUpdate)
-        assertEquals(0L, snap.skippedUpdateCode)
     }
 
     @Test
@@ -32,14 +32,10 @@ class SettingsSnapshotTest {
             themeColor = 0xFF3B82F6.toInt(),
             showInboxEnvs = false,
             showInboxRemote = true,
-            autoUpdate = true,
-            skippedUpdateCode = 117L,
         )
         val again = json.decodeFromString<SettingsSnapshot>(json.encodeToString(SettingsSnapshot.serializer(), snap))
         assertEquals(0xFF3B82F6.toInt(), again.themeColor)
         assertEquals(false, again.showInboxEnvs)
         assertEquals(true, again.showInboxRemote)
-        assertEquals(true, again.autoUpdate)
-        assertEquals(117L, again.skippedUpdateCode)
     }
 }

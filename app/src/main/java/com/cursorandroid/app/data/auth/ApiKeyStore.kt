@@ -101,18 +101,6 @@ class ApiKeyStore(context: Context) {
             notifyPrefs.edit { putBoolean(SHOW_INBOX_REMOTE, value) }
         }
 
-    var autoUpdate: Boolean
-        get() = notifyPrefs.getBoolean(AUTO_UPDATE, false)
-        set(value) {
-            notifyPrefs.edit { putBoolean(AUTO_UPDATE, value) }
-        }
-
-    var autoUpdateAsked: Boolean
-        get() = notifyPrefs.getBoolean(AUTO_UPDATE_ASKED, false)
-        set(value) {
-            notifyPrefs.edit { putBoolean(AUTO_UPDATE_ASKED, value) }
-        }
-
     var batteryAsked: Boolean
         get() = notifyPrefs.getBoolean(BATTERY_ASKED, false)
         set(value) {
@@ -123,12 +111,6 @@ class ApiKeyStore(context: Context) {
         get() = notifyPrefs.getBoolean(FEEDBACK_NOTICE, false)
         set(value) {
             notifyPrefs.edit { putBoolean(FEEDBACK_NOTICE, value) }
-        }
-
-    var skippedUpdateCode: Long
-        get() = notifyPrefs.getLong(SKIPPED_UPDATE, 0L)
-        set(value) {
-            notifyPrefs.edit { putLong(SKIPPED_UPDATE, value) }
         }
 
     var githubToken: String?
@@ -266,12 +248,9 @@ class ApiKeyStore(context: Context) {
         private const val THEME_COLOR = "theme_color"
         private const val SHOW_INBOX_ENVS = "show_inbox_envs"
         private const val SHOW_INBOX_REMOTE = "show_inbox_remote"
-        private const val AUTO_UPDATE = "auto_update"
-        private const val AUTO_UPDATE_ASKED = "auto_update_asked"
         private const val BATTERY_ASKED = "battery_asked"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
         private const val DEMO_MODE = "demo_mode"
-        private const val SKIPPED_UPDATE = "skipped_update_code"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()
     }
 }
