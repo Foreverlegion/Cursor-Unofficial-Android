@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.AppInsets
+import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
@@ -55,6 +56,13 @@ import com.cursorandroid.app.data.api.matchRepo
 import com.cursorandroid.app.data.api.prettyProvider
 import com.cursorandroid.app.data.api.defaultParams
 import com.cursorandroid.app.data.api.namedCloudEnvironments
+import com.cursorandroid.app.data.api.environmentChoices
+import com.cursorandroid.app.data.api.environmentConfigJson
+import com.cursorandroid.app.data.api.environmentOwner
+import com.cursorandroid.app.data.api.resolvedEnvironmentJson
+import com.cursorandroid.app.data.api.activeBuildSummary
+import com.cursorandroid.app.data.api.poolAgentRepos
+import com.cursorandroid.app.data.api.acceptsManyRepos
 import com.cursorandroid.app.data.api.selection
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.RepositoryItem
@@ -116,13 +124,23 @@ fun NewAgentScreen(
     var repoMenu by remember { mutableStateOf(false) }
     var branchMenu by remember { mutableStateOf(false) }
     var repoQuery by remember { mutableStateOf("") }
+    var extraRepos by remember { mutableStateOf(listOf<String>()) }
+    var saveEnvironment by remember { mutableStateOf(false) }
+    var environmentName by remember { mutableStateOf("") }
+    var envInstall by remember { mutableStateOf("") }
+    var savedEnvs by remember { mutableStateOf(container.catalog.savedEnvironments()) }
+    var selectedEnvId by remember { mutableStateOf<String?>(null) }
+    var envStatus by remember { mutableStateOf("") }
+    var envOwner by remember { mutableStateOf("personal") }
+    var envJson by remember { mutableStateOf("") }
+    var createEnvRepos by remember { mutableStateOf(listOf<String>()) }
+    var envBusy by remember { mutableStateOf(false) }
     var createRepo by remember { mutableStateOf(false) }
     var newRepoName by remember { mutableStateOf("") }
     var newRepoPrivate by remember { mutableStateOf(true) }
     var cloudFromEnv by remember {
         mutableStateOf(!initialEnvName.isNullOrBlank() && initialEnvType == "cloud")
     }
-    var cloudEnvMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
@@ -145,9 +163,10 @@ fun NewAgentScreen(
         val label = item?.providerLabel() ?: prettyProvider(gitHost(url))
         if (label.isNotBlank()) provider = label
     }
-    val cloudEnvs = remember(repos, envName) {
-        container.catalog.agents().namedCloudEnvironments(container.catalog.cloudEnvs() + listOf(envName))
-    }
+    val cloudChoices = environmentChoices(
+        savedEnvs,
+        container.catalog.agents().namedCloudEnvironments(container.catalog.cloudEnvs() + listOf(envName)),
+    )
 
     LaunchedEffect(resetTick) {
         val saved = container.drafts.load(DraftStore.NEW_AGENT)
@@ -176,6 +195,20 @@ fun NewAgentScreen(
         if (saved.workOnBranch != null) workOnBranch = saved.workOnBranch
         if (saved.skipReviewer != null) skipReviewer = saved.skipReviewer
         if (saved.prUrl.isNotBlank()) prUrl = saved.prUrl
+        if (saved.extraRepos.isNotEmpty()) extraRepos = saved.extraRepos
+        saveEnvironment = saved.saveEnvironment
+        if (saved.environmentName.isNotBlank()) environmentName = saved.environmentName
+        if (saved.envInstall.isNotBlank()) envInstall = saved.envInstall
+        if (saved.envOwner.isNotBlank()) envOwner = environmentOwner(saved.envOwner)
+        if (saved.environmentJson.isNotBlank()) envJson = saved.environmentJson
+        if (saved.createEnvRepos.isNotEmpty()) createEnvRepos = saved.createEnvRepos
+        savedEnvs = container.catalog.savedEnvironments()
+        selectedEnvId = if (!initialEnvName.isNullOrBlank() && initialEnvType == "cloud") {
+            savedEnvs.firstOrNull { it.id.isNotBlank() && it.name.equals(envName, ignoreCase = true) }?.id
+        } else {
+            saved.selectedEnvId.takeIf { it.isNotBlank() }
+                ?: savedEnvs.firstOrNull { it.id.isNotBlank() && it.name.equals(envName, ignoreCase = true) }?.id
+        }
         if (saved.modelParams.isNotEmpty()) modelParams = saved.modelParams
         subagents = saved.resolvedSubagents()
         draftReady = true
@@ -183,7 +216,9 @@ fun NewAgentScreen(
 
     LaunchedEffect(
         agentName, prompt, modelId, modelParams, mode, attaches, envType, envName, provider, repoUrl,
-        startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, draftReady,
+        startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, extraRepos,
+        saveEnvironment, environmentName, envInstall, envOwner, selectedEnvId, envJson,
+        createEnvRepos, draftReady,
     ) {
         if (!draftReady) return@LaunchedEffect
         val first = subagents.firstOrNull()
@@ -209,8 +244,44 @@ fun NewAgentScreen(
                 prUrl = prUrl,
                 modelParams = modelParams,
                 subagents = subagents,
+                extraRepos = extraRepos,
+                saveEnvironment = saveEnvironment,
+                environmentName = environmentName,
+                envInstall = envInstall,
+                envOwner = envOwner,
+                selectedEnvId = selectedEnvId.orEmpty(),
+                environmentJson = envJson,
+                createEnvRepos = createEnvRepos,
             ),
         )
+    }
+
+    LaunchedEffect(selectedEnvId) {
+        val id = selectedEnvId?.takeIf { it.isNotBlank() }
+        if (id == null) {
+            envStatus = ""
+            return@LaunchedEffect
+        }
+        envStatus = "Loading builds…"
+        val detail = runCatching { container.repo.getCloudEnvironment(id) }.getOrNull()
+        if (selectedEnvId != id) return@LaunchedEffect
+        if (detail != null) {
+            savedEnvs = container.catalog.savedEnvironments()
+            if (detail.name.isNotBlank()) envName = detail.name
+        }
+        val active = runCatching { container.repo.activeEnvironmentBuild(id) }.getOrNull()
+        val listed = runCatching { container.repo.listEnvironmentBuilds(id) }.getOrNull()
+        if (selectedEnvId != id) return@LaunchedEffect
+        var latest = listed?.items?.firstOrNull()
+        val activeId = active?.buildId
+        if (!activeId.isNullOrBlank() && latest?.id != activeId) {
+            latest = runCatching { container.repo.getEnvironmentBuild(id, activeId) }.getOrNull() ?: latest
+        }
+        if (selectedEnvId != id) return@LaunchedEffect
+        envStatus = when {
+            active == null && listed == null -> "Build status unavailable"
+            else -> activeBuildSummary(active, latest).ifBlank { "No build yet" }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -295,6 +366,7 @@ fun NewAgentScreen(
 
     Scaffold(
         modifier = modifier,
+        contentWindowInsets = AppInsets.bars,
         topBar = {
             TopAppBar(
                 title = { Text("New agent") },
@@ -311,8 +383,7 @@ fun NewAgentScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .imePadding()
+                .scaffoldBars(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -358,40 +429,80 @@ fun NewAgentScreen(
                         )
                     }
                     if (cloudFromEnv) {
-                        ExposedDropdownMenuBox(expanded = cloudEnvMenu, onExpandedChange = { cloudEnvMenu = it }) {
-                            OutlinedTextField(
-                                value = envName,
-                                onValueChange = { envName = it },
-                                modifier = Modifier
-                                    .menuAnchor(MenuAnchorType.PrimaryEditable)
-                                    .fillMaxWidth(),
-                                label = { Text("Environment") },
-                                placeholder = { Text("Name of the saved environment") },
-                                supportingText = {
-                                    Text("Saved environment: snapshot, secrets, and repos. Do not also pick a repo.")
-                                },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cloudEnvMenu) },
-                                singleLine = true,
-                            )
-                            ExposedDropdownMenu(expanded = cloudEnvMenu, onDismissRequest = { cloudEnvMenu = false }) {
-                                if (cloudEnvs.isEmpty()) {
-                                    DropdownMenuItem(
-                                        text = { Text("Type a saved environment name") },
-                                        onClick = { cloudEnvMenu = false },
-                                        enabled = false,
-                                    )
+                        SavedEnvironmentPanel(
+                            choices = cloudChoices,
+                            name = envName,
+                            onName = { typed ->
+                                envName = typed
+                                selectedEnvId = cloudChoices.firstOrNull {
+                                    it.fromApi && it.name.equals(typed.trim(), ignoreCase = true)
+                                }?.id
+                            },
+                            selectedId = selectedEnvId,
+                            onPicked = { choice ->
+                                envName = choice.name
+                                selectedEnvId = choice.id
+                            },
+                            status = envStatus,
+                            onDelete = selectedEnvId?.let { id ->
+                                {
+                                    scope.launch {
+                                        envBusy = true
+                                        error = null
+                                        try {
+                                            container.repo.deleteCloudEnvironment(id)
+                                            savedEnvs = container.catalog.savedEnvironments()
+                                            if (selectedEnvId == id) {
+                                                selectedEnvId = null
+                                                envName = ""
+                                                envStatus = ""
+                                            }
+                                        } catch (e: Exception) {
+                                            error = e.message ?: "Delete failed"
+                                        } finally {
+                                            envBusy = false
+                                        }
+                                    }
                                 }
-                                cloudEnvs.forEach { name ->
-                                    DropdownMenuItem(
-                                        text = { Text(name) },
-                                        onClick = {
-                                            envName = name
-                                            cloudEnvMenu = false
-                                        },
-                                    )
+                            },
+                            createName = environmentName,
+                            onCreateName = { environmentName = it },
+                            owner = envOwner,
+                            onOwner = { envOwner = it },
+                            catalogRepos = repos,
+                            repoUrls = createEnvRepos,
+                            onRepoUrls = { createEnvRepos = it },
+                            environmentJson = envJson,
+                            onEnvironmentJson = { envJson = it },
+                            busy = envBusy || loading,
+                            onCreate = {
+                                scope.launch {
+                                    val savedName = environmentName.trim()
+                                    if (savedName.isBlank()) {
+                                        error = "Name the environment."
+                                        return@launch
+                                    }
+                                    envBusy = true
+                                    error = null
+                                    try {
+                                        val made = container.repo.createCloudEnvironment(
+                                            savedName,
+                                            createEnvRepos,
+                                            resolvedEnvironmentJson(envJson),
+                                            envOwner,
+                                        )
+                                        savedEnvs = container.catalog.savedEnvironments()
+                                        envName = made.name.ifBlank { savedName }
+                                        selectedEnvId = made.id.takeIf { it.isNotBlank() }
+                                        environmentName = ""
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Create failed"
+                                    } finally {
+                                        envBusy = false
+                                    }
                                 }
-                            }
-                        }
+                            },
+                        )
                     } else {
                     ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
                         OutlinedTextField(
@@ -479,12 +590,29 @@ fun NewAgentScreen(
                                         createRepo = false
                                         newRepoName = ""
                                         repoUrl = repo.url
+                                        extraRepos = extraRepos.filterNot { it.equals(repo.url, ignoreCase = true) }
                                         repoMenu = false
                                     },
                                 )
                             }
                         }
                     }
+                    ExtraReposField(
+                        repos = providerRepos,
+                        selected = extraRepos,
+                        primaryUrl = repoUrl,
+                        onSelected = { extraRepos = it },
+                    )
+                    SaveEnvironmentField(
+                        save = saveEnvironment,
+                        onSave = { saveEnvironment = it },
+                        name = environmentName,
+                        onName = { environmentName = it },
+                        install = envInstall,
+                        onInstall = { envInstall = it },
+                        owner = envOwner,
+                        onOwner = { envOwner = it },
+                    )
                     if (createRepo && repoUrl.isBlank()) {
                         val sanitized = GithubRepos.sanitizeName(newRepoName)
                         val hasToken = !container.store.githubToken.isNullOrBlank()
@@ -798,10 +926,19 @@ fun NewAgentScreen(
                         }
                     }
                     Text(
-                        "Self-hosted pool from List Pools. Unknown names fail with 400.",
+                        "Self-hosted pool from List Pools. Unknown names fail with 400. Any-repo pools can take several repos. The default pool and repo-backed pools take one.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    val selectedPool = pools.firstOrNull { it.poolName.equals(envName.trim(), ignoreCase = true) }
+                    if (selectedPool?.acceptsManyRepos() == true) {
+                        ExtraReposField(
+                            repos = repos,
+                            selected = extraRepos,
+                            primaryUrl = "",
+                            onSelected = { extraRepos = it },
+                        )
+                    }
                 }
 
                 ExposedDropdownMenuBox(expanded = modelMenu, onExpandedChange = { modelMenu = it }) {
@@ -975,6 +1112,31 @@ fun NewAgentScreen(
                                 }
                                 val repo = repoUrl.trim()
                                 val branch = startingRef.trim()
+                                val selectedPool = pools.firstOrNull { it.poolName.equals(envName.trim(), ignoreCase = true) }
+                                if (envType == "pool" && extraRepos.size > 1 && selectedPool?.acceptsManyRepos() != true) {
+                                    error = "This pool accepts one repo. Name an any-repo pool to send several."
+                                    return@launch
+                                }
+                                var launchFromEnv = cloudFromEnv
+                                var launchEnvName = envName
+                                if (envType == "cloud" && !cloudFromEnv && saveEnvironment) {
+                                    val savedName = environmentName.trim()
+                                    if (savedName.isBlank()) {
+                                        error = "Name the environment."
+                                        return@launch
+                                    }
+                                    val made = container.repo.createCloudEnvironment(
+                                        savedName,
+                                        listOf(repo) + extraRepos,
+                                        environmentConfigJson(envInstall),
+                                        envOwner,
+                                    )
+                                    savedEnvs = container.catalog.savedEnvironments()
+                                    selectedEnvId = made.id.takeIf { it.isNotBlank() }
+                                    container.catalog.rememberCloudEnv(made.name.ifBlank { savedName })
+                                    launchFromEnv = true
+                                    launchEnvName = made.name.ifBlank { savedName }
+                                }
                                 val tip = if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank() && branch.isNotBlank()) {
                                     runCatching { container.repo.branchTip(repo, branch) }.getOrNull()
                                 } else {
@@ -982,15 +1144,17 @@ fun NewAgentScreen(
                                 }
                                 val cloudTarget = if (envType == "cloud") {
                                     cloudCreateTarget(
-                                        cloudFromEnv,
-                                        envName,
+                                        launchFromEnv,
+                                        launchEnvName,
                                         repo,
                                         tip?.sha ?: branch.ifBlank { null },
                                         prUrl,
+                                        extraRepoUrls = if (launchFromEnv) emptyList() else extraRepos,
                                     )
                                 } else {
                                     null
                                 }
+                                val pooledRepos = if (envType == "pool") poolAgentRepos(selectedPool, extraRepos) else null
                                 val computer = computers.firstOrNull {
                                     !selectedWorkerId.isNullOrBlank() && it.workerId == selectedWorkerId
                                 } ?: computers.firstOrNull { it.name.equals(envName.trim(), ignoreCase = true) }
@@ -1017,10 +1181,10 @@ fun NewAgentScreen(
                                     repos = when (envType) {
                                         "cloud" -> cloudTarget?.second
                                         "machine" -> machineTarget?.second
-                                        else -> null
+                                        else -> pooledRepos
                                     },
                                     workOnCurrentBranch = when {
-                                        envType == "cloud" && !cloudFromEnv -> workOnBranch
+                                        envType == "cloud" && !launchFromEnv -> workOnBranch
                                         envType == "machine" -> workOnBranch
                                         else -> null
                                     },
@@ -1034,8 +1198,8 @@ fun NewAgentScreen(
                                 if (named != null) {
                                     container.chats.setTitle(created.agent.id, named)
                                 }
-                                if (envType == "cloud" && cloudFromEnv) {
-                                    container.catalog.rememberCloudEnv(envName)
+                                if (envType == "cloud" && launchFromEnv) {
+                                    container.catalog.rememberCloudEnv(launchEnvName)
                                 }
                                 if (envType == "cloud" && !cloudFromEnv && repo.isNotBlank()) {
                                     container.chats.setRepoBase(

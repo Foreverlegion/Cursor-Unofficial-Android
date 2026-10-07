@@ -7,7 +7,9 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.put
 
 @Serializable
 data class MeResponse(
@@ -112,6 +114,69 @@ data class CustomSubagent(
     val description: String,
     val prompt: String,
     val model: String? = null,
+)
+
+@Serializable
+data class EnvRepo(
+    val url: String,
+)
+
+@Serializable
+data class EnvironmentRepoFile(
+    val url: String? = null,
+    val path: String? = null,
+)
+
+@Serializable
+data class CloudEnvironment(
+    val id: String = "",
+    val name: String = "",
+    val owner: String? = null,
+    val repos: List<EnvRepo> = emptyList(),
+    val environmentJson: String? = null,
+    val repoFile: EnvironmentRepoFile? = null,
+    val versionId: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class EnvironmentBuildFailure(
+    val type: String? = null,
+    val code: String? = null,
+)
+
+@Serializable
+data class EnvironmentBuild(
+    val id: String,
+    val environmentId: String? = null,
+    val status: String? = null,
+    val trigger: String? = null,
+    val draft: Boolean? = null,
+    val failure: EnvironmentBuildFailure? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+    val completedAt: String? = null,
+)
+
+@Serializable
+data class EnvironmentBuildList(
+    val items: List<EnvironmentBuild> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
+data class EnvironmentActiveBuild(
+    val type: String = "",
+    val buildId: String? = null,
+)
+
+@Serializable
+data class CreateEnvironmentRequest(
+    val owner: String,
+    val name: String,
+    val repos: List<EnvRepo>,
+    val environmentJson: String,
 )
 
 @Serializable
@@ -590,27 +655,133 @@ fun List<AgentSummary>.namedCloudEnvironments(extra: List<String> = emptyList())
         .sortedBy { it.lowercase() }
 }
 
+const val MAX_AGENT_REPOS = 20
+const val MAX_ENV_REPOS = 100
+
+fun WorkerPool.acceptsManyRepos(): Boolean {
+    if (!repoUrl.isNullOrBlank()) return false
+    return !poolName.equals("default", ignoreCase = true)
+}
+
+fun environmentConfigJson(install: String?): String {
+    val script = install?.trim()?.takeIf { it.isNotEmpty() } ?: "true"
+    return buildJsonObject { put("install", script) }.toString()
+}
+
+fun environmentOwner(raw: String?): String {
+    return if (raw.equals("team", ignoreCase = true)) "team" else "personal"
+}
+
+fun resolvedEnvironmentJson(raw: String?): String {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty()) return environmentConfigJson(null)
+    return text
+}
+
+data class EnvironmentChoice(
+    val name: String,
+    val id: String?,
+    val owner: String?,
+    val repoCount: Int,
+    val fromApi: Boolean,
+)
+
+fun EnvironmentChoice.menuLabel(): String {
+    if (!fromApi) return "$name · past chat"
+    val who = when (owner?.lowercase()) {
+        "team" -> "team"
+        "personal" -> "personal"
+        else -> "saved"
+    }
+    val count = if (repoCount == 1) "1 repo" else "$repoCount repos"
+    return "$name · $who · $count"
+}
+
+fun environmentChoices(
+    saved: List<CloudEnvironment>,
+    scraped: List<String>,
+): List<EnvironmentChoice> {
+    val real = saved
+        .filter { it.name.isNotBlank() }
+        .distinctBy { it.id.ifBlank { it.name.lowercase() } }
+        .sortedBy { it.name.lowercase() }
+        .map { env ->
+            EnvironmentChoice(
+                name = env.name,
+                id = env.id.takeIf { it.isNotBlank() },
+                owner = env.owner,
+                repoCount = env.repos.size,
+                fromApi = env.id.isNotBlank(),
+            )
+        }
+    val taken = real.map { it.name.lowercase() }.toSet()
+    val past = scraped.map { it.trim() }.filter { it.isNotEmpty() && it.lowercase() !in taken }
+        .distinctBy { it.lowercase() }
+        .sortedBy { it.lowercase() }
+        .map { name ->
+            EnvironmentChoice(name = name, id = null, owner = null, repoCount = 0, fromApi = false)
+        }
+    return real + past
+}
+
+fun activeBuildSummary(active: EnvironmentActiveBuild?, latest: EnvironmentBuild?): String {
+    val boot = when (active?.type) {
+        "build" -> active.buildId?.let { "Boots from $it" } ?: "Boots from a build"
+        "universal_image" -> "Boots from the default image"
+        else -> null
+    }
+    val build = latest?.let { item ->
+        val status = item.status ?: "unknown"
+        val draft = if (item.draft == true) " draft" else ""
+        val fail = item.failure?.code?.let { " ($it)" }.orEmpty()
+        "Latest ${item.id} $status$draft$fail"
+    }
+    return listOfNotNull(boot, build).joinToString(" · ")
+}
+
+fun assembleRepos(
+    primaryUrl: String,
+    extraUrls: List<String>,
+    startingRef: String?,
+    prUrl: String?,
+    max: Int = MAX_AGENT_REPOS,
+): List<Repo> {
+    val pull = prUrl?.trim()?.takeIf { it.isNotEmpty() }
+    val ref = if (pull == null) startingRef?.trim()?.takeIf { it.isNotEmpty() } else null
+    val urls = buildList {
+        val primary = primaryUrl.trim()
+        if (primary.isNotEmpty()) add(primary)
+        extraUrls.forEach { raw ->
+            val url = raw.trim()
+            if (url.isNotEmpty()) add(url)
+        }
+    }.distinctBy { it.lowercase() }.take(max.coerceAtLeast(0))
+    return urls.mapIndexed { index, url ->
+        if (index == 0) Repo(url = url, startingRef = ref, prUrl = pull) else Repo(url = url)
+    }
+}
+
+fun poolAgentRepos(pool: WorkerPool?, urls: List<String>): List<Repo>? {
+    val max = if (pool?.acceptsManyRepos() == true) MAX_AGENT_REPOS else 1
+    val repos = assembleRepos("", urls, null, null, max)
+    return repos.ifEmpty { null }
+}
+
 fun cloudCreateTarget(
     fromSavedEnv: Boolean,
     envName: String,
     repoUrl: String,
     startingRef: String?,
     prUrl: String? = null,
+    extraRepoUrls: List<String> = emptyList(),
 ): Pair<Env?, List<Repo>?> {
     val name = envName.trim()
     if (fromSavedEnv && name.isNotBlank()) {
         return Env(type = "cloud", name = name) to null
     }
-    val repo = repoUrl.trim()
-    if (repo.isBlank()) return null to null
-    val pull = prUrl?.trim()?.takeIf { it.isNotEmpty() }
-    return null to listOf(
-        Repo(
-            url = repo,
-            startingRef = if (pull == null) startingRef?.trim()?.takeIf { it.isNotEmpty() } else null,
-            prUrl = pull,
-        ),
-    )
+    val repos = assembleRepos(repoUrl, extraRepoUrls, startingRef, prUrl)
+    if (repos.isEmpty()) return null to null
+    return null to repos
 }
 
 fun machineCreateTarget(

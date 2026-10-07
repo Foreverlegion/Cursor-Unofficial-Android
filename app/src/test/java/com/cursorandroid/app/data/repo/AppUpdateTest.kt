@@ -1,7 +1,9 @@
 package com.cursorandroid.app.data.repo
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppUpdateTest {
@@ -20,6 +22,13 @@ class AppUpdateTest {
         assert(AppUpdate.INSTALLER_PACKAGES.contains("com.google.android.gms"))
         assert(AppUpdate.INSTALLER_PACKAGES.contains("com.android.vending"))
         assert(AppUpdate.INSTALLER_PACKAGES.contains("com.google.android.packageinstaller"))
+    }
+
+    @Test
+    fun prereleaseApkIsNotAnUpdate() {
+        assertFalse(AppUpdate.isUpdateRelease(draft = false, prerelease = true, hasApk = true))
+        assertFalse(AppUpdate.isUpdateRelease(draft = true, prerelease = false, hasApk = true))
+        assertTrue(AppUpdate.isUpdateRelease(draft = false, prerelease = false, hasApk = true))
     }
 
     @Test

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — Unofficial Cursor for Android</title>
+  <style>
+    :root {
+      --bg: #0e0e10;
+      --card: #1a1a1f;
+      --text: #f2f2f3;
+      --muted: #9a9aa3;
+      --accent: #14b8a6;
+      --border: #3a3a44;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.15rem; margin: 2rem 0 0.6rem; color: var(--accent); }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); font-size: 0.95rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.15rem;
+      margin: 1.25rem 0;
+    }
+    a { color: var(--accent); }
+    ul { padding-left: 1.2rem; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      background: #24242b;
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="muted">Unofficial Cursor for Android (<code>com.cursorandroid.app</code>)<br />
+  Last updated: October 7, 2026</p>
+
+  <div class="card">
+    <p><strong>Not affiliated with Cursor or Anysphere.</strong> This is an unofficial, personal project by Foreverlegion. It is not made by, endorsed by, sponsored by, or connected to Cursor or Anysphere.</p>
+  </div>
+
+  <h2>Summary</h2>
+  <ul>
+    <li>The app is <strong>free</strong>. No ads, no in-app purchases, no paid unlocks from the developer.</li>
+    <li>No third-party advertising SDKs, analytics SDKs, crash reporters, or trackers are embedded by the developer.</li>
+    <li>Your Cursor API key and optional GitHub token are stored <strong>on your device</strong> (encrypted SharedPreferences where available).</li>
+    <li>Network traffic is for Cursor’s public Cloud Agents APIs, and (when you use those features) GitHub for releases/auto-update, optional repo create, and issues/feedback.</li>
+  </ul>
+
+  <h2>Data stored on your device</h2>
+  <ul>
+    <li><strong>Cursor user API key</strong> — required to use Cloud Agents. Stored locally; not sent to the app developer.</li>
+    <li><strong>Optional GitHub personal access token</strong> — only if you add one in Settings (for creating a GitHub repo from New agent and related GitHub features). Stored locally.</li>
+    <li><strong>App preferences</strong> — notification toggles, theme, MCP server configs you enter, mute state, drafts, caches of conversation/inbox data needed to show the UI.</li>
+  </ul>
+  <p>Uninstalling the app removes app-private storage, subject to Android backup/restore behavior.</p>
+
+  <h2>Network use</h2>
+  <ul>
+    <li><strong>Cursor / Anysphere APIs</strong> (for example <code>api.cursor.com</code>) — using <em>your</em> API key to list agents, start runs, stream status, fetch artifacts, and related Cloud Agents features. Prompts and agent content go to Cursor under your account; this client does not operate a separate agent backend.</li>
+    <li><strong>Optional browser sign-in</strong> — can open cursor.com flows to mint a user API key for this client.</li>
+    <li><strong>GitHub</strong> (<code>api.github.com</code>, <code>github.com</code>, and related GitHub hosts) when you:
+      <ul>
+        <li>Check for or download updates from this project’s GitHub Releases</li>
+        <li>Create a repository (requires your GitHub token)</li>
+        <li>Open or submit feedback/issues against the project repository</li>
+      </ul>
+    </li>
+    <li><strong>MCP servers you configure</strong> — if you add HTTP/stdio MCP endpoints, the app contacts those hosts you chose (or Cursor’s cloud VMs as applicable). That is under your control.</li>
+  </ul>
+
+  <h2>Notifications</h2>
+  <p>With permission, the app can show local notifications when a run finishes or needs approval (including per-chat mute). Notification content is generated on-device from agent status you already have access to; it is not sold or used for advertising.</p>
+
+  <h2>Install count</h2>
+  <p>The app does not collect an install count and does not send an install identifier. Older test builds did. That ping was removed before this Play release.</p>
+
+  <h2>What the developer does not collect</h2>
+  <ul>
+    <li>No developer-operated ad network, marketing pixel, or behavioral advertising profile.</li>
+    <li>The developer does not receive your Cursor API key or chat contents through a separate telemetry pipeline.</li>
+    <li>Data you send to Cursor or GitHub is processed by those services under <em>their</em> terms and privacy policies.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>The app is a developer tool for managing cloud coding agents. It is not directed at children under 13.</p>
+
+  <h2>Changes</h2>
+  <p>Updates to this policy will be posted on this page with a revised “Last updated” date.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy or the app: <a href="mailto:Foreverlegion">Foreverlegion</a><br />
+  Project: <a href="https://github.com/Foreverlegion/Cursor-Unofficial-Android">github.com/Foreverlegion/Cursor-Unofficial-Android</a></p>
+</main>
+</body>
+</html>

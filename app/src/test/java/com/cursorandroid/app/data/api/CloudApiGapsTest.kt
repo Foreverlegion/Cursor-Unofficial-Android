@@ -25,6 +25,90 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun cloudCreateTargetSendsSeveralReposUntilANamedEnv() {
+        val (env, repos) = cloudCreateTarget(
+            fromSavedEnv = false,
+            envName = "",
+            repoUrl = "https://github.com/acme/app",
+            startingRef = "main",
+            extraRepoUrls = listOf(
+                "https://github.com/acme/api",
+                "https://github.com/acme/app",
+            ),
+        )
+        assertNull(env)
+        assertEquals(2, repos!!.size)
+        assertEquals("https://github.com/acme/app", repos[0].url)
+        assertEquals("main", repos[0].startingRef)
+        assertEquals("https://github.com/acme/api", repos[1].url)
+        assertNull(repos[1].startingRef)
+        val named = cloudCreateTarget(true, "web", "https://github.com/acme/app", "main", extraRepoUrls = listOf("https://github.com/acme/api"))
+        assertEquals("web", named.first?.name)
+        assertNull(named.second)
+    }
+
+    @Test
+    fun anyRepoPoolTakesManyAndDefaultTakesOne() {
+        val any = WorkerPool(poolName = "sandbox")
+        val bound = WorkerPool(poolName = "gpu", repoUrl = "https://github.com/acme/app")
+        val fallback = WorkerPool(poolName = "default")
+        assertTrue(any.acceptsManyRepos())
+        assertTrue(!bound.acceptsManyRepos())
+        assertTrue(!fallback.acceptsManyRepos())
+        assertEquals(2, poolAgentRepos(any, listOf("https://github.com/acme/app", "https://github.com/acme/api"))!!.size)
+        assertEquals(1, poolAgentRepos(fallback, listOf("https://github.com/acme/app", "https://github.com/acme/api"))!!.size)
+        assertEquals("""{"install":"pnpm install"}""", environmentConfigJson("pnpm install"))
+        assertEquals("""{"install":"true"}""", environmentConfigJson(" "))
+        assertEquals("team", environmentOwner("Team"))
+        assertEquals("personal", environmentOwner("nope"))
+        assertEquals("""{"install":"true"}""", resolvedEnvironmentJson(" "))
+        assertEquals("""{"install":"pnpm install"}""", resolvedEnvironmentJson("""{"install":"pnpm install"}"""))
+    }
+
+    @Test
+    fun environmentChoicesPreferSavedIdsOverScrapedNames() {
+        val saved = CloudEnvironment(
+            id = "8f14e45f-ceea-4e6b-9c3a-1d2e3f4a5b6c",
+            name = "Web",
+            owner = "team",
+            repos = listOf(EnvRepo("https://github.com/acme/app")),
+        )
+        val choices = environmentChoices(listOf(saved), listOf("Web", "api"))
+        assertEquals(2, choices.size)
+        assertEquals("Web", choices[0].name)
+        assertEquals(saved.id, choices[0].id)
+        assertTrue(choices[0].fromApi)
+        assertEquals("Web · team · 1 repo", choices[0].menuLabel())
+        assertNull(choices[1].id)
+        assertEquals("api · past chat", choices[1].menuLabel())
+    }
+
+    @Test
+    fun activeBuildSummaryAndBuildJson() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val listed = json.decodeFromString<EnvironmentBuildList>(
+            """{"items":[{"id":"bld-20260930-3c59dc04-8a1d-4b6e-9f2a-7e5d1c0b9a8f","environmentId":"8f14e45f-ceea-4e6b-9c3a-1d2e3f4a5b6c","status":"FAILED","trigger":"MANUAL","draft":true,"failure":{"type":"INSTALL_FAILED","code":"environment_json_invalid"}}],"nextCursor":"abc"}""",
+        )
+        val active = json.decodeFromString<EnvironmentActiveBuild>(
+            """{"type":"build","buildId":"bld-20260930-3c59dc04-8a1d-4b6e-9f2a-7e5d1c0b9a8f"}""",
+        )
+        val image = json.decodeFromString<EnvironmentActiveBuild>("""{"type":"universal_image"}""")
+        val env = json.decodeFromString<CloudEnvironment>(
+            """{"id":"8f14e45f-ceea-4e6b-9c3a-1d2e3f4a5b6c","name":"Web","owner":"personal","repos":[],"repoFile":{"url":"https://github.com/acme/app","path":".cursor/environment.json"},"environmentJson":"{\"install\":\"true\"}","versionId":"c9f0f895-fb98-4b91-8f3e-2a1b0c9d8e7f"}""",
+        )
+        assertEquals("INSTALL_FAILED", listed.items.single().failure?.type)
+        assertEquals("abc", listed.nextCursor)
+        assertEquals(".cursor/environment.json", env.repoFile?.path)
+        assertEquals("c9f0f895-fb98-4b91-8f3e-2a1b0c9d8e7f", env.versionId)
+        assertEquals(
+            "Boots from bld-20260930-3c59dc04-8a1d-4b6e-9f2a-7e5d1c0b9a8f · Latest bld-20260930-3c59dc04-8a1d-4b6e-9f2a-7e5d1c0b9a8f FAILED draft (environment_json_invalid)",
+            activeBuildSummary(active, listed.items.single()),
+        )
+        assertEquals("Boots from the default image", activeBuildSummary(image, null))
+        assertNull(image.buildId)
+    }
+
+    @Test
     fun cloudCreateTargetKeepsBranchWithoutPr() {
         val (_, repos) = cloudCreateTarget(false, "", "https://github.com/acme/app", "develop")
         val repo = repos!!.single()
