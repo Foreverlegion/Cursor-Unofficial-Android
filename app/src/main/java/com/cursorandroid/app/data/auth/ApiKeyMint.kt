@@ -19,8 +19,30 @@ object ApiKeyMint {
         data class Refuse(val message: String) : Decision
     }
 
+    const val DASHBOARD = "https://cursor.com/dashboard/api"
+
     const val REFUSE =
-        "This account already has a Cursor Android API key, so sign-in will not create another. Paste that key, or delete it on cursor.com/dashboard/api and sign in again."
+        "Older installs of this unofficial app may have created one or more User API keys named cursor-android or Cursor Android. " +
+            "Cursor only allows a new key after those leftovers are deleted, so this sign-in will not create another. " +
+            "There may be more than one key to delete. " +
+            "Open cursor.com/dashboard/api, delete every key with those names, then sign in again."
+
+    fun explainsLeftoverKeys(message: String?): Boolean {
+        if (message == REFUSE) return true
+        val text = message?.lowercase().orEmpty()
+        if (text.isEmpty()) return false
+        val names = text.contains("cursor-android") || text.contains("cursor android")
+        val blocked = text.contains("already") || text.contains("delete") || text.contains("leftover")
+        return names && blocked
+    }
+
+    fun isExistingKeyFailure(body: String): Boolean {
+        val text = body.lowercase()
+        val mentionsKey = text.contains("api key") || text.contains("apikey") ||
+            text.contains("cursor-android") || text.contains("cursor android")
+        val blocked = text.contains("already") || text.contains("exist") || text.contains("duplicate")
+        return mentionsKey && blocked
+    }
 
     fun decide(stored: String?, listed: List<ListedKey>?): Decision {
         val saved = stored?.trim()?.takeIf { it.isNotEmpty() }

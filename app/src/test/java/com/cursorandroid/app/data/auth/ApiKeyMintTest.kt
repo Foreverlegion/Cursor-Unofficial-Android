@@ -29,6 +29,10 @@ class ApiKeyMintTest {
         val decision = ApiKeyMint.decide(stored = null, listed = listed)
         assertTrue(decision is ApiKeyMint.Decision.Refuse)
         assertEquals(ApiKeyMint.REFUSE, (decision as ApiKeyMint.Decision.Refuse).message)
+        assertTrue(ApiKeyMint.explainsLeftoverKeys(ApiKeyMint.REFUSE))
+        assertTrue(ApiKeyMint.explainsLeftoverKeys("there's already a Cursor Android API key please delete it/them first"))
+        assertTrue(ApiKeyMint.isExistingKeyFailure("api key already exists"))
+        assertFalse(ApiKeyMint.isExistingKeyFailure("unauthorized"))
     }
 
     @Test

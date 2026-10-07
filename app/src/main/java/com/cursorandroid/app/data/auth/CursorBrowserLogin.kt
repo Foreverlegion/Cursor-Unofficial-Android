@@ -178,6 +178,9 @@ class CursorBrowserLogin(
         return response.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
+                if (ApiKeyMint.isExistingKeyFailure(text)) {
+                    throw IllegalStateException(ApiKeyMint.REFUSE)
+                }
                 throw IllegalStateException("Could not mint API key (HTTP ${resp.code})")
             }
             readApiKey(text) ?: throw IllegalStateException("Mint response missing api key")

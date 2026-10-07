@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.data.auth.ApiKeyMint
 import com.cursorandroid.app.data.auth.DemoAccess
 import com.cursorandroid.app.ui.screenInsets
 import com.cursorandroid.app.data.notify.RunWatchScheduler
@@ -165,6 +166,24 @@ fun SignInScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Cancel") }
             }
+            if (ApiKeyMint.explainsLeftoverKeys(error)) {
+                Text(
+                    "Existing API keys need to be deleted",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    ApiKeyMint.REFUSE,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = { SafeLinks.open(context, ApiKeyMint.DASHBOARD) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(ApiKeyMint.DASHBOARD)
+                }
+            }
             Text("Review / Demo", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Play review sign-in. Username demo, password demo. Sample chats only. This does not connect to Cursor.",
@@ -214,7 +233,7 @@ fun SignInScreen(
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
             )
-            if (error != null) {
+            if (error != null && !ApiKeyMint.explainsLeftoverKeys(error)) {
                 Text(error!!, color = MaterialTheme.colorScheme.error)
             }
             Button(
