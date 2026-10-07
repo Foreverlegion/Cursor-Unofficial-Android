@@ -8,6 +8,8 @@ Play review can sign in with username demo and password demo. That mode shows tw
 
 Play installs update from the Play Store. This build does not check GitHub for a newer APK.
 
+Play testing is open. Testers join from the Play testing link. There is no email list.
+
 ---
 
 # 1.0.24

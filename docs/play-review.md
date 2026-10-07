@@ -18,3 +18,11 @@ The app opens with sample chats only. A banner at the top says "Demo — not con
 
 To leave, open Settings → Account → Sign out.
 ```
+
+# Play testing track
+
+Testers join in the open. Do not use an email list.
+
+In Play Console, use Open testing, or Closed testing set to open join (anyone with the link). Testers opt in from that public link. No invite list.
+
+Upload the signed 1.0.25 (125) app bundle to that track.
