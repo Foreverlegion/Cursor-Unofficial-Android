@@ -21,7 +21,7 @@ class CursorAndroidApp : Application() {
         if (container.store.hasKey()) {
             RunWatchScheduler.resume(this)
         }
-        AutoUpdateScheduler.sync(this, container.store.autoUpdate)
+        AutoUpdateScheduler.sync(this, false)
         FeedbackReplyScheduler.sync(this)
         // Older builds enqueued these. Cancel them so they stop pinging.
         val work = WorkManager.getInstance(this)

@@ -6,6 +6,8 @@ Settings has Report bug and Request feature. Replies show up in the app. Ban sti
 
 Play review can sign in with username demo and password demo. That mode shows two sample chats and a Demo banner. It does not call Cursor.
 
+Play installs update from the Play Store. This build does not check GitHub for a newer APK.
+
 ---
 
 # 1.0.24

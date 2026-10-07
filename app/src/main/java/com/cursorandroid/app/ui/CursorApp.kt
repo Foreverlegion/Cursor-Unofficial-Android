@@ -25,7 +25,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,19 +38,14 @@ import com.cursorandroid.app.LaunchRequest
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
-import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.Attachments
-import com.cursorandroid.app.data.repo.AutoUpdateScheduler
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
-import com.cursorandroid.app.data.repo.ReleaseNotes
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
-import com.cursorandroid.app.ui.settings.AutoUpdatePrompt
 import com.cursorandroid.app.ui.settings.BatteryPrompt
 import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
-import com.cursorandroid.app.ui.settings.ReleaseNotesPrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
@@ -97,7 +91,6 @@ private fun CursorAppContent(
 ) {
     var signedIn by rememberSaveable { mutableStateOf(container.store.hasSession()) }
     var demo by rememberSaveable { mutableStateOf(container.store.demoMode) }
-    var askedAutoUpdate by rememberSaveable { mutableStateOf(container.store.autoUpdateAsked) }
     var askedBattery by rememberSaveable { mutableStateOf(container.store.batteryAsked) }
     var askedFeedback by rememberSaveable { mutableStateOf(container.store.feedbackNoticeSeen) }
     val context = LocalContext.current
@@ -113,18 +106,6 @@ private fun CursorAppContent(
             askedBattery = true
             if (allow) {
                 BatteryExemption.requestExempt(context)
-            }
-        }
-        return
-    }
-    if (!askedAutoUpdate) {
-        AutoUpdatePrompt { enabled ->
-            container.store.autoUpdate = enabled
-            container.store.autoUpdateAsked = true
-            askedAutoUpdate = true
-            if (enabled) {
-                AppUpdate.requestInstallPermission(context)
-                AutoUpdateScheduler.sync(context.applicationContext, true)
             }
         }
         return
@@ -148,24 +129,9 @@ private fun CursorAppContent(
     var composeEnvName by rememberSaveable { mutableStateOf<String?>(null) }
     var composeTick by rememberSaveable { mutableStateOf(0) }
     var accountTick by rememberSaveable { mutableIntStateOf(0) }
-    var offer by remember { mutableStateOf<AppUpdate.Remote?>(null) }
-    var offerBusy by remember { mutableStateOf(false) }
-    var offerError by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
     LaunchedEffect(signedIn, demo) {
         if (signedIn && !demo) RunWatchScheduler.resume(context.applicationContext)
-        AutoUpdateScheduler.sync(context.applicationContext, container.store.autoUpdate)
         FeedbackReplyScheduler.sync(context.applicationContext)
-    }
-    LaunchedEffect(signedIn, container.store.autoUpdate) {
-        if (!signedIn || !container.store.autoUpdate) return@LaunchedEffect
-        val remote = withContext(Dispatchers.IO) {
-            runCatching { AppUpdate.findRemote(container.store.githubToken) }.getOrNull()
-        } ?: return@LaunchedEffect
-        val here = AppUpdate.installed(context)
-        if (ReleaseNotes.shouldOffer(remote, here.versionCode, container.store.skippedUpdateCode)) {
-            offer = remote
-        }
     }
 
     LaunchedEffect(launch.nonce) {
@@ -332,35 +298,6 @@ private fun CursorAppContent(
                     showRemote = showInboxRemote,
                 )
             }
-        }
-    }
-    val pending = offer
-    if (pending != null) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            ReleaseNotesPrompt(
-                remote = pending,
-                busy = offerBusy,
-                error = offerError,
-                onSkip = {
-                    container.store.skippedUpdateCode = pending.versionCode
-                    offer = null
-                    offerError = null
-                },
-                onUpdate = {
-                    scope.launch {
-                        offerBusy = true
-                        offerError = null
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                AppUpdate.installRemote(context, pending, container.store.githubToken)
-                            }
-                        }.onFailure { fail ->
-                            offerError = fail.message ?: "Update failed"
-                        }
-                        offerBusy = false
-                    }
-                },
-            )
         }
     }
     }
