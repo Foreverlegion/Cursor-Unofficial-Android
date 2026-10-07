@@ -53,9 +53,7 @@ After the first install, Settings → Update (or auto-update) pulls newer APKs f
 
 ## Sign in
 
-You need a Cursor user API key from [cursor.com/dashboard/api](https://cursor.com/dashboard/api).
-
-The app can also walk a browser sign-in to mint a key. Same access either way: your account, your key, stored on the phone.
+Paste a Cursor user API key you already have from [cursor.com/dashboard/api](https://cursor.com/dashboard/api) (dashboard API Keys, or Cursor Settings > API Keys). The app stores that key on the phone. It does not create a new key.
 
 Minimum Android: 8.0 (API 26).
 

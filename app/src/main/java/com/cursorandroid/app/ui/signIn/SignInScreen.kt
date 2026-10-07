@@ -34,12 +34,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.notify.RunWatchScheduler
-import com.cursorandroid.app.data.repo.ClientOrigin
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.settings.SettingsTransfer
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+
+private const val API_KEYS_URL = "https://cursor.com/dashboard/api"
 
 @Composable
 fun SignInScreen(
@@ -49,8 +48,6 @@ fun SignInScreen(
     var key by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var waitingBrowser by remember { mutableStateOf(false) }
-    var browserJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val notifyPerm = rememberLauncherForActivityResult(
@@ -80,76 +77,21 @@ fun SignInScreen(
         ) {
             Text("Cursor", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Sign in on cursor.com to mint a user API key named ${ClientOrigin.ID}. Same Cloud Agents access as pasting a key. This app does not run an agent on the phone.",
+                "Paste a Cursor user API key from cursor.com/dashboard/api or Cursor Settings > API Keys. The key stays on this phone. This app does not create keys, and it does not run an agent on the phone.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(
+            TextButton(
                 onClick = {
-                    val handshake = container.login.handshake()
-                    error = null
-                    waitingBrowser = true
-                    loading = true
-                    if (!SafeLinks.open(context, handshake.loginUrl)) {
-                        error = "Could not open Cursor login"
-                        waitingBrowser = false
-                        loading = false
-                        return@Button
-                    }
-                    browserJob?.cancel()
-                    browserJob = scope.launch {
-                        try {
-                            val minted = container.login.complete(handshake)
-                            container.store.apiKey = minted
-                            container.repo.me()
-                            RunWatchScheduler.ensureSweep(context.applicationContext)
-                            onSignedIn()
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            container.store.clear()
-                            error = e.message ?: "Sign-in failed"
-                        } finally {
-                            waitingBrowser = false
-                            loading = false
-                            browserJob = null
-                        }
+                    if (!SafeLinks.open(context, API_KEYS_URL)) {
+                        error = "Could not open the API keys page"
                     }
                 },
                 enabled = !loading,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                if (waitingBrowser) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Text("Sign in with Cursor")
-                }
+                Text("Open API keys")
             }
-            if (waitingBrowser) {
-                Text(
-                    "Finish login in the browser, then return here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(
-                    onClick = {
-                        browserJob?.cancel()
-                        browserJob = null
-                        waitingBrowser = false
-                        loading = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Cancel") }
-            }
-            Text(
-                "Or paste a key from cursor.com/dashboard/api",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             OutlinedTextField(
                 value = key,
                 onValueChange = { key = it },
@@ -179,7 +121,7 @@ fun SignInScreen(
                         }
                     }
                 },
-                enabled = key.isNotBlank() && !loading && !waitingBrowser,
+                enabled = key.isNotBlank() && !loading,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (loading) {

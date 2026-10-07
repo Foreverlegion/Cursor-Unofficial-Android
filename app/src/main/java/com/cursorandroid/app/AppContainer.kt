@@ -5,7 +5,6 @@ import android.content.pm.ApplicationInfo
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
-import com.cursorandroid.app.data.auth.CursorBrowserLogin
 import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
@@ -103,8 +102,6 @@ class AppContainer(context: Context) {
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
         .create(CursorApi::class.java)
-
-    val login = CursorBrowserLogin(publicHttp, json)
 
     val repo = AgentRepository(
         api = api,
