@@ -13,6 +13,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -52,9 +53,10 @@ fun FeedbackSection(
         ) {
             Text("Report Bug")
         }
-        if (reportStatus != null) {
+        val status = reportStatus
+        if (status != null) {
             Text(
-                reportStatus!!,
+                status,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (reportError) {
                     MaterialTheme.colorScheme.error
