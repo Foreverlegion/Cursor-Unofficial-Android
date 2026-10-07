@@ -12,7 +12,10 @@ import com.cursorandroid.app.data.repo.AgentRepository
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
 import com.cursorandroid.app.data.repo.CatalogCache
 import com.cursorandroid.app.data.repo.ConversationStore
+import com.cursorandroid.app.data.repo.DemoCursorApi
+import com.cursorandroid.app.data.repo.DemoSession
 import com.cursorandroid.app.data.repo.DraftStore
+import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.LocalChatStore
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
@@ -28,10 +31,11 @@ class AppContainer(context: Context) {
     val conversations = ConversationStore(context)
     val chats = LocalChatStore(context)
     val drafts = DraftStore(context)
-    val catalog = CatalogCache(context)
+    val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
     val notices = NoticeStore(context)
     val notifier = RunNotifier(context.applicationContext, store, notices, chats)
+    val feedback = FeedbackStore(context)
 
     fun renameChat(agentId: String, name: String) {
         val title = name.trim()
@@ -53,7 +57,7 @@ class AppContainer(context: Context) {
 
     private val authInterceptor = Interceptor { chain ->
         val key = store.apiKey
-        val request = if (key.isNullOrBlank()) {
+        val request = if (store.demoMode || key.isNullOrBlank()) {
             chain.request()
         } else {
             chain.request().newBuilder()
@@ -97,12 +101,14 @@ class AppContainer(context: Context) {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-    private val api: CursorApi = Retrofit.Builder()
+    private val liveApi: CursorApi = Retrofit.Builder()
         .baseUrl("https://api.cursor.com/")
         .client(http)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
         .create(CursorApi::class.java)
+
+    private val api: CursorApi = DemoCursorApi(store, DemoSession(), liveApi)
 
     val login = CursorBrowserLogin(publicHttp, json)
 

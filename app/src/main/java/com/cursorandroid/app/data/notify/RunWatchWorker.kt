@@ -13,6 +13,14 @@ class RunWatchWorker(
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as? CursorAndroidApp ?: return Result.failure()
+        if (app.container.store.demoMode) {
+            inputData.getString(KEY_RUN_ID)?.let { runId ->
+                RunWatchStore.remove(applicationContext, runId)
+                ApprovalStreamHub.close(runId)
+                ApprovalStreamHub.detach(applicationContext, runId)
+            }
+            return Result.success()
+        }
         val agentId = inputData.getString(KEY_AGENT_ID) ?: return Result.failure()
         val runId = inputData.getString(KEY_RUN_ID) ?: return Result.failure()
         val agentName = inputData.getString(KEY_AGENT_NAME)

@@ -55,7 +55,9 @@ After the first install, Settings → Update (or auto-update) pulls newer APKs f
 
 You need a Cursor user API key from [cursor.com/dashboard/api](https://cursor.com/dashboard/api).
 
-The app can also walk a browser sign-in to mint a key. Same access either way: your account, your key, stored on the phone.
+The app can also walk a browser sign-in. The first time, it creates one API key and saves it on the phone. Later sign-ins reuse that key.
+
+Play review uses a local demo sign-in (`demo` / `demo`) with sample chats and no Cursor API. Instructions: [docs/play-review.md](docs/play-review.md).
 
 Minimum Android: 8.0 (API 26).
 

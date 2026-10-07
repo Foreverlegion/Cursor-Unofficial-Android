@@ -46,3 +46,25 @@ jobs:
           name: cursor-android-preview
           path: cursor-android-preview.apk
           if-no-files-found: error
+      - name: Bundle signed release
+        env:
+          CURSOR_ANDROID_STORE_PASSWORD: ${{ secrets.CURSOR_ANDROID_STORE_PASSWORD }}
+          CURSOR_ANDROID_KEY_PASSWORD: ${{ secrets.CURSOR_ANDROID_KEY_PASSWORD }}
+          CURSOR_ANDROID_KEY_ALIAS: ${{ secrets.CURSOR_ANDROID_KEY_ALIAS }}
+          CURSOR_ANDROID_ISSUES_TOKEN: ${{ secrets.CURSOR_ANDROID_ISSUES_TOKEN }}
+        run: |
+          if [ ! -f app/signing/stable.p12 ]; then
+            echo "Release keystore missing"
+            exit 1
+          fi
+          if [ -z "$CURSOR_ANDROID_STORE_PASSWORD" ] || [ -z "$CURSOR_ANDROID_KEY_PASSWORD" ]; then
+            echo "Release signing passwords missing"
+            exit 1
+          fi
+          ./gradlew --no-daemon :app:bundleRelease
+          cp app/build/outputs/bundle/release/app-release.aab cursor-android-bundle.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cursor-android-bundle
+          path: cursor-android-bundle.aab
+          if-no-files-found: error

@@ -5,4 +5,6 @@
     <string name="notify_channel_desc">Alerts when a cloud or remote agent run finishes</string>
     <string name="notify_approval_channel_name">Agent approvals</string>
     <string name="notify_approval_channel_desc">Alerts when a gated action needs approval on your PC</string>
+    <string name="notify_feedback_channel_name">Feedback</string>
+    <string name="notify_feedback_channel_desc">Replies to a bug report or feature request</string>
 </resources>

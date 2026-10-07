@@ -1,3 +1,15 @@
+# 1.0.25
+
+First browser sign-in saves one API key named cursor-android. Later sign-ins reuse it.
+
+Settings has Report bug and Request feature. Replies show up in the app. Ban still turns that install off.
+
+Play review can sign in with username demo and password demo. That mode shows two sample chats and a Demo banner. It does not call Cursor.
+
+Play installs update from the Play Store. This build does not check GitHub for a newer APK.
+
+---
+
 # 1.0.24
 
 Inbox and agent threads follow the Play listing layout. Status pills are Done, Running, Needs approval, and Failed, from real agent and run states. The inbox bar and Settings sit above the Android system navigation bar.

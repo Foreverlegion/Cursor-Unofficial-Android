@@ -119,6 +119,12 @@ class ApiKeyStore(context: Context) {
             notifyPrefs.edit { putBoolean(BATTERY_ASKED, value) }
         }
 
+    var feedbackNoticeSeen: Boolean
+        get() = notifyPrefs.getBoolean(FEEDBACK_NOTICE, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(FEEDBACK_NOTICE, value) }
+        }
+
     var skippedUpdateCode: Long
         get() = notifyPrefs.getLong(SKIPPED_UPDATE, 0L)
         set(value) {
@@ -169,7 +175,15 @@ class ApiKeyStore(context: Context) {
         saveStoredMcps(items)
     }
 
+    var demoMode: Boolean
+        get() = notifyPrefs.getBoolean(DEMO_MODE, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(DEMO_MODE, value) }
+        }
+
     fun hasKey(): Boolean = !apiKey.isNullOrBlank()
+
+    fun hasSession(): Boolean = demoMode || hasKey()
 
     fun clear() {
         writeSecret(KEY, null)
@@ -255,6 +269,8 @@ class ApiKeyStore(context: Context) {
         private const val AUTO_UPDATE = "auto_update"
         private const val AUTO_UPDATE_ASKED = "auto_update_asked"
         private const val BATTERY_ASKED = "battery_asked"
+        private const val FEEDBACK_NOTICE = "feedback_notice_seen"
+        private const val DEMO_MODE = "demo_mode"
         private const val SKIPPED_UPDATE = "skipped_update_code"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()
     }

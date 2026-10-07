@@ -32,6 +32,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.data.auth.ApiKeyMint
+import com.cursorandroid.app.data.auth.DemoAccess
 import com.cursorandroid.app.ui.screenInsets
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.ClientOrigin
@@ -47,6 +49,8 @@ fun SignInScreen(
     onSignedIn: () -> Unit,
 ) {
     var key by remember { mutableStateOf("") }
+    var demoUser by remember { mutableStateOf("") }
+    var demoPass by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var waitingBrowser by remember { mutableStateOf(false) }
@@ -80,12 +84,31 @@ fun SignInScreen(
         ) {
             Text("Cursor", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Sign in on cursor.com to mint a user API key named ${ClientOrigin.ID}. Same Cloud Agents access as pasting a key. This app does not run an agent on the phone.",
+                "Sign in on cursor.com. The first time, this saves one API key named ${ClientOrigin.ID}. Later sign-ins reuse that key and do not create another. Same Cloud Agents access as pasting a key. This app does not run an agent on the phone.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(
                 onClick = {
+                    val saved = container.store.apiKey?.trim()?.takeIf { it.isNotEmpty() }
+                    if (saved != null) {
+                        error = null
+                        loading = true
+                        scope.launch {
+                            try {
+                                container.repo.me()
+                                RunWatchScheduler.ensureSweep(context.applicationContext)
+                                onSignedIn()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = e.message ?: "Saved API key was rejected. Paste a key."
+                            } finally {
+                                loading = false
+                            }
+                        }
+                        return@Button
+                    }
                     val handshake = container.login.handshake()
                     error = null
                     waitingBrowser = true
@@ -99,15 +122,13 @@ fun SignInScreen(
                     browserJob?.cancel()
                     browserJob = scope.launch {
                         try {
-                            val minted = container.login.complete(handshake)
-                            container.store.apiKey = minted
+                            container.login.complete(handshake, container.store)
                             container.repo.me()
                             RunWatchScheduler.ensureSweep(context.applicationContext)
                             onSignedIn()
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            container.store.clear()
                             error = e.message ?: "Sign-in failed"
                         } finally {
                             waitingBrowser = false
@@ -145,6 +166,60 @@ fun SignInScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Cancel") }
             }
+            if (ApiKeyMint.explainsLeftoverKeys(error)) {
+                Text(
+                    "Existing API keys need to be deleted",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    ApiKeyMint.REFUSE,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = { SafeLinks.open(context, ApiKeyMint.DASHBOARD) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(ApiKeyMint.DASHBOARD)
+                }
+            }
+            Text("Review / Demo", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Play review sign-in. Username demo, password demo. Sample chats only. This does not connect to Cursor.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = demoUser,
+                onValueChange = { demoUser = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Username") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = demoPass,
+                onValueChange = { demoPass = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Password") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
+            Button(
+                onClick = {
+                    if (!DemoAccess.accepts(demoUser, demoPass)) {
+                        error = "Review sign-in was rejected."
+                        return@Button
+                    }
+                    error = null
+                    container.store.demoMode = true
+                    onSignedIn()
+                },
+                enabled = demoUser.isNotBlank() && demoPass.isNotBlank() && !loading && !waitingBrowser,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Enter demo")
+            }
             Text(
                 "Or paste a key from cursor.com/dashboard/api",
                 style = MaterialTheme.typography.bodySmall,
@@ -158,7 +233,7 @@ fun SignInScreen(
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
             )
-            if (error != null) {
+            if (error != null && !ApiKeyMint.explainsLeftoverKeys(error)) {
                 Text(error!!, color = MaterialTheme.colorScheme.error)
             }
             Button(

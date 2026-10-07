@@ -11,8 +11,14 @@ import com.cursorandroid.app.data.api.WorkerPool
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-class CatalogCache(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+class CatalogCache(
+    context: Context,
+    private val demo: () -> Boolean = { false },
+) {
+    private val app = context.applicationContext
+    private val real = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val demoPrefs = app.getSharedPreferences(PREFS_DEMO, Context.MODE_PRIVATE)
+    private fun active() = if (demo()) demoPrefs else real
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -55,52 +61,52 @@ class CatalogCache(context: Context) {
     }
 
     fun gitSnaps(): Map<String, GitSnap> {
-        val raw = prefs.getString("git", null) ?: return emptyMap()
+        val raw = active().getString("git", null) ?: return emptyMap()
         return runCatching { json.decodeFromString<Map<String, GitSnap>>(raw) }.getOrDefault(emptyMap())
     }
 
     fun saveGit(snap: GitSnap) {
         val next = gitSnaps().toMutableMap()
         next[snap.agentId] = snap
-        prefs.edit { putString("git", json.encodeToString(next)) }
+        active().edit { putString("git", json.encodeToString(next)) }
     }
 
     fun removeGit(agentId: String) {
         val next = gitSnaps().toMutableMap()
         if (next.remove(agentId) != null) {
-            prefs.edit { putString("git", json.encodeToString(next)) }
+            active().edit { putString("git", json.encodeToString(next)) }
         }
     }
 
     fun reposFresh(maxAgeMs: Long = REPOS_TTL): Boolean {
-        val at = prefs.getLong("repos_at", 0L)
+        val at = active().getLong("repos_at", 0L)
         return at > 0L && System.currentTimeMillis() - at < maxAgeMs && repos().isNotEmpty()
     }
 
     fun branches(url: String): List<String> {
-        val raw = prefs.getString(branchKey(url), null) ?: return emptyList()
+        val raw = active().getString(branchKey(url), null) ?: return emptyList()
         return runCatching { json.decodeFromString<List<String>>(raw) }.getOrDefault(emptyList())
     }
 
     fun saveBranches(url: String, names: List<String>) {
-        prefs.edit {
+        active().edit {
             putString(branchKey(url), json.encodeToString(names))
             putLong(branchKey(url) + "_at", System.currentTimeMillis())
         }
     }
 
     fun branchesFresh(url: String, maxAgeMs: Long = BRANCH_TTL): Boolean {
-        val at = prefs.getLong(branchKey(url) + "_at", 0L)
+        val at = active().getLong(branchKey(url) + "_at", 0L)
         return at > 0L && System.currentTimeMillis() - at < maxAgeMs && branches(url).isNotEmpty()
     }
 
     private inline fun <reified T> readList(key: String): List<T> {
-        val raw = prefs.getString(key, null) ?: return emptyList()
+        val raw = active().getString(key, null) ?: return emptyList()
         return runCatching { json.decodeFromString<List<T>>(raw) }.getOrDefault(emptyList())
     }
 
     private inline fun <reified T> write(key: String, value: List<T>) {
-        prefs.edit {
+        active().edit {
             putString(key, json.encodeToString(value))
             putLong("${key}_at", System.currentTimeMillis())
         }
@@ -110,6 +116,7 @@ class CatalogCache(context: Context) {
 
     companion object {
         private const val PREFS = "catalog_cache"
+        private const val PREFS_DEMO = "catalog_cache_demo"
         const val REPOS_TTL = 30L * 60L * 1000L
         const val BRANCH_TTL = 15L * 60L * 1000L
     }

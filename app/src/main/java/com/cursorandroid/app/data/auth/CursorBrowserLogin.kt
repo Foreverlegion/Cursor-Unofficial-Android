@@ -5,6 +5,8 @@ import com.cursorandroid.app.data.repo.ClientOrigin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -26,6 +28,8 @@ class CursorBrowserLogin(
     private val http: OkHttpClient,
     private val json: Json,
 ) {
+    private val gate = Mutex()
+
     fun handshake(): LoginHandshake {
         val uuid = UUID.randomUUID().toString()
         val verifier = randomVerifier()
@@ -41,10 +45,37 @@ class CursorBrowserLogin(
         return LoginHandshake(uuid = uuid, verifier = verifier, loginUrl = loginUrl)
     }
 
-    suspend fun complete(handshake: LoginHandshake, keyName: String = KEY_NAME): String {
-        return withContext(Dispatchers.IO) {
-            val access = poll(handshake)
-            mintKey(access, keyName)
+    suspend fun complete(handshake: LoginHandshake, store: ApiKeyStore, keyName: String = KEY_NAME): String {
+        return gate.withLock {
+            val saved = store.apiKey?.trim()?.takeIf { it.isNotEmpty() }
+            if (saved != null) return@withLock saved
+            val key = withContext(Dispatchers.IO) {
+                val access = poll(handshake)
+                when (val decision = ApiKeyMint.decide(stored = null, listed = listKeys(access))) {
+                    is ApiKeyMint.Decision.Reuse -> decision.key
+                    is ApiKeyMint.Decision.Create -> mintKey(access, keyName)
+                    is ApiKeyMint.Decision.Refuse -> throw IllegalStateException(decision.message)
+                }
+            }
+            store.apiKey = key
+            key
+        }
+    }
+
+    private fun listKeys(accessToken: String): List<ApiKeyMint.ListedKey>? {
+        val request = Request.Builder()
+            .url("$API/aiserver.v1.DashboardService/ListUserApiKeys")
+            .header("Authorization", "Bearer $accessToken")
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Connect-Protocol-Version", "1")
+            .post("{}".toRequestBody(JSON))
+            .build()
+        val response = runCatching { http.newCall(request).execute() }.getOrNull() ?: return null
+        return response.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) return@use null
+            ApiKeyMint.parse(text)
         }
     }
 
@@ -147,6 +178,9 @@ class CursorBrowserLogin(
         return response.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
+                if (ApiKeyMint.isExistingKeyFailure(text)) {
+                    throw IllegalStateException(ApiKeyMint.REFUSE)
+                }
                 throw IllegalStateException("Could not mint API key (HTTP ${resp.code})")
             }
             readApiKey(text) ?: throw IllegalStateException("Mint response missing api key")
