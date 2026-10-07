@@ -10,6 +10,7 @@ data class LaunchRequest(
     val compose: Boolean = false,
     val shareText: String? = null,
     val shareUris: List<Uri> = emptyList(),
+    val openSettings: Boolean = false,
 ) {
     companion object {
         fun from(intent: Intent?, nonce: Long): LaunchRequest {
@@ -29,6 +30,10 @@ data class LaunchRequest(
                 compose = shared && notifyId == null && viewId == null,
                 shareText = text,
                 shareUris = uris,
+                openSettings = intent.getBooleanExtra(
+                    com.cursorandroid.app.data.notify.FeedbackNotifier.EXTRA_OPEN_SETTINGS,
+                    false,
+                ),
             )
         }
 

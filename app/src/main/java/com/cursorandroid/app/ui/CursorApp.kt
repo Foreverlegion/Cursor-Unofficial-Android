@@ -24,6 +24,7 @@ import androidx.window.core.layout.WindowSizeClass
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.LaunchRequest
 import com.cursorandroid.app.data.notify.BatteryExemption
+import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.Attachments
@@ -36,6 +37,7 @@ import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
 import com.cursorandroid.app.ui.settings.AutoUpdatePrompt
 import com.cursorandroid.app.ui.settings.BatteryPrompt
+import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
 import com.cursorandroid.app.ui.settings.ReleaseNotesPrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
@@ -83,6 +85,7 @@ private fun CursorAppContent(
     var signedIn by rememberSaveable { mutableStateOf(container.store.hasKey()) }
     var askedAutoUpdate by rememberSaveable { mutableStateOf(container.store.autoUpdateAsked) }
     var askedBattery by rememberSaveable { mutableStateOf(container.store.batteryAsked) }
+    var askedFeedback by rememberSaveable { mutableStateOf(container.store.feedbackNoticeSeen) }
     val context = LocalContext.current
     LaunchedEffect(askedBattery) {
         if (!askedBattery && BatteryExemption.isExempt(context)) {
@@ -122,6 +125,13 @@ private fun CursorAppContent(
         )
         return
     }
+    if (!askedFeedback) {
+        FeedbackNoticePrompt {
+            container.store.feedbackNoticeSeen = true
+            askedFeedback = true
+        }
+        return
+    }
 
     val windowSize = currentWindowAdaptiveInfo().windowSizeClass
     val twoPane = windowSize.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
@@ -130,6 +140,7 @@ private fun CursorAppContent(
     var composeEnvType by rememberSaveable { mutableStateOf("cloud") }
     var composeEnvName by rememberSaveable { mutableStateOf<String?>(null) }
     var composeTick by rememberSaveable { mutableStateOf(0) }
+    var accountTick by rememberSaveable { mutableIntStateOf(0) }
     var offer by remember { mutableStateOf<AppUpdate.Remote?>(null) }
     var offerBusy by remember { mutableStateOf(false) }
     var offerError by remember { mutableStateOf<String?>(null) }
@@ -137,6 +148,7 @@ private fun CursorAppContent(
     LaunchedEffect(signedIn) {
         if (signedIn) RunWatchScheduler.resume(context.applicationContext)
         AutoUpdateScheduler.sync(context.applicationContext, container.store.autoUpdate)
+        FeedbackReplyScheduler.sync(context.applicationContext)
     }
     LaunchedEffect(signedIn, container.store.autoUpdate) {
         if (!signedIn || !container.store.autoUpdate) return@LaunchedEffect
@@ -151,6 +163,10 @@ private fun CursorAppContent(
 
     LaunchedEffect(launch.nonce) {
         if (launch.nonce == 0L) return@LaunchedEffect
+        if (launch.openSettings) {
+            pane = Pane.Settings
+            accountTick += 1
+        }
         if (launch.agentId != null) {
             selectedId = launch.agentId
             pane = Pane.Inbox
@@ -217,6 +233,7 @@ private fun CursorAppContent(
                             onBack = { pane = Pane.Inbox },
                             onSignedOut = { signedIn = false },
                             onAppearanceChanged = onAppearanceChanged,
+                            openAccountTick = accountTick,
                             modifier = Modifier.fillMaxSize(),
                         )
                         pane == Pane.Compose -> NewAgentScreen(
@@ -252,6 +269,7 @@ private fun CursorAppContent(
                     onBack = { pane = Pane.Inbox },
                     onSignedOut = { signedIn = false },
                     onAppearanceChanged = onAppearanceChanged,
+                    openAccountTick = accountTick,
                 )
                 pane == Pane.Compose -> NewAgentScreen(
                     container = container,
