@@ -1,72 +1,94 @@
 package com.cursorandroid.app.data.repo
 
-import java.net.URLEncoder
-
 object BugReport {
     const val MAX_TITLE = 80
     const val MAX_BODY = 4_000
-    const val MAX_URL_BODY = 1_500
 
-    data class Device(
-        val versionName: String,
-        val versionCode: Long,
-        val sdk: Int,
-        val release: String,
-        val manufacturer: String,
-        val model: String,
-    )
+    class Blocked(message: String) : IllegalStateException(message)
+
+    data class Filed(val number: Int)
 
     fun sanitizeTitle(raw: String): String {
-        return clean(raw).replace('\n', ' ').replace('\r', ' ').trim().take(MAX_TITLE)
+        return redact(clean(raw)).replace('\n', ' ').replace('\r', ' ').trim().take(MAX_TITLE)
     }
 
     fun sanitizeBody(raw: String): String {
         return redact(clean(raw)).trim().take(MAX_BODY)
     }
 
-    fun composeBody(userText: String, device: Device): String {
+    fun composeBody(
+        userText: String,
+        versionName: String,
+        versionCode: Long,
+        androidRelease: String,
+        sdk: Int,
+        kind: FeedbackPolicy.Kind = FeedbackPolicy.Kind.BUG,
+    ): String {
         val report = sanitizeBody(userText)
-        val tech = buildString {
-            append("App ").append(device.versionName.ifBlank { "?" })
-            append(" (").append(device.versionCode).append(")\n")
-            append("Android ").append(device.release.ifBlank { "?" })
-            append(" (SDK ").append(device.sdk).append(")\n")
-            append(device.manufacturer.trim()).append(' ').append(device.model.trim())
-        }.trim()
         return buildString {
             if (report.isNotEmpty()) {
                 append(report)
                 append("\n\n")
             }
             append("---\n")
-            append(tech)
-            append("\nReported from the Android app. No account identity attached.")
+            append(if (kind == FeedbackPolicy.Kind.FEATURE) "Type: feature request\n" else "Type: bug report\n")
+            append("App ").append(versionName.ifBlank { "?" })
+            append(" (").append(versionCode).append(")\n")
+            append("Android ").append(androidRelease.ifBlank { "?" })
+            append(" (SDK ").append(sdk).append(")\n")
+            append("Anonymous report from the Android app. No name, email, API key, or device is attached.\n")
+            append("Reply on this issue to answer in the app.")
         }
     }
 
-    fun newIssueUrl(title: String, body: String): String {
-        val heading = sanitizeTitle(title).ifBlank { "Android bug" }
-        val text = body.take(MAX_URL_BODY)
-        return "https://github.com/${GithubAppIssues.REPO}/issues/new" +
-            "?assignees=${enc(GithubAppIssues.ASSIGNEE)}" +
-            "&labels=bug" +
-            "&title=${enc(heading)}" +
-            "&body=${enc(text)}"
-    }
-
-    fun submit(title: String, userText: String, device: Device, userToken: String?): String {
-        val heading = sanitizeTitle(title).ifBlank { "Android bug" }
-        val body = composeBody(userText, device)
-        val token = GithubAppIssues.bakedToken() ?: userToken?.trim()?.takeIf { it.isNotEmpty() }
-        if (token.isNullOrEmpty()) {
-            return newIssueUrl(heading, body)
+    /**
+     * Files with the app token only. A personal GitHub token would put the reporter's login on the issue.
+     * Returns after the issue exists. Does not open a browser.
+     */
+    fun submit(
+        title: String,
+        userText: String,
+        versionName: String,
+        versionCode: Long,
+        androidRelease: String,
+        sdk: Int,
+        ledger: ReportLedger,
+        kind: FeedbackPolicy.Kind = FeedbackPolicy.Kind.BUG,
+    ): Filed {
+        if (FeedbackPolicy.blocksSubmit(ledger.banned(), serverBanned = false)) {
+            ledger.ban()
+            throw Blocked(FeedbackPolicy.BLOCKED)
         }
-        val created = runCatching {
-            GithubAppIssues.createIssue(token, heading, body, labels = listOf("bug"))
-        }.getOrElse {
-            return newIssueUrl(heading, body)
+        val token = GithubAppIssues.bakedToken()
+            ?: throw Blocked("Feedback is unavailable right now.")
+        val serverBanned = ledger.numbers().any { number ->
+            GithubAppIssues.getIssue(token, number)?.let { issue ->
+                issue.labels.any { FeedbackPolicy.isBannedLabel(it.name) }
+            } == true
         }
-        return SafeLinks.githubHttps(created.html_url)?.toString() ?: newIssueUrl(heading, body)
+        if (FeedbackPolicy.blocksSubmit(localBanned = false, serverBanned = serverBanned)) {
+            ledger.ban()
+            throw Blocked(FeedbackPolicy.BLOCKED)
+        }
+        val fallback = if (kind == FeedbackPolicy.Kind.FEATURE) "Feature request" else "Android bug"
+        val heading = sanitizeTitle(title).ifBlank { fallback }
+        val body = composeBody(userText, versionName, versionCode, androidRelease, sdk, kind)
+        val extra = FeedbackPolicy.kindLabel(kind)
+        GithubAppIssues.ensureLabel(token, FeedbackPolicy.LABEL_FEEDBACK, "1d76db")
+        GithubAppIssues.ensureLabel(
+            token,
+            extra,
+            if (kind == FeedbackPolicy.Kind.FEATURE) "a2eeef" else "d73a4a",
+        )
+        val created = GithubAppIssues.createIssue(
+            token,
+            heading,
+            body,
+            labels = listOf(FeedbackPolicy.LABEL_FEEDBACK, extra),
+        )
+        val number = created.number ?: throw Blocked("GitHub did not accept the report.")
+        ledger.remember(number, heading)
+        return Filed(number)
     }
 
     internal fun redact(raw: String): String {
@@ -85,9 +107,6 @@ object BugReport {
         }
     }
 
-    private fun enc(value: String): String =
-        URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
-
     private val SECRET_PREFIXES = listOf(
         Regex("ghp_[A-Za-z0-9_]{20,}"),
         Regex("github_pat_[A-Za-z0-9_]{20,}"),
@@ -95,5 +114,10 @@ object BugReport {
         Regex("ghu_[A-Za-z0-9_]{20,}"),
         Regex("ghs_[A-Za-z0-9_]{20,}"),
         Regex("ghr_[A-Za-z0-9_]{20,}"),
+        Regex("(?i)bearer\\s+[A-Za-z0-9._\\-]{8,}"),
+        Regex("(?i)\\bkey_[A-Za-z0-9_\\-]{12,}"),
+        Regex("(?i)\\bcrsr_[A-Za-z0-9_\\-]{12,}"),
+        Regex("(?i)\\bsk-[A-Za-z0-9_\\-]{12,}"),
+        Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"),
     )
 }

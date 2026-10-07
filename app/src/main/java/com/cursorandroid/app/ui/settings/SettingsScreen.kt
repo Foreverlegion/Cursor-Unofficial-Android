@@ -66,7 +66,7 @@ import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
-import com.cursorandroid.app.data.repo.AutoUpdateScheduler
+import com.cursorandroid.app.data.repo.FeedbackPolicy
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import java.text.NumberFormat
@@ -86,7 +86,9 @@ fun SettingsScreen(
     showBack: Boolean,
     onBack: () -> Unit,
     onSignedOut: () -> Unit,
+    onSessionChanged: () -> Unit = {},
     onAppearanceChanged: () -> Unit = {},
+    openAccountTick: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     var overview by remember { mutableStateOf<AccountOverview?>(null) }
@@ -101,7 +103,6 @@ fun SettingsScreen(
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
-    var autoUpdate by remember { mutableStateOf(container.store.autoUpdate) }
     var tab by remember { mutableStateOf(SettingsTab.Profile) }
     val context = LocalContext.current
     val lifeState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
@@ -128,13 +129,15 @@ fun SettingsScreen(
         themeColor = container.store.themeColor
         showInboxEnvs = container.store.showInboxEnvs
         showInboxRemote = container.store.showInboxRemote
-        autoUpdate = container.store.autoUpdate
         onAppearanceChanged()
     }
 
     LaunchedEffect(Unit) {
         overview = runCatching { container.repo.accountOverview() }.getOrNull()
         modelItems = runCatching { container.repo.models() }.getOrDefault(emptyList())
+    }
+    LaunchedEffect(openAccountTick) {
+        if (openAccountTick > 0) tab = SettingsTab.Account
     }
 
     if (showBack) BackHandler(onBack = onBack)
@@ -263,27 +266,17 @@ fun SettingsScreen(
                         )
                         SettingsTab.Account -> AccountTab(
                             container = container,
-                            autoUpdate = autoUpdate,
-                            onAutoUpdate = { on ->
-                                autoUpdate = on
-                                container.store.autoUpdate = on
-                                container.store.autoUpdateAsked = true
-                                if (on) {
-                                    AppUpdate.requestInstallPermission(context)
-                                }
-                                AutoUpdateScheduler.sync(context.applicationContext, on)
-                            },
-                            onImported = {
-                                reloadLocal()
-                                AutoUpdateScheduler.sync(
-                                    context.applicationContext,
-                                    container.store.autoUpdate,
-                                )
-                            },
+                            operator = FeedbackPolicy.isOperator(overview?.me?.userEmail),
+                            onImported = { reloadLocal() },
                             onSignedOut = {
                                 RunWatchScheduler.stop(context.applicationContext)
-                                container.store.clear()
-                                onSignedOut()
+                                if (container.store.demoMode) {
+                                    container.store.demoMode = false
+                                    if (container.store.hasKey()) onSessionChanged() else onSignedOut()
+                                } else {
+                                    container.store.clear()
+                                    onSignedOut()
+                                }
                             },
                         )
                     }
@@ -519,7 +512,7 @@ private fun ConnectionsTab(
     }
     Section(
         title = "GitHub",
-        detail = "Needed to create a GitHub repo from New agent, or to check updates against a private repo.",
+        detail = "Needed to create a GitHub repo from New agent.",
     ) {
         GithubTokenField(container)
     }
@@ -532,29 +525,19 @@ private fun ConnectionsTab(
 @Composable
 private fun AccountTab(
     container: AppContainer,
-    autoUpdate: Boolean,
-    onAutoUpdate: (Boolean) -> Unit,
+    operator: Boolean,
     onImported: () -> Unit,
     onSignedOut: () -> Unit,
 ) {
-    Section(
-        title = "Updates",
-        detail = "When on, the app checks GitHub and shows release notes before installing.",
-    ) {
-        PrefSwitch(
-            title = "Auto update",
-            detail = "Offer newer published APKs when you open the app.",
-            checked = autoUpdate,
-            onCheckedChange = onAutoUpdate,
-        )
-    }
+    val context = LocalContext.current
+    val installed = remember { AppUpdate.installed(context) }
     Section(
         title = "Backup",
         detail = "Move settings to another phone or keep a copy before uninstalling.",
     ) {
         SettingsTransfer(container = container, onImported = onImported)
     }
-    FeedbackSection(container = container)
+    FeedbackSection(container = container, operator = operator)
     Section(title = "Session") {
         Button(onClick = onSignedOut, modifier = Modifier.fillMaxWidth()) {
             Text("Sign out")
@@ -577,7 +560,11 @@ private fun AccountTab(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        AppUpdateSection(container, showToken = false)
+        Text(
+            "Installed ${installed.versionName}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
