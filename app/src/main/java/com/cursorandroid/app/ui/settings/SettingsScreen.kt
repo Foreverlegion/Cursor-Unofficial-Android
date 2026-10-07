@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.AppInsets
+import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.AccountOverview
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.notify.BatteryExemption
@@ -65,8 +67,6 @@ import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.AutoUpdateScheduler
-import com.cursorandroid.app.data.repo.InstallPulse
-import com.cursorandroid.app.data.repo.InstallPulseScheduler
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import java.text.NumberFormat
@@ -141,6 +141,7 @@ fun SettingsScreen(
 
     Scaffold(
         modifier = modifier,
+        contentWindowInsets = AppInsets.bars,
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -157,7 +158,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .scaffoldBars(padding),
         ) {
             val tabs = SettingsTab.entries
             val selected = tabs.indexOf(tab).coerceAtLeast(0)
@@ -272,14 +273,12 @@ fun SettingsScreen(
                                 }
                                 AutoUpdateScheduler.sync(context.applicationContext, on)
                             },
-                            showInstallCounts = InstallPulse.isOwner(overview?.me?.userEmail),
                             onImported = {
                                 reloadLocal()
                                 AutoUpdateScheduler.sync(
                                     context.applicationContext,
                                     container.store.autoUpdate,
                                 )
-                                InstallPulseScheduler.sync(context.applicationContext)
                             },
                             onSignedOut = {
                                 RunWatchScheduler.stop(context.applicationContext)
@@ -535,7 +534,6 @@ private fun AccountTab(
     container: AppContainer,
     autoUpdate: Boolean,
     onAutoUpdate: (Boolean) -> Unit,
-    showInstallCounts: Boolean,
     onImported: () -> Unit,
     onSignedOut: () -> Unit,
 ) {
@@ -556,10 +554,7 @@ private fun AccountTab(
     ) {
         SettingsTransfer(container = container, onImported = onImported)
     }
-    FeedbackSection(
-        container = container,
-        showInstallCounts = showInstallCounts,
-    )
+    FeedbackSection(container = container)
     Section(title = "Session") {
         Button(onClick = onSignedOut, modifier = Modifier.fillMaxWidth()) {
             Text("Sign out")

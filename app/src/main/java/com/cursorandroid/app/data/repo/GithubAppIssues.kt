@@ -14,9 +14,6 @@ import java.util.concurrent.TimeUnit
 object GithubAppIssues {
     const val REPO = "Foreverlegion/Cursor-Unofficial-Android"
     const val ASSIGNEE = "Foreverlegion"
-    const val LEDGER_GIST_DESC = "cursor-android-install-ledger"
-    const val LEDGER_GIST_ID = "fb8d79307fba4ba60aff5327a835abe3"
-    const val LEDGER_FILE = "ledger.json"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -36,54 +33,6 @@ object GithubAppIssues {
         .build()
 
     fun bakedToken(): String? = BuildConfig.APP_ISSUES_TOKEN.trim().takeIf { it.isNotEmpty() }
-
-    fun findLedgerGist(token: String): GhGist? {
-        val key = token.trim()
-        if (key.isEmpty()) error("Missing GitHub token")
-        val (code, raw) = call("GET", "/gists?per_page=50", token = key)
-        if (code !in 200..299) error(httpError(code, raw))
-        return json.decodeFromString<List<GhGist>>(raw)
-            .filter { it.description == LEDGER_GIST_DESC && !it.id.isNullOrBlank() }
-            .minByOrNull { it.created_at.orEmpty() }
-    }
-
-    fun getGist(token: String, id: String): GhGist {
-        val key = token.trim()
-        if (key.isEmpty()) error("Missing GitHub token")
-        val (code, raw) = call("GET", "/gists/$id", token = key)
-        if (code !in 200..299) error(httpError(code, raw))
-        return json.decodeFromString<GhGist>(raw)
-    }
-
-    fun createLedgerGist(token: String, content: String): GhGist {
-        val key = token.trim()
-        if (key.isEmpty()) error("Missing GitHub token")
-        val payload = json.encodeToString(
-            CreateGist(
-                description = LEDGER_GIST_DESC,
-                public = false,
-                files = mapOf(LEDGER_FILE to GistFile(content)),
-            ),
-        )
-        val (code, raw) = call("POST", "/gists", payload, key)
-        if (code !in 200..299) error(httpError(code, raw))
-        return json.decodeFromString<GhGist>(raw)
-    }
-
-    fun updateLedgerGist(token: String, id: String, content: String): GhGist {
-        val key = token.trim()
-        if (key.isEmpty()) error("Missing GitHub token")
-        val payload = json.encodeToString(
-            PatchGist(files = mapOf(LEDGER_FILE to GistFile(content))),
-        )
-        val (code, raw) = call("PATCH", "/gists/$id", payload, key)
-        if (code !in 200..299) error(httpError(code, raw))
-        return json.decodeFromString<GhGist>(raw)
-    }
-
-    fun gistLedgerContent(gist: GhGist): String {
-        return gist.files[LEDGER_FILE]?.content.orEmpty()
-    }
 
     fun createIssue(
         token: String,
@@ -139,9 +88,7 @@ object GithubAppIssues {
             builder.header("Authorization", "Bearer $token")
         }
         val request = when (method) {
-            "GET" -> builder.get().build()
             "POST" -> builder.post((body ?: "{}").toRequestBody(JSON)).build()
-            "PATCH" -> builder.patch((body ?: "{}").toRequestBody(JSON)).build()
             else -> error("Unsupported GitHub method")
         }
         http.newCall(request).execute().use { response ->
@@ -155,31 +102,6 @@ object GithubAppIssues {
         val title: String? = null,
         val body: String? = null,
         val html_url: String? = null,
-    )
-
-    @Serializable
-    data class GhGist(
-        val id: String? = null,
-        val description: String? = null,
-        val created_at: String? = null,
-        val files: Map<String, GistFile> = emptyMap(),
-    )
-
-    @Serializable
-    data class GistFile(
-        val content: String? = null,
-    )
-
-    @Serializable
-    private data class CreateGist(
-        val description: String,
-        val public: Boolean,
-        val files: Map<String, GistFile>,
-    )
-
-    @Serializable
-    private data class PatchGist(
-        val files: Map<String, GistFile>,
     )
 
     @Serializable

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -70,6 +71,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.AppInsets
+import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.Computer
@@ -223,6 +226,7 @@ fun InboxScreen(
     }.toSet()
     Scaffold(
         modifier = modifier,
+        contentWindowInsets = AppInsets.bars,
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -256,7 +260,7 @@ fun InboxScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .scaffoldBars(padding),
         ) {
             NoticeTray(
                 notices = notices,
@@ -1148,6 +1152,7 @@ private fun InboxBottomNav(onSettings: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .windowInsetsPadding(AppInsets.navigation)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         shape = RoundedCornerShape(28.dp),
         color = PlayColors.Card,

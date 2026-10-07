@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.AppInsets
+import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
@@ -365,6 +366,7 @@ fun NewAgentScreen(
 
     Scaffold(
         modifier = modifier,
+        contentWindowInsets = AppInsets.bars,
         topBar = {
             TopAppBar(
                 title = { Text("New agent") },
@@ -381,8 +383,7 @@ fun NewAgentScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .imePadding()
+                .scaffoldBars(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

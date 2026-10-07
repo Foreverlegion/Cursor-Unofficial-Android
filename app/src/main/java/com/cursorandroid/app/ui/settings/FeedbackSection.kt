@@ -11,10 +11,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -23,36 +21,20 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.BugReport
-import com.cursorandroid.app.data.repo.InstallPulse
 import com.cursorandroid.app.data.repo.SafeLinks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.NumberFormat
-import java.util.Locale
 
 @Composable
 fun FeedbackSection(
     container: AppContainer,
-    showInstallCounts: Boolean,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val fmt = remember { NumberFormat.getIntegerInstance(Locale.US) }
-    var counts by remember { mutableStateOf<InstallPulse.Counts?>(null) }
-    var countError by remember { mutableStateOf(false) }
     var reportOpen by remember { mutableStateOf(false) }
     var reportStatus by remember { mutableStateOf<String?>(null) }
     var reportError by remember { mutableStateOf(false) }
-
-    LaunchedEffect(showInstallCounts) {
-        if (!showInstallCounts) return@LaunchedEffect
-        val result = withContext(Dispatchers.IO) {
-            runCatching { InstallPulse.fetchCounts() }
-        }
-        counts = result.getOrNull()
-        countError = result.isFailure
-    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -79,34 +61,6 @@ fun FeedbackSection(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-            )
-        }
-    }
-
-    if (showInstallCounts) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Installs", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Visible only on this Cursor account.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                when {
-                    counts != null ->
-                        "${fmt.format(counts!!.current)} currently installed · ${fmt.format(counts!!.total)} total installs"
-                    countError -> "Install count unavailable"
-                    else -> "Loading install count…"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                "Total counts each phone once. Updates do not add another install. Current drops off after ${InstallPulse.WINDOW_DAYS} days without a ping.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

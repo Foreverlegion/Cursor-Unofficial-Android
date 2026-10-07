@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.cursorandroid.app.ui.screenInsets
 
 @Composable
 fun AutoUpdatePrompt(
@@ -28,6 +29,7 @@ fun AutoUpdatePrompt(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .screenInsets()
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,

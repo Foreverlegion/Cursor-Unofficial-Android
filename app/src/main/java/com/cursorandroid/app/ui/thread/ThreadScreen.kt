@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -92,6 +91,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.AppInsets
+import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.ApiException
@@ -1095,6 +1096,7 @@ fun ThreadScreen(
 
     Scaffold(
         modifier = modifier,
+        contentWindowInsets = AppInsets.bars,
         topBar = {
             TopAppBar(
                 title = {
@@ -1204,8 +1206,7 @@ fun ThreadScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .imePadding(),
+                .scaffoldBars(padding),
         ) {
             if (working) {
                 WorkingBar(activity)
