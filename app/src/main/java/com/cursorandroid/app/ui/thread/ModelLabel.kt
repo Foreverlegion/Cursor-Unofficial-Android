@@ -37,14 +37,21 @@ internal fun modelLabel(selection: ModelSelection?, catalog: List<ModelItem>): S
 
 internal fun senderLabel(model: String?): String = if (model.isNullOrBlank()) "Agent" else "Agent · $model"
 
-private val HINT_LINE = Regex("^\\s*model\\s*:\\s*(\\S.*?)\\s*$", RegexOption.IGNORE_CASE)
+private val HINT_LINE = Regex("^model\\s*:\\s*(\\S.*?)$", RegexOption.IGNORE_CASE)
 private val CLAUDE_ID = Regex("^claude-(opus|sonnet|haiku)-(\\d+)-(\\d+)$", RegexOption.IGNORE_CASE)
+private val DECORATION = Regex("^[\\s>*_#`\\-+]+|[\\s*_`]+$")
 private const val MAX_HINT = 120
 
-/** `Model: <name>` on the first line of a prompt. Known ids get a friendly name, anything else is kept as written. */
+/**
+ * `Model: <name>` on the first non-blank line of a prompt. Leading whitespace, CRLF, quote or list
+ * markers, and emphasis around the line (`**Model:** x`) are tolerated. Known ids get a friendly
+ * name, anything else is kept as written.
+ */
 internal fun promptModelHint(text: String?): String? {
-    val first = text?.lineSequence()?.firstOrNull() ?: return null
-    val name = HINT_LINE.matchEntire(first)?.groupValues?.get(1)?.take(MAX_HINT) ?: return null
+    val first = text?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: return null
+    val plain = first.replace(DECORATION, "").replace("**", "").replace("__", "")
+    val name = HINT_LINE.matchEntire(plain)?.groupValues?.get(1)
+        ?.replace(DECORATION, "")?.take(MAX_HINT)?.takeIf { it.isNotEmpty() } ?: return null
     return friendlyHintName(name)
 }
 
@@ -54,29 +61,52 @@ internal fun friendlyHintName(name: String): String {
     return "${family.lowercase().replaceFirstChar { it.uppercase() }} $major.$minor"
 }
 
-/** The hint from each run's first user message, keyed by run id. */
-internal fun runModelHints(lines: List<TranscriptLine>): Map<String, String> {
+private fun userRunId(line: TranscriptLine): String? =
+    line.runId?.takeIf { it.isNotBlank() }
+        ?: line.id.takeIf { it.startsWith("user-") && !it.startsWith("user-local-") }?.removePrefix("user-")
+
+private fun lineRun(line: TranscriptLine): String? =
+    line.runId?.takeIf { it.isNotBlank() }
+        ?: line.id.takeIf { it.startsWith("assistant-") || it.startsWith("think-") }
+            ?.substringAfter('-')
+
+/**
+ * The hint that applies to each non-user line. A run's own prompt hint (from Get Run or List Runs)
+ * wins, then the hint on the user message that opened the turn, then the most recent earlier hint.
+ * Conversation messages carry no run id, so the turn is found by position.
+ */
+internal fun lineModelHints(lines: List<TranscriptLine>, runHints: Map<String, String>): Map<String, String> {
     val out = HashMap<String, String>()
-    val seen = HashSet<String>()
+    var carried: String? = null
     for (line in lines) {
-        if (line.kind != "user") continue
-        val run = line.runId?.takeIf { it.isNotBlank() }
-            ?: line.id.takeIf { it.startsWith("user-") && !it.startsWith("user-local-") }?.removePrefix("user-")
-            ?: continue
-        if (!seen.add(run)) continue
-        promptModelHint(line.text)?.let { out[run] = it }
+        if (line.kind == "user") {
+            val own = userRunId(line)?.let { runHints[it] } ?: promptModelHint(line.text)
+            if (own != null) carried = own
+            continue
+        }
+        val hint = lineRun(line)?.let { runHints[it] } ?: carried
+        if (hint != null) out[line.id] = hint
     }
     return out
+}
+
+/** The hint for the run that is going now: its own prompt, else the latest hint in the thread. */
+internal fun currentModelHint(lines: List<TranscriptLine>, runHints: Map<String, String>, runId: String?): String? {
+    runId?.let { runHints[it] }?.let { return it }
+    val users = lines.filter { it.kind == "user" }
+    users.firstOrNull { runId != null && userRunId(it) == runId }?.let { promptModelHint(it.text) }?.let { return it }
+    return users.asReversed().firstNotNullOfOrNull { promptModelHint(it.text) }
+        ?: runHints.values.lastOrNull()
 }
 
 /** API field, then the model recorded at send time, then the prompt hint, then the agent's model. */
 internal fun runModelLabel(
     book: RunModelBook,
     runId: String?,
-    hints: Map<String, String>,
+    hint: String?,
     catalog: List<ModelItem>,
 ): String? {
     book.forRun(runId)?.let { return modelLabel(it, catalog) }
-    runId?.let { hints[it] }?.let { return it }
+    hint?.let { return it }
     return modelLabel(book.fallback(runId), catalog)
 }

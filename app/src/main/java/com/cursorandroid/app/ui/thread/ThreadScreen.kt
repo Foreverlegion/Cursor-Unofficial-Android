@@ -131,6 +131,7 @@ import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.data.repo.RunStopper
 import com.cursorandroid.app.data.repo.StopOutcome
 import com.cursorandroid.app.data.repo.TranscriptLine
+import com.cursorandroid.app.data.repo.visibleUserText
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.defaultParams
@@ -158,6 +159,7 @@ import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.ui.status.PlayColors
 import com.cursorandroid.app.ui.status.foreground
 import com.cursorandroid.app.ui.status.runIndicator
+import com.cursorandroid.app.ui.status.repoNameOnly
 import com.cursorandroid.app.ui.status.shortRepo
 import com.cursorandroid.app.ui.status.threadSubtitle
 import com.cursorandroid.app.ui.status.toolCallParts
@@ -177,6 +179,7 @@ import java.util.UUID
 
 private const val STOPPING = "Stopping..."
 private const val STOP_LOOKUP_LIMIT = 5
+private const val PROMPT_LOOKUPS = 6
 
 data class SnackEvent(val seq: Int, val text: String, val indefinite: Boolean = false)
 
@@ -704,10 +707,35 @@ class ThreadViewModel(
 
     private var probedPrompts = false
 
+    var runHints by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    private val promptChecked = HashSet<String>()
+
+    private fun noteRunPrompt(item: Run) {
+        val text = item.prompt?.text
+        if (text.isNullOrBlank()) return
+        promptChecked += item.id
+        val hint = promptModelHint(visibleUserText(text)) ?: return
+        if (runHints[item.id] != hint) runHints = runHints + (item.id to hint)
+    }
+
+    /** The run's own prompt carries the hint. List Runs may omit the prompt, so Get Run fills it in. */
+    suspend fun ensureRunHint(runId: String?) {
+        val id = runId?.takeIf { it.isNotBlank() && it !in promptChecked } ?: return
+        val full = runCatching { container.repo.getRun(agentId, id) }.getOrNull() ?: return
+        noteRunPrompt(full)
+        if (full.prompt?.text.isNullOrBlank()) promptChecked += id
+    }
+
     private suspend fun mergeServerRuns(): List<Run> {
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
         noteApiModels(runs = runs)
         if (runs.isNotEmpty()) runOrder = runsOldestFirst(runs).map { it.id }
+        runs.forEach { noteRunPrompt(it) }
+        runsOldestFirst(runs).asReversed()
+            .filter { it.id !in promptChecked }
+            .take(PROMPT_LOOKUPS)
+            .forEach { ensureRunHint(it.id) }
         var filled = runs.map { item -> hydrateRun(item, force = false) }
         filled.filter { it.isTerminal() }.forEach { settledRuns += it.id }
         var merged = mergeRunTranscript(lines, filled)
@@ -1164,9 +1192,9 @@ fun ThreadScreen(
     }
     val title = localTitle ?: vm.agent?.name ?: "Agent"
     val indicator = runState.indicator
-    val repoLabel = shortRepo(vm.run?.git?.branches?.firstOrNull()?.repoUrl)
-        ?: shortRepo(container.catalog.gitSnaps()[agentId]?.repoUrl)
-        ?: shortRepo(vm.agent?.repos?.firstOrNull()?.url)
+    val repoLabel = repoNameOnly(vm.run?.git?.branches?.firstOrNull()?.repoUrl)
+        ?: repoNameOnly(container.catalog.gitSnaps()[agentId]?.repoUrl)
+        ?: repoNameOnly(vm.agent?.repos?.firstOrNull()?.url)
         ?: vm.agent?.env?.name?.takeIf { it.isNotBlank() }
     val subtitle = threadSubtitle(repoLabel, indicator)
     val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
@@ -1186,8 +1214,15 @@ fun ThreadScreen(
     val rows = remember(shownLines, showTools, showThinking) {
         groupChatRows(shownLines, showTools, showThinking)
     }
-    val modelHints = remember(shownLines) { runModelHints(shownLines) }
-    val workingModel = runModelLabel(vm.modelBook, vm.run?.id, modelHints, models)
+    val runHints = vm.runHints
+    val lineHints = remember(shownLines, runHints) { lineModelHints(shownLines, runHints) }
+    val workingModel = runModelLabel(
+        vm.modelBook,
+        vm.run?.id,
+        currentModelHint(shownLines, runHints, vm.run?.id),
+        models,
+    )
+    LaunchedEffect(vm.run?.id) { vm.ensureRunHint(vm.run?.id) }
     val currentRunId = vm.run?.id
     val liveThink = remember(shownLines, currentRunId, working) {
         liveThinkingLine(shownLines, currentRunId, working)
@@ -1474,7 +1509,7 @@ fun ThreadScreen(
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
                                 modelText = if (row.line.kind == "assistant") {
-                                    runModelLabel(vm.modelBook, lineRunId(row.line), modelHints, models)
+                                    runModelLabel(vm.modelBook, lineRunId(row.line), lineHints[row.line.id], models)
                                 } else {
                                     null
                                 },

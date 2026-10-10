@@ -82,6 +82,12 @@ fun shortRepo(url: String?): String? {
     return path
 }
 
+/** Repo name only, without owner or namespace, for any forge (`git/legion/Fleet-Widget.git` -> `Fleet-Widget`). */
+fun repoNameOnly(url: String?): String? {
+    val path = shortRepo(url) ?: return null
+    return path.trimEnd('/').substringAfterLast('/').removeSuffix(".git").ifBlank { null }
+}
+
 fun agentCardSubtitle(envType: String?, envName: String?, repoUrl: String?): String {
     val env = envLabel(envType)
     val named = envName?.trim()?.takeIf { it.isNotEmpty() && !it.equals(env, ignoreCase = true) }
