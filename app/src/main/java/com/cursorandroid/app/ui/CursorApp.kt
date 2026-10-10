@@ -125,6 +125,7 @@ private fun CursorAppContent(
     val twoPane = windowSize.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
     var pane by rememberSaveable { mutableStateOf(Pane.Inbox) }
     var selectedId by rememberSaveable { mutableStateOf(launch.agentId) }
+    var linkNote by rememberSaveable { mutableStateOf<String?>(null) }
     var composeEnvType by rememberSaveable { mutableStateOf("cloud") }
     var composeEnvName by rememberSaveable { mutableStateOf<String?>(null) }
     var composeTick by rememberSaveable { mutableStateOf(0) }
@@ -143,6 +144,11 @@ private fun CursorAppContent(
         if (launch.agentId != null) {
             selectedId = launch.agentId
             pane = Pane.Inbox
+            linkNote = null
+        } else if (launch.invalidAgentLink) {
+            selectedId = null
+            pane = Pane.Inbox
+            linkNote = LaunchRequest.INVALID_AGENT_LINK
         }
         val hasShare = !launch.shareText.isNullOrBlank() || launch.shareUris.isNotEmpty()
         if (hasShare) {
@@ -195,6 +201,8 @@ private fun CursorAppContent(
                 InboxScreen(
                     container = container,
                     selectedId = selectedId,
+                    linkNote = linkNote,
+                    onDismissLinkNote = { linkNote = null },
                     onSelect = {
                         selectedId = it
                         pane = Pane.Inbox
@@ -286,6 +294,8 @@ private fun CursorAppContent(
                 else -> InboxScreen(
                     container = container,
                     selectedId = selectedId,
+                    linkNote = linkNote,
+                    onDismissLinkNote = { linkNote = null },
                     onSelect = { selectedId = it },
                     onCompose = { type, name ->
                         composeEnvType = type

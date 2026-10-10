@@ -7,16 +7,25 @@ import com.cursorandroid.app.data.repo.SafeLinks
 data class LaunchRequest(
     val nonce: Long = 0L,
     val agentId: String? = null,
+    val invalidAgentLink: Boolean = false,
     val compose: Boolean = false,
     val shareText: String? = null,
     val shareUris: List<Uri> = emptyList(),
     val openSettings: Boolean = false,
 ) {
     companion object {
+        const val INVALID_AGENT_LINK = "That agent link is not valid."
+
         fun from(intent: Intent?, nonce: Long): LaunchRequest {
             if (intent == null) return LaunchRequest(nonce)
-            val notifyId = intent.getStringExtra(com.cursorandroid.app.data.notify.RunNotifier.EXTRA_AGENT_ID)
-            val viewId = viewAgentId(intent)
+            val notifyId = SafeLinks.agentId(
+                intent.getStringExtra(com.cursorandroid.app.data.notify.RunNotifier.EXTRA_AGENT_ID),
+            )
+            val web = if (intent.action == Intent.ACTION_VIEW) {
+                SafeLinks.agentLink(intent.dataString)
+            } else {
+                null
+            }
             val shared = intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
             val text = if (shared) {
                 intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.ifBlank { null }
@@ -26,8 +35,9 @@ data class LaunchRequest(
             val uris = shareUris(intent)
             return LaunchRequest(
                 nonce = nonce,
-                agentId = SafeLinks.agentId(notifyId ?: viewId),
-                compose = shared && notifyId == null && viewId == null,
+                agentId = notifyId ?: web?.agentId,
+                invalidAgentLink = notifyId == null && web?.invalid == true,
+                compose = shared && notifyId == null && web?.agentId == null,
                 shareText = text,
                 shareUris = uris,
                 openSettings = intent.getBooleanExtra(
@@ -35,13 +45,6 @@ data class LaunchRequest(
                     false,
                 ),
             )
-        }
-
-        private fun viewAgentId(intent: Intent): String? {
-            if (intent.action != Intent.ACTION_VIEW) return null
-            val path = intent.data?.path.orEmpty()
-            val last = path.trimEnd('/').substringAfterLast('/')
-            return SafeLinks.agentId(last)
         }
 
         @Suppress("DEPRECATION")

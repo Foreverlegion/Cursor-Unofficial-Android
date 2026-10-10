@@ -101,6 +101,8 @@ import kotlinx.coroutines.launch
 fun InboxScreen(
     container: AppContainer,
     selectedId: String?,
+    linkNote: String? = null,
+    onDismissLinkNote: () -> Unit = {},
     onSelect: (String) -> Unit,
     onCompose: (envType: String, envName: String?) -> Unit,
     onSettings: () -> Unit,
@@ -262,6 +264,26 @@ fun InboxScreen(
                 .fillMaxSize()
                 .scaffoldBars(padding),
         ) {
+            if (!linkNote.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        linkNote,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    IconButton(onClick = onDismissLinkNote) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Dismiss")
+                    }
+                }
+            }
             NoticeTray(
                 notices = notices,
                 onOpen = { notice ->

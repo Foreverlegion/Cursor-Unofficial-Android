@@ -351,6 +351,14 @@ private fun ProfileTab(
         }
     }
     Section(
+        title = "Open Cursor agent links in this app",
+        detail = "https://cursor.com/agents links are not verified, so Android shows a chooser until you allow them under Open by default.",
+    ) {
+        TextButton(onClick = { SafeLinks.openSupportedLinks(context) }) {
+            Text("Open link settings")
+        }
+    }
+    Section(
         title = "Inbox tabs",
         detail = "Cloud always stays. Hide Pool or Remote if you do not use them. Hidden tabs fold back into Cloud.",
     ) {

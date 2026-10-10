@@ -62,8 +62,8 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="cursor.com" android:pathPrefix="/agents" />
-                <data android:scheme="https" android:host="www.cursor.com" android:pathPrefix="/agents" />
+                <data android:scheme="https" android:host="cursor.com" android:pathPrefix="/agents/" />
+                <data android:scheme="https" android:host="www.cursor.com" android:pathPrefix="/agents/" />
             </intent-filter>
         </activity>
     </application>

@@ -195,6 +195,29 @@ class CloudApiGapsTest {
     }
 
     @Test
+    fun apiModelsKeepJsonFieldNames() {
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true; explicitNulls = false }
+        val me = json.encodeToString(
+            MeResponse.serializer(),
+            MeResponse(apiKeyName = "cursor-android", userEmail = "a@b.c"),
+        )
+        assertTrue(me.contains("\"apiKeyName\""))
+        assertTrue(me.contains("\"userEmail\""))
+        val worker = json.encodeToString(
+            Worker.serializer(),
+            Worker(workerId = "w1", repoUrl = "https://github.com/acme/app"),
+        )
+        assertTrue(worker.contains("\"workerId\""))
+        assertTrue(worker.contains("\"repoUrl\""))
+        val created = json.encodeToString(
+            CreateAgentRequest.serializer(),
+            CreateAgentRequest(prompt = Prompt("hi"), name = "chat"),
+        )
+        assertTrue(created.contains("\"prompt\""))
+        assertTrue(created.contains("\"text\""))
+    }
+
+    @Test
     fun steerRequestKeepsPromptText() {
         val json = kotlinx.serialization.json.Json { encodeDefaults = true }
         val body = json.encodeToString(SteerRequest.serializer(), SteerRequest(Prompt("stay on the branch")))

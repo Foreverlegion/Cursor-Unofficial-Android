@@ -7,11 +7,29 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.URI
 
+data class AgentLink(
+    val agentId: String?,
+    val invalid: Boolean,
+)
+
 object SafeLinks {
     private val AGENT_ID = Regex("^bc-[A-Za-z0-9_-]{6,80}$")
+    private val AGENT_HOSTS = setOf("cursor.com", "www.cursor.com")
 
     fun agentId(raw: String?): String? {
         return raw?.trim()?.takeIf { AGENT_ID.matches(it) }
+    }
+
+    fun agentLink(raw: String?): AgentLink? {
+        val uri = httpsUri(raw) ?: return null
+        val host = uri.host?.trim()?.lowercase().orEmpty()
+        if (host !in AGENT_HOSTS) return null
+        val path = uri.path?.trimEnd('/').orEmpty()
+        if (!path.startsWith("/agents/") && path != "/agents") return null
+        val rest = path.removePrefix("/agents").removePrefix("/")
+        if (rest.isEmpty() || rest.contains('/')) return AgentLink(agentId = null, invalid = true)
+        val id = agentId(rest)
+        return if (id == null) AgentLink(agentId = null, invalid = true) else AgentLink(id, invalid = false)
     }
 
     fun httpsUri(raw: String?): URI? {
@@ -25,6 +43,20 @@ object SafeLinks {
     }
 
     fun isHttps(raw: String?): Boolean = httpsUri(raw) != null
+
+    @android.annotation.SuppressLint("UnsafeImplicitIntentLaunch")
+    fun openSupportedLinks(context: Context) {
+        val uri = Uri.parse("package:${context.packageName}")
+        val openByDefault = if (android.os.Build.VERSION.SDK_INT >= 31) {
+            Intent(android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS, uri)
+        } else {
+            null
+        }
+        val details = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri)
+        val primary = (openByDefault ?: details).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(primary) }.isSuccess) return
+        runCatching { context.startActivity(details.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
 
     @android.annotation.SuppressLint("UnsafeImplicitIntentLaunch")
     fun open(context: Context, raw: String?): Boolean {
