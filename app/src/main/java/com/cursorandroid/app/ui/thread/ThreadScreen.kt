@@ -177,6 +177,12 @@ class ThreadViewModel(
         private set
     var usage by mutableStateOf<AgentUsageResponse?>(null)
         private set
+    var pendingPrUrl by mutableStateOf<String?>(null)
+        private set
+
+    fun consumePendingPr() {
+        pendingPrUrl = null
+    }
     var behind by mutableStateOf<RepoBehind?>(null)
         private set
     var approvalPending by mutableStateOf(false)
@@ -225,6 +231,7 @@ class ThreadViewModel(
                             container.catalog.saveGit(
                                 GitSnap(agentId, git.branch, git.prUrl, git.repoUrl),
                             )
+                            container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
                         }
                         usage = container.repo.usage(agentId)
                         adoptRun(latest)
@@ -954,6 +961,13 @@ fun ThreadScreen(
     var modelMenu by remember { mutableStateOf(false) }
     val listState = remember(agentId) { LazyListState() }
     val context = LocalContext.current
+    val pendingPr = vm.pendingPrUrl
+    LaunchedEffect(pendingPr) {
+        if (!pendingPr.isNullOrBlank()) {
+            SafeLinks.open(context, pendingPr)
+            vm.consumePendingPr()
+        }
+    }
     val scope = rememberCoroutineScope()
     val working = showWorkBar(
         lines = vm.lines,

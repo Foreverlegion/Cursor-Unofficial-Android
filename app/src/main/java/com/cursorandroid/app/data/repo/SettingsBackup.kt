@@ -26,6 +26,8 @@ object SettingsBackup {
             defaultModel = container.store.defaultModel,
             showMicrophone = container.store.showMicrophone,
             githubToken = container.store.githubToken,
+            forges = container.store.forges(),
+            repoDefaults = container.store.repoDefaults(),
             inboxWorkingOnly = container.chats.inboxWorkingOnly,
             inboxShowArchived = container.chats.inboxShowArchived,
             inboxShowHidden = container.chats.inboxShowHidden,
@@ -69,6 +71,12 @@ object SettingsBackup {
         if (!snap.githubToken.isNullOrBlank()) {
             container.store.githubToken = snap.githubToken
         }
+        if (snap.forges.isNotEmpty()) {
+            container.store.saveForges(snap.forges)
+        }
+        if (snap.repoDefaults.isNotEmpty()) {
+            container.store.saveRepoDefaults(snap.repoDefaults)
+        }
         container.chats.inboxWorkingOnly = snap.inboxWorkingOnly
         container.chats.inboxShowArchived = snap.inboxShowArchived
         container.chats.inboxShowHidden = snap.inboxShowHidden
@@ -107,6 +115,8 @@ data class SettingsSnapshot(
     val defaultModel: String = "",
     val showMicrophone: Boolean = true,
     val githubToken: String? = null,
+    val forges: List<ForgeConnection> = emptyList(),
+    val repoDefaults: List<RepoDefault> = emptyList(),
     val inboxWorkingOnly: Boolean = false,
     val inboxShowArchived: Boolean = false,
     val inboxShowHidden: Boolean = false,

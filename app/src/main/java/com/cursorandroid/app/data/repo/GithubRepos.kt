@@ -57,7 +57,7 @@ object GithubRepos {
         description: String?,
     ): RepositoryItem {
         val key = token.trim()
-        if (key.isEmpty()) error("Add a GitHub token in Settings > Connections.")
+        if (key.isEmpty()) error("Add a GitHub forge in Settings > Connections.")
         val repoName = sanitizeName(name)
         if (repoName.isEmpty()) error("Repo name is empty")
         val request = Request.Builder()

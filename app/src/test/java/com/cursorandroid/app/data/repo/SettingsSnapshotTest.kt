@@ -28,6 +28,8 @@ class SettingsSnapshotTest {
         assertTrue(snap.groupByRepo)
         assertTrue(snap.compactCards)
         assertEquals(0, snap.hideFinishedDays)
+        assertTrue(snap.forges.isEmpty())
+        assertTrue(snap.repoDefaults.isEmpty())
     }
 
     @Test

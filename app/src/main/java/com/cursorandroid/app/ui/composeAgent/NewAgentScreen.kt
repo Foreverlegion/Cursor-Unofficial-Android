@@ -75,6 +75,8 @@ import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.DraftSubagent
 import com.cursorandroid.app.data.repo.GithubRepos
+import com.cursorandroid.app.data.repo.mcpServersFor
+import com.cursorandroid.app.data.repo.prefixPrompt
 import com.cursorandroid.app.data.repo.toApi
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
@@ -110,6 +112,11 @@ fun NewAgentScreen(
     var workOnBranch by remember { mutableStateOf(false) }
     var skipReviewer by remember { mutableStateOf(false) }
     var prUrl by remember { mutableStateOf("") }
+    var promptPrefix by remember { mutableStateOf("") }
+    var repoMcpIds by remember { mutableStateOf<List<String>?>(null) }
+    var openFinishedPr by remember { mutableStateOf(false) }
+    var seededRepo by remember { mutableStateOf<String?>(null) }
+    var heldBranchRepo by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("agent") }
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelId by remember { mutableStateOf("") }
@@ -153,6 +160,7 @@ fun NewAgentScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val providers = remember(repos) { listedProviders(repos) }
+    val createForge = container.store.forgeForLabel(provider)
     val providerRepos = remember(repos, provider) {
         repos.filter { provider.isBlank() || it.providerLabel() == provider }
     }
@@ -211,7 +219,49 @@ fun NewAgentScreen(
         }
         if (saved.modelParams.isNotEmpty()) modelParams = saved.modelParams
         subagents = saved.resolvedSubagents()
+        seededRepo = repoUrl
         draftReady = true
+    }
+
+    LaunchedEffect(repoUrl, draftReady) {
+        if (!draftReady) return@LaunchedEffect
+        val seed = seededRepo ?: return@LaunchedEffect
+        if (repoUrl == seed) return@LaunchedEffect
+        val defaults = container.store.repoDefault(repoUrl)
+        if (defaults == null) {
+            promptPrefix = ""
+            repoMcpIds = null
+            openFinishedPr = false
+            heldBranchRepo = ""
+            val fallback = container.store.defaultModel
+            if (fallback.isNotBlank()) {
+                modelId = fallback
+                modelParams = models.firstOrNull { it.id == fallback }?.defaultParams().orEmpty()
+            }
+            return@LaunchedEffect
+        }
+        if (defaults.modelId.isNotBlank()) {
+            modelId = defaults.modelId
+            modelParams = defaults.modelParams
+        }
+        if (defaults.branch.isNotBlank()) {
+            startingRef = defaults.branch
+            heldBranchRepo = repoUrl
+        } else {
+            heldBranchRepo = ""
+        }
+        defaults.autoCreatePr?.let { autoPr = it }
+        defaults.skipReviewer?.let { skipReviewer = it }
+        promptPrefix = defaults.promptPrefix
+        repoMcpIds = defaults.mcpIds
+        openFinishedPr = defaults.openFinishedPr
+        if (defaults.environmentName.isNotBlank()) {
+            envType = "cloud"
+            cloudFromEnv = true
+            envName = defaults.environmentName
+            selectedEnvId = defaults.environmentId.takeIf { it.isNotBlank() }
+                ?: savedEnvs.firstOrNull { it.name.equals(defaults.environmentName, ignoreCase = true) }?.id
+        }
     }
 
     LaunchedEffect(
@@ -321,7 +371,7 @@ fun NewAgentScreen(
     }
 
     LaunchedEffect(provider) {
-        if (provider != "GitHub") {
+        if (container.store.forgeForLabel(provider) == null) {
             createRepo = false
             newRepoName = ""
         }
@@ -343,22 +393,24 @@ fun NewAgentScreen(
             return@LaunchedEffect
         }
         loadingBranches = true
+        fun fillBranch(names: List<String>) {
+            val hold = heldBranchRepo == repoUrl && startingRef.isNotBlank()
+            if (hold) return
+            if (startingRef.isBlank() || (names.isNotEmpty() && startingRef !in names)) {
+                startingRef = selectedRepo?.defaultBranch?.takeIf { it in names }
+                    ?: names.firstOrNull().orEmpty()
+            }
+        }
         val cached = container.catalog.branches(repoUrl)
         if (cached.isNotEmpty()) {
             branches = cached
-            if (startingRef.isBlank() || startingRef !in cached) {
-                startingRef = selectedRepo?.defaultBranch?.takeIf { it in cached }
-                    ?: cached.firstOrNull().orEmpty()
-            }
+            fillBranch(cached)
         }
         val next = runCatching {
             container.repo.branches(repoUrl, selectedRepo?.defaultBranch)
         }.getOrDefault(cached)
         branches = next
-        if (startingRef.isBlank() || startingRef !in next) {
-            startingRef = selectedRepo?.defaultBranch?.takeIf { it in next }
-                ?: next.firstOrNull().orEmpty()
-        }
+        fillBranch(next)
         loadingBranches = false
     }
 
@@ -562,7 +614,7 @@ fun NewAgentScreen(
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(expanded = repoMenu, onDismissRequest = { repoMenu = false }) {
-                            if (provider == "GitHub") {
+                            if (createForge != null) {
                                 DropdownMenuItem(
                                     text = { Text("Create new repo") },
                                     onClick = {
@@ -615,7 +667,7 @@ fun NewAgentScreen(
                     )
                     if (createRepo && repoUrl.isBlank()) {
                         val sanitized = GithubRepos.sanitizeName(newRepoName)
-                        val hasToken = !container.store.githubToken.isNullOrBlank()
+                        val hasToken = createForge != null
                         OutlinedTextField(
                             value = newRepoName,
                             onValueChange = { newRepoName = it },
@@ -627,11 +679,11 @@ fun NewAgentScreen(
                                 Text(
                                     when {
                                         !hasToken ->
-                                            "Add a GitHub token with repo access in Settings > Connections."
+                                            "Add a forge with a token in Settings > Connections."
                                         sanitized.isNotBlank() && sanitized != newRepoName.trim() ->
                                             "Will be $sanitized"
                                         else ->
-                                            "Creates a private repo under the token account, with a README on main."
+                                            "Creates a private repo on ${createForge?.displayName() ?: "this forge"}."
                                     },
                                 )
                             },
@@ -1100,7 +1152,8 @@ fun NewAgentScreen(
                                 val subs = allSubs.toApi()
                                 val named = agentName.trim().takeIf { it.isNotEmpty() }
                                 if (envType == "cloud" && !cloudFromEnv && createRepo && repoUrl.isBlank()) {
-                                    val made = container.repo.createGithubRepo(
+                                    val made = container.repo.createOnForge(
+                                        providerLabel = provider,
                                         name = newRepoName,
                                         privateRepo = newRepoPrivate,
                                         description = null,
@@ -1170,7 +1223,7 @@ fun NewAgentScreen(
                                 }
                                 val picked = models.firstOrNull { it.id == modelId }
                                 val body = CreateAgentRequest(
-                                    prompt = Attachments.prompt(prompt, ready),
+                                    prompt = Attachments.prompt(prefixPrompt(promptPrefix, prompt), ready),
                                     model = picked?.selection(modelParams),
                                     name = named,
                                     env = when (envType) {
@@ -1191,10 +1244,13 @@ fun NewAgentScreen(
                                     autoCreatePR = if (envType == "cloud") autoPr else null,
                                     skipReviewerRequest = if (envType == "cloud" && autoPr && skipReviewer) true else null,
                                     mode = mode,
-                                    mcpServers = container.store.mcpServers(),
+                                    mcpServers = mcpServersFor(container.store.storedMcps(), repoMcpIds),
                                     customSubagents = subs,
                                 )
                                 val created = container.repo.createAgent(body)
+                                if (openFinishedPr) {
+                                    container.chats.setOpenFinishedPr(created.agent.id, true)
+                                }
                                 if (named != null) {
                                     container.chats.setTitle(created.agent.id, named)
                                 }
@@ -1253,7 +1309,7 @@ fun NewAgentScreen(
                                 envName.trim().isNotBlank()
                             } else if (createRepo && repoUrl.isBlank()) {
                                 GithubRepos.sanitizeName(newRepoName).isNotBlank() &&
-                                    !container.store.githubToken.isNullOrBlank()
+                                    createForge != null
                             } else {
                                 repoUrl.isNotBlank() && (startingRef.isNotBlank() || prUrl.isNotBlank())
                             }

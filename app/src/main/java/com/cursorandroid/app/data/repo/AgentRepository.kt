@@ -405,13 +405,37 @@ class AgentRepository(
         return created
     }
 
+    suspend fun createOnForge(
+        providerLabel: String,
+        name: String,
+        privateRepo: Boolean,
+        description: String?,
+    ): RepositoryItem {
+        val forge = store.forgeForLabel(providerLabel)
+            ?: error("Add a forge for $providerLabel in Settings > Connections.")
+        if (forge.provider == com.cursorandroid.app.data.repo.ForgeKind.GITHUB.id) {
+            return createGithubRepo(name, privateRepo, description)
+        }
+        val created = ForgeClient.createRepo(forge, name, privateRepo, description)
+        val next = (listOf(created) + catalog.repos())
+            .distinctBy { it.url.trim().lowercase().removeSuffix(".git") }
+            .sortedBy { it.displayName().lowercase() }
+        catalog.saveRepos(next)
+        val branch = created.defaultBranch?.takeIf { it.isNotBlank() } ?: "main"
+        catalog.saveBranches(created.url, listOf(branch))
+        return created
+    }
+
     suspend fun branches(repoUrl: String, defaultBranch: String? = null): List<String> {
         if (catalog.branchesFresh(repoUrl)) {
             return catalog.branches(repoUrl)
         }
         val fromApi = runCatching { wrap { api.repositoryBranches(repoUrl).names() } }.getOrDefault(emptyList())
-        val fromHost = if (fromApi.isEmpty()) publicBranches(repoUrl) else emptyList()
-        val names = (fromApi + fromHost + listOfNotNull(defaultBranch) + DEFAULT_BRANCHES)
+        val fromForge = store.forgeForRepo(repoUrl)?.let { forge ->
+            runCatching { ForgeClient.listBranches(forge, repoUrl) }.getOrDefault(emptyList())
+        }.orEmpty()
+        val fromHost = if (fromApi.isEmpty() && fromForge.isEmpty()) publicBranches(repoUrl) else emptyList()
+        val names = (fromForge + fromApi + fromHost + listOfNotNull(defaultBranch) + DEFAULT_BRANCHES)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .distinct()

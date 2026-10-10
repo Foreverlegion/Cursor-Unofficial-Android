@@ -179,6 +179,8 @@ fun InboxScreen(
                 scope.launch {
                     runCatching { container.repo.refreshGitSnaps(latest) }
                     git = container.catalog.gitSnaps()
+                    val url = container.chats.claimFinishedPr(git)
+                    if (!url.isNullOrBlank()) SafeLinks.open(context, url)
                 }
                 val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
                 computers = next

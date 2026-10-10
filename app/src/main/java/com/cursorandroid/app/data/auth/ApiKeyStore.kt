@@ -6,11 +6,23 @@ import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.cursorandroid.app.data.api.McpServer
+import com.cursorandroid.app.data.repo.ForgeConnection
+import com.cursorandroid.app.data.repo.RepoDefault
 import com.cursorandroid.app.data.repo.StoredMcpServer
+import com.cursorandroid.app.data.repo.decodeForges
+import com.cursorandroid.app.data.repo.decodeRepoDefaults
 import com.cursorandroid.app.data.repo.decodeStoredMcps
+import com.cursorandroid.app.data.repo.encodeForges
+import com.cursorandroid.app.data.repo.encodeRepoDefaults
 import com.cursorandroid.app.data.repo.encodeStoredMcps
+import com.cursorandroid.app.data.repo.findRepoDefault
+import com.cursorandroid.app.data.repo.forgeForLabel
+import com.cursorandroid.app.data.repo.forgeForRepo
+import com.cursorandroid.app.data.repo.migrateForges
 import com.cursorandroid.app.data.repo.migrateLegacyMcp
 import com.cursorandroid.app.data.repo.storedMcpsToApi
+import com.cursorandroid.app.data.repo.upsertPublicGithub
+import com.cursorandroid.app.data.repo.upsertRepoDefault
 
 class ApiKeyStore(context: Context) {
     private val app = context.applicationContext
@@ -23,6 +35,7 @@ class ApiKeyStore(context: Context) {
 
     init {
         recover()
+        runCatching { forges() }
     }
 
     var apiKey: String?
@@ -120,10 +133,52 @@ class ApiKeyStore(context: Context) {
         }
 
     var githubToken: String?
-        get() = readSecret(GITHUB)
+        get() = forges().firstOrNull { it.provider == com.cursorandroid.app.data.repo.ForgeKind.GITHUB.id }?.token
+            ?.takeIf { it.isNotBlank() }
+            ?: readSecret(GITHUB)
         set(value) {
-            writeSecret(GITHUB, value?.trim()?.takeIf { it.isNotEmpty() })
+            val token = value?.trim()?.takeIf { it.isNotEmpty() }
+            val current = decodeForges(readSecret(FORGES))
+            val base = if (current.isEmpty()) migrateForges(emptyList(), readSecret(GITHUB)) else current
+            saveForges(upsertPublicGithub(base, token))
         }
+
+    fun forges(): List<ForgeConnection> {
+        val stored = decodeForges(readSecret(FORGES))
+        val legacy = readSecret(GITHUB)
+        val migrated = migrateForges(stored, legacy)
+        if (migrated != stored) saveForges(migrated)
+        return if (migrated != stored) migrated else stored
+    }
+
+    fun saveForges(items: List<ForgeConnection>) {
+        val next = items.take(20)
+        writeSecret(FORGES, if (next.isEmpty()) null else encodeForges(next))
+        val github = next.firstOrNull { it.provider == com.cursorandroid.app.data.repo.ForgeKind.GITHUB.id }?.token
+        writeSecret(GITHUB, github?.trim()?.takeIf { it.isNotEmpty() })
+    }
+
+    fun forgeForRepo(repoUrl: String): ForgeConnection? = forgeForRepo(forges(), repoUrl)
+
+    fun forgeForLabel(label: String): ForgeConnection? = forgeForLabel(forges(), label)
+
+    fun repoDefaults(): List<RepoDefault> = decodeRepoDefaults(readSecret(REPO_DEFAULTS))
+
+    fun repoDefault(url: String): RepoDefault? = findRepoDefault(repoDefaults(), url)
+
+    fun saveRepoDefaults(items: List<RepoDefault>) {
+        val next = items.take(50)
+        writeSecret(REPO_DEFAULTS, if (next.isEmpty()) null else encodeRepoDefaults(next))
+    }
+
+    fun saveRepoDefault(item: RepoDefault) {
+        saveRepoDefaults(upsertRepoDefault(repoDefaults(), item))
+    }
+
+    fun deleteRepoDefault(url: String) {
+        val key = com.cursorandroid.app.data.api.repoKey(url)
+        saveRepoDefaults(repoDefaults().filterNot { com.cursorandroid.app.data.api.repoKey(it.repoUrl) == key })
+    }
 
     fun storedMcps(): List<StoredMcpServer> {
         val stored = decodeStoredMcps(readSecret(MCP_LIST))
@@ -176,6 +231,7 @@ class ApiKeyStore(context: Context) {
     fun clear() {
         writeSecret(KEY, null)
         writeSecret(GITHUB, null)
+        writeSecret(FORGES, null)
     }
 
     private fun readKey(): String? = readSecret(KEY)
@@ -242,6 +298,8 @@ class ApiKeyStore(context: Context) {
         private const val PREFS_NOTIFY = "cursor_prefs"
         private const val KEY = "api_key"
         private const val GITHUB = "github_token"
+        private const val FORGES = "forges"
+        private const val REPO_DEFAULTS = "repo_defaults"
         private const val NOTIFY = "notify_on_complete"
         private const val NOTIFY_APPROVAL = "notify_on_approval"
         private const val SHOW_TOOLS = "show_tool_calls"

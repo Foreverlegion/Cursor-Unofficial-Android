@@ -152,6 +152,18 @@ class LocalChatStore(context: Context) {
             durable.edit { putStringSet(COLLAPSED_REPOS, value.toHashSet()) }
         }
 
+    fun setOpenFinishedPr(agentId: String, open: Boolean) {
+        update(agentId) { it.copy(openFinishedPr = open) }
+    }
+
+    fun claimFinishedPr(snaps: Map<String, com.cursorandroid.app.data.api.GitSnap>): String? {
+        val hit = loadAll().entries.firstOrNull { (id, meta) ->
+            meta.openFinishedPr && !snaps[id]?.prUrl.isNullOrBlank()
+        } ?: return null
+        update(hit.key) { it.copy(openFinishedPr = false) }
+        return snaps[hit.key]?.prUrl?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     fun setPinned(agentId: String, pinned: Boolean) {
         update(agentId) {
             it.copy(
@@ -217,4 +229,5 @@ data class ChatMeta(
     val ignoredRemoteSha: String? = null,
     val pinned: Boolean = false,
     val pinnedAt: Long = 0L,
+    val openFinishedPr: Boolean = false,
 )

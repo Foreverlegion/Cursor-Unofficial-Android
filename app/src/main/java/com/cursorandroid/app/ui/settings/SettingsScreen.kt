@@ -79,9 +79,11 @@ private enum class SettingsPage(val title: String, val summary: String) {
     Home("Settings", ""),
     Appearance("Appearance", "Theme color"),
     AgentList("Agent list", "Grouping, cards, and filters"),
+    RepoDefaults("Repo defaults", "Model, branch, and PR per repo"),
     Chats("Chats & threads", "Tools, thinking, and model"),
     Notifications("Notifications", "Run alerts and battery"),
-    Connections("Connections", "Links, MCP, and GitHub"),
+    Connections("Connections", "Links, MCP, and forges"),
+    Forges("Forges", "Git hosts and tokens"),
     Backup("Backup", "Export and import"),
     Feedback("Feedback", "Bugs and feature requests"),
     About("About & account", "Stats, usage, and sign out"),
@@ -96,11 +98,11 @@ private const val BATTERY_INFO =
 private const val ALERT_INFO = "Alerts stay on this phone. Cursor has no mobile push, so a finish notice can lag in the background."
 private const val MCP_INFO =
     "Saved on this phone. Enabled servers are attached to new agents and follow-ups. The agent calls their tools."
-private const val GITHUB_INFO = "Needed to create a GitHub repo from New agent, and to read a private GitHub repo."
+private const val GITHUB_INFO = "Forge tokens stay encrypted on this phone. They list branches and create repos from New agent. A GitHub token already saved on this phone is kept as a GitHub forge."
 private const val REMOTE_INFO =
     "On the PC: Cursor 3.9.8 or newer, Agents Window, Settings, Agents, Remote Control, then /remote-control. Local remotes show under Remote. To start new work on a named machine, use New agent, Machine."
 private const val BACKUP_INFO =
-    "Export includes the API key, GitHub token, theme, inbox tabs, alerts, model, MCP, chat names, favorites, pins, drafts, and cached transcripts. Keep the file private."
+    "Export includes the API key, forge tokens, repo defaults, theme, inbox tabs, alerts, model, MCP, chat names, favorites, pins, drafts, and cached transcripts. Keep the file private."
 private const val KEY_INFO =
     "The key stays on this phone across updates, stored encrypted. Uninstall wipes it unless you import an export."
 private const val USAGE_INFO =
@@ -119,6 +121,15 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var page by remember { mutableStateOf(SettingsPage.Home) }
+    var under by remember { mutableStateOf(SettingsPage.Home) }
+    fun closePage() {
+        if (page == SettingsPage.Home) {
+            onBack()
+        } else {
+            page = under
+            under = SettingsPage.Home
+        }
+    }
     var info by remember { mutableStateOf<String?>(null) }
     var overview by remember { mutableStateOf<AccountOverview?>(null) }
     var overviewError by remember { mutableStateOf<String?>(null) }
@@ -215,7 +226,7 @@ fun SettingsScreen(
     }
 
     BackHandler(enabled = page != SettingsPage.Home || showBack) {
-        if (page != SettingsPage.Home) page = SettingsPage.Home else onBack()
+        closePage()
     }
 
     val shownInfo = info
@@ -268,11 +279,7 @@ fun SettingsScreen(
                 title = { Text(page.title) },
                 navigationIcon = {
                     if (page != SettingsPage.Home || showBack) {
-                        IconButton(
-                            onClick = {
-                                if (page != SettingsPage.Home) page = SettingsPage.Home else onBack()
-                            },
-                        ) {
+                        IconButton(onClick = { closePage() }) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
                         }
                     }
@@ -294,7 +301,7 @@ fun SettingsScreen(
             ) {
                 when (page) {
                     SettingsPage.Home -> {
-                        SettingsPage.entries.filter { it != SettingsPage.Home }.forEach { item ->
+                        SettingsPage.entries.filter { it != SettingsPage.Home && it != SettingsPage.Forges }.forEach { item ->
                             SettingsLinkRow(item.title, item.summary) { page = item }
                         }
                     }
@@ -522,26 +529,20 @@ fun SettingsScreen(
                             }
                             McpListSection(container.store)
                         }
-                        HorizontalDivider()
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("GitHub token", style = MaterialTheme.typography.bodyLarge)
-                                    Text(
-                                        "Needed to create a repo from New agent",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                IconButton(onClick = { info = GITHUB_INFO }) {
-                                    Icon(Icons.Outlined.Info, contentDescription = "About GitHub token")
-                                }
-                            }
-                            GithubTokenField(container)
-                        }
+                        val forgeCount = container.store.forges().size
+                        SettingsLinkRow(
+                            title = "Forges",
+                            summary = if (forgeCount == 0) "Add GitHub or another host" else "$forgeCount connected",
+                            info = GITHUB_INFO,
+                            onInfo = { info = it },
+                            onClick = {
+                                under = SettingsPage.Connections
+                                page = SettingsPage.Forges
+                            },
+                        )
                     }
+                    SettingsPage.Forges -> ForgesPage(container)
+                    SettingsPage.RepoDefaults -> RepoDefaultsPage(container)
                     SettingsPage.Backup -> {
                         Column(Modifier.padding(horizontal = 16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -784,7 +785,7 @@ private fun SettingsChoiceRow(
 }
 
 @Composable
-private fun SettingsLinkRow(
+internal fun SettingsLinkRow(
     title: String,
     summary: String,
     info: String? = null,
@@ -824,7 +825,7 @@ private fun SettingsLinkRow(
 }
 
 @Composable
-private fun SettingsStaticRow(title: String, summary: String) {
+internal fun SettingsStaticRow(title: String, summary: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
