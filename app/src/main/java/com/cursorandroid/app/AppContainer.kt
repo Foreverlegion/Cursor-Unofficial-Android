@@ -18,6 +18,8 @@ import com.cursorandroid.app.data.repo.DemoCursorApi
 import com.cursorandroid.app.data.repo.DemoSession
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
+import com.cursorandroid.app.data.repo.ForgeSyncStore
+import com.cursorandroid.app.data.repo.ForgeSyncer
 import com.cursorandroid.app.data.repo.InboxRefreshHub
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
@@ -25,7 +27,11 @@ import com.cursorandroid.app.data.repo.RunSettleHub
 import com.cursorandroid.app.data.repo.MachineStore
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.settleAgents
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
+import java.io.File
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -54,6 +60,12 @@ class AppContainer(context: Context) {
     }
     val notifier = RunNotifier(context.applicationContext, store, notices, chats, runSettle, inboxRefresh)
     val feedback = FeedbackStore(context)
+    val forgeSync = ForgeSyncer(
+        store = ForgeSyncStore(File(context.applicationContext.filesDir, "forge-sync")),
+        forges = { store.forges() },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        enabled = { !store.demoMode },
+    )
 
     fun renameChat(agentId: String, name: String) {
         val title = name.trim()

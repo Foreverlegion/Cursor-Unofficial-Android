@@ -7,6 +7,8 @@ import androidx.work.WorkManager
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
+import com.cursorandroid.app.data.repo.FORGE_SYNC_START_MS
+import com.cursorandroid.app.data.repo.ForgeSyncScheduler
 
 class CursorAndroidApp : Application() {
     lateinit var container: AppContainer
@@ -21,6 +23,9 @@ class CursorAndroidApp : Application() {
             RunWatchScheduler.resume(this)
         }
         FeedbackReplyScheduler.sync(this)
+        container.forgeSync.requestLoad()
+        container.forgeSync.requestDue(FORGE_SYNC_START_MS)
+        ForgeSyncScheduler.sync(this, container.store.forges())
         // Older builds enqueued these. Cancel them so they stop pinging.
         val work = WorkManager.getInstance(this)
         work.cancelUniqueWork("install-pulse")
