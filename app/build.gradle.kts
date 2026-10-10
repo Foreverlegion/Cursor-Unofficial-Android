@@ -39,8 +39,8 @@ android {
         applicationId = "com.cursorandroid.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 127
-        versionName = "1.0.27"
+        versionCode = 128
+        versionName = "1.0.28"
         buildConfigField(
             "String",
             "APP_ISSUES_TOKEN",
@@ -66,7 +66,8 @@ android {
             }
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             if (canSignStable) {
                 signingConfig = signingConfigs.getByName("stable")
             }
@@ -82,6 +83,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -91,6 +96,27 @@ android {
         abortOnError = true
         textReport = true
         htmlReport = true
+    }
+}
+
+tasks.register<Exec>("checkReleaseReflectiveCtors") {
+    group = "verification"
+    description = "Fail if R8 drops constructors Room, startup, or WorkManager call by reflection."
+    dependsOn("minifyReleaseWithR8")
+    workingDir = rootProject.projectDir
+    inputs.file(layout.buildDirectory.file("outputs/mapping/release/mapping.txt"))
+    commandLine(
+        "bash",
+        "scripts/check-r8-reflective-ctors.sh",
+        "app/build/outputs/mapping/release/mapping.txt",
+    )
+}
+
+gradle.projectsEvaluated {
+    listOf("assembleRelease", "bundleRelease").forEach { name ->
+        tasks.named(name).configure {
+            dependsOn(tasks.named("checkReleaseReflectiveCtors"))
+        }
     }
 }
 
@@ -126,6 +152,13 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.datastore.preferences)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation(libs.androidx.work.testing)
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

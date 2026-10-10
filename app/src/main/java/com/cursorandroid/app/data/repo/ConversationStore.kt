@@ -104,6 +104,19 @@ class ConversationStore(context: Context) {
         batch.forEach { (id, snap) -> writeFile(id, snap) }
     }
 
+    fun settle(agentId: String, runId: String, status: String) {
+        rememberLive(agentId, status)
+        val pendingSnap = synchronized(pending) { pending[agentId] }
+        val snap = pendingSnap ?: loadSnap(agentId)
+        if (snap.runId != runId || snap.runStatus.equals(status, ignoreCase = true)) return
+        val next = snap.copy(runStatus = status)
+        if (pendingSnap != null) {
+            synchronized(pending) { pending[agentId] = next }
+        } else {
+            writeFile(agentId, next)
+        }
+    }
+
     fun liveStatuses(): Map<String, String> = synchronized(live) { live.toMap() }
 
     fun liveStatus(agentId: String): String? = synchronized(live) { live[agentId] }
@@ -420,16 +433,16 @@ internal fun visibleUserText(text: String): String {
     return out
 }
 
+internal fun runsOldestFirst(runs: List<Run>): List<Run> {
+    return if (runs.all { !it.createdAt.isNullOrBlank() }) runs.sortedBy { it.createdAt } else runs.asReversed()
+}
+
 internal fun mergeRunTranscript(
     lines: List<TranscriptLine>,
     runs: List<Run>,
 ): List<TranscriptLine> {
     if (runs.isEmpty()) return coalesceTranscript(lines)
-    val ordered = if (runs.all { !it.createdAt.isNullOrBlank() }) {
-        runs.sortedBy { it.createdAt }
-    } else {
-        runs.asReversed()
-    }
+    val ordered = runsOldestFirst(runs)
     val extra = ArrayList<TranscriptLine>(ordered.size * 2)
     for (run in ordered) {
         val user = visibleUserText(run.prompt?.text.orEmpty())
@@ -447,6 +460,9 @@ internal fun mergeRunTranscript(
 internal fun mergeConversationTranscript(
     local: List<TranscriptLine>,
     messages: List<ConversationMessage>,
+    settledRuns: Set<String> = emptySet(),
+    runOrder: List<String> = emptyList(),
+    liveRunId: String? = null,
 ): List<TranscriptLine> {
     if (messages.isEmpty()) return coalesceTranscript(local)
     val used = BooleanArray(local.size)
@@ -487,20 +503,119 @@ internal fun mergeConversationTranscript(
         )
     }
 
+    val order = RunOrder(runOrder, liveRunId)
+    val prefix = ArrayList<TranscriptLine>()
     local.forEachIndexed { i, line ->
         if (used[i]) return@forEachIndexed
+        val old = order.isOld(line)
         when (line.kind) {
-            "user" -> out += line
+            "user" -> if (old) placeOlder(out, prefix, line, order) else out += line
             "assistant" -> {
                 val text = line.text.trim()
-                if (text.isNotEmpty() && out.none { it.kind == "assistant" && it.text.trim() == text }) {
-                    insertAfterRun(out, line)
+                val settled = line.runId in settledRuns || order.runOf(line) in settledRuns
+                val unseen = out.none { it.kind == "assistant" && it.text.trim() == text }
+                if (text.isNotEmpty() && unseen && !(settled && coveredByServer(text, out))) {
+                    if (old) placeOlder(out, prefix, line, order) else insertAtTurnEnd(out, line)
                 }
             }
-            else -> insertAfterRun(out, line)
+            else -> if (old) placeOlder(out, prefix, line, order) else insertAfterRun(out, line)
         }
     }
+    out.addAll(0, prefix.sortedBy { order.rank(order.runOf(it)) ?: -1 })
     return coalesceTranscript(out)
+}
+
+/** Run order from the run list. Only the live run may sit at the tail of the transcript. */
+internal class RunOrder(runOrder: List<String>, private val liveRunId: String?) {
+    private val ranks = runOrder.withIndex().associate { it.value to it.index }
+    private val enabled = runOrder.isNotEmpty() || liveRunId != null
+    private val newest: String? = liveRunId ?: runOrder.lastOrNull()
+
+    fun rank(run: String?): Int? = run?.let { ranks[it] }
+
+    fun runOf(line: TranscriptLine): String? {
+        line.runId?.takeIf { it.isNotBlank() }?.let { return it }
+        return runIdFromId(line)?.takeIf { it in ranks || it == liveRunId }
+    }
+
+    fun isOld(line: TranscriptLine): Boolean {
+        if (!enabled) return false
+        val run = runOf(line) ?: return false
+        return run != newest
+    }
+
+    fun effective(lines: List<TranscriptLine>): List<String?> {
+        var turn: String? = null
+        return lines.map { line ->
+            val own = runOf(line)
+            if (line.kind == "user") {
+                turn = own
+                own
+            } else {
+                own ?: turn
+            }
+        }
+    }
+}
+
+/**
+ * A line from an older run that the server window does not list. It goes with its own turn, else
+ * before the first turn of a newer run, else at the top, but never at the tail.
+ */
+private fun placeOlder(
+    out: MutableList<TranscriptLine>,
+    prefix: MutableList<TranscriptLine>,
+    line: TranscriptLine,
+    order: RunOrder,
+) {
+    val run = order.runOf(line)
+    val effective = order.effective(out)
+    if (line.kind != "user") {
+        val last = effective.indexOfLast { it == run }
+        if (last >= 0) {
+            out.add(last + 1, line)
+            return
+        }
+    }
+    val mine = order.rank(run)
+    if (mine != null) {
+        val next = effective.indexOfFirst { e -> order.rank(e)?.let { it > mine } == true }
+        if (next >= 0) {
+            out.add(next, line)
+            return
+        }
+    }
+    prefix += line
+}
+
+private val WHITESPACE = Regex("\\s+")
+
+private fun squash(text: String): String = text.replace(WHITESPACE, " ").trim()
+
+/**
+ * A streamed bubble glues every assistant segment of a run into one line. Once the run is over
+ * and the server already lists those segments as messages, the glued copy is a stale duplicate.
+ */
+internal fun coveredByServer(text: String, out: List<TranscriptLine>): Boolean {
+    val whole = squash(text)
+    if (whole.isEmpty()) return true
+    val parts = out.filter { it.kind == "assistant" }.map { squash(it.text) }.filter { it.isNotEmpty() }
+    if (parts.any { it.contains(whole) }) return true
+    var rest = whole
+    for (part in parts.sortedByDescending { it.length }) rest = rest.replace(part, " ")
+    return rest.isBlank()
+}
+
+/** A streamed tail is the newest text of its turn: after every server message up to the next user turn. */
+private fun insertAtTurnEnd(out: MutableList<TranscriptLine>, line: TranscriptLine) {
+    val run = line.runId?.takeIf { it.isNotBlank() }
+    val user = if (run == null) -1 else out.indexOfFirst { it.kind == "user" && (it.runId == run || it.id == "user-$run") }
+    if (user < 0) {
+        out += line
+        return
+    }
+    val next = (user + 1 until out.size).firstOrNull { out[it].kind == "user" } ?: out.size
+    out.add(next, line)
 }
 
 private fun insertAfterRun(out: MutableList<TranscriptLine>, line: TranscriptLine) {

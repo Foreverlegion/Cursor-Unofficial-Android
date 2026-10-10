@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +56,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +67,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.ui.status.PlayColors
 import com.cursorandroid.app.ui.status.StatusPill
@@ -75,7 +83,14 @@ import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.repo.RepoGroupPrefs
+import com.cursorandroid.app.data.repo.markLocalActive
+import com.cursorandroid.app.data.repo.settleAgents
 import com.cursorandroid.app.data.api.Computer
+import com.cursorandroid.app.data.repo.machineKey
+import com.cursorandroid.app.data.repo.visibleMachines
+import com.cursorandroid.app.ui.MachineActionsDialog
+import com.cursorandroid.app.ui.MachineMenuRow
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.isArchived
 import com.cursorandroid.app.data.api.isLiveStatus
@@ -84,13 +99,23 @@ import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.mergeInboxAgents
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.visibleInbox
-import com.cursorandroid.app.data.notify.Notice
+import com.cursorandroid.app.data.notify.unreadCount
 import com.cursorandroid.app.data.notify.RunWatchScheduler
+import com.cursorandroid.app.data.notify.VisibleAgent
+import com.cursorandroid.app.data.repo.InboxPollPolicy
+import com.cursorandroid.app.data.repo.RefreshReason
+import com.cursorandroid.app.data.repo.applyRunChecks
+import com.cursorandroid.app.data.repo.inboxRefreshLoop
+import com.cursorandroid.app.data.repo.runCheckTargets
+import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.repo.ChatMeta
 import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -101,23 +126,60 @@ import kotlinx.coroutines.launch
 fun InboxScreen(
     container: AppContainer,
     selectedId: String?,
+    linkNote: String? = null,
+    onDismissLinkNote: () -> Unit = {},
     onSelect: (String) -> Unit,
     onCompose: (envType: String, envName: String?) -> Unit,
     onSettings: () -> Unit,
     showEnvs: Boolean = true,
     showRemote: Boolean = true,
+    settingsEpoch: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     var items by remember { mutableStateOf(container.catalog.agents().sortedByDescending { it.sortKey() }) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
+    var machinePrefs by remember { mutableStateOf(container.machines.prefs()) }
+    var machineAction by remember { mutableStateOf<Computer?>(null) }
+    val shownComputers = remember(computers, machinePrefs) {
+        visibleMachines(computers, machinePrefs, container.machines.now())
+    }
+    machineAction?.let { target ->
+        MachineActionsDialog(
+            name = target.name,
+            onHide = {
+                container.machines.hide(target.machineKey(), target.name)
+                machinePrefs = container.machines.prefs()
+                machineAction = null
+            },
+            onDelete = {
+                container.machines.forget(target.machineKey(), target.name)
+                machinePrefs = container.machines.prefs()
+                machineAction = null
+            },
+            onDismiss = { machineAction = null },
+        )
+    }
     var metas by remember { mutableStateOf(container.chats.snapshot()) }
     val notices by container.notices.feed.collectAsStateWithLifecycle()
-    var git by remember { mutableStateOf(container.catalog.gitSnaps()) }
+    fun loadGit(): Map<String, GitSnap> = withRepoFallbacks(
+        container.catalog.gitSnaps(),
+        container.catalog.agentRepos(),
+        container.chats.snapshot().mapValues { it.value.repoUrl },
+    )
+    var git by remember { mutableStateOf(loadGit()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
     var workingOnly by remember { mutableStateOf(container.chats.inboxWorkingOnly) }
+    var groupByRepo by remember { mutableStateOf(container.chats.groupByRepo) }
+    var compactCards by remember { mutableStateOf(container.chats.compactCards) }
+    var hideFinishedDays by remember { mutableIntStateOf(container.chats.hideFinishedDays) }
+    var collapsedRepos by remember { mutableStateOf(container.chats.collapsedRepos) }
+    var groupPrefs by remember { mutableStateOf(container.chats.repoGroupPrefs) }
+    var cloudFilter by remember { mutableStateOf(CloudFilter.All) }
+    var revealFinished by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
     val hiddenIds = metas.filter { it.value.hidden }.keys
     var nextCursor by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<AgentSummary?>(null) }
@@ -131,7 +193,8 @@ fun InboxScreen(
     val context = LocalContext.current
     var reloadJob by remember { mutableStateOf<Job?>(null) }
 
-    fun applyAgents(agents: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
+    fun applyAgents(incoming: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
+        val agents = settleAgents(incoming, container.runSettle.settled.value, container.runSettle.liveRuns.value)
         items = agents
         nextCursor = cursor
         container.catalog.saveAgents(agents)
@@ -160,10 +223,14 @@ fun InboxScreen(
                 metas = container.chats.snapshot()
                 scope.launch {
                     runCatching { container.repo.refreshGitSnaps(latest) }
-                    git = container.catalog.gitSnaps()
+                    runCatching { container.repo.resolveAgentRepos(latest) }
+                    git = loadGit()
+                    val url = container.chats.claimFinishedPr(git)
+                    if (!url.isNullOrBlank()) SafeLinks.open(context, url)
                 }
                 val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
                 computers = next
+                machinePrefs = container.machines.prefs()
                 container.catalog.saveComputers(next)
                 var cursor = page.nextCursor
                 while (!cursor.isNullOrBlank()) {
@@ -194,39 +261,175 @@ fun InboxScreen(
         }
     }
 
+    val settledRuns by container.runSettle.settled.collectAsStateWithLifecycle()
+    val localActive by container.runSettle.localActive.collectAsStateWithLifecycle()
+    val liveRuns by container.runSettle.liveRuns.collectAsStateWithLifecycle()
+    LaunchedEffect(settledRuns, liveRuns) {
+        val next = settleAgents(items, settledRuns, liveRuns)
+        if (next !== items) {
+            items = next
+            container.catalog.saveAgents(next)
+            live = container.conversations.liveStatuses()
+            container.notices.reconcile(next, live, container.chatTitles())
+        }
+    }
+
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifeState by lifecycle.currentStateAsState()
+    LaunchedEffect(settingsEpoch) {
+        showArchived = container.chats.inboxShowArchived
+        showHidden = container.chats.inboxShowHidden
+        workingOnly = container.chats.inboxWorkingOnly
+        groupByRepo = container.chats.groupByRepo
+        compactCards = container.chats.compactCards
+        hideFinishedDays = container.chats.hideFinishedDays
+        collapsedRepos = container.chats.collapsedRepos
+        groupPrefs = container.chats.repoGroupPrefs
+        revealFinished = false
+    }
     LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
     }
+    val newestNotice = notices.maxByOrNull { it.at }?.id
+    val noticeAtOpen = remember { newestNotice }
+    LaunchedEffect(newestNotice) {
+        if (newestNotice != null && newestNotice != noticeAtOpen) {
+            container.inboxRefresh.request(RefreshReason.Notification)
+        }
+    }
     LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
         if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
-        while (true) {
-            delay(5_000)
-            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
-            if (reloadJob?.isActive == true && refreshing) continue
-            try {
-                val page = container.repo.listAgentsPage(includeArchived = true)
-                val incoming = container.repo.hydrateStatuses(page.entries())
-                val agents = mergeInboxAgents(items, incoming)
-                applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
-                metas = container.chats.snapshot()
-                val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
-                if (next != null) {
-                    computers = next
-                    container.catalog.saveComputers(next)
-                }
-            } catch (_: Exception) {
-            }
+        val hub = container.inboxRefresh
+        hub.drain()
+        VisibleAgent.inboxPolling(true)
+        var machinesAt = 0L
+        try {
+            inboxRefreshLoop(
+                first = RefreshReason.Resume,
+                intervalMs = { failures ->
+                    InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures)
+                },
+                now = System::currentTimeMillis,
+                awaitTrigger = { hub.await(it) },
+                pause = { delay(it) },
+                poll = poll@{ reason, tick ->
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
+                    if (reloadJob?.isActive == true && refreshing) return@poll true
+                    val page = container.repo.listAgentsPage(includeArchived = true)
+                    val fresh = page.entries()
+                    val checks = runCheckTargets(items, fresh, container.runSettle.settled.value)
+                    val full = InboxPollPolicy.fullHydrate(reason, tick)
+                    val only = if (full) null else {
+                        (fresh.filter { isLiveStatus(it.status) } + checks).map { it.id }.toSet()
+                    }
+                    val incoming = container.repo.hydrateStatuses(fresh, only = only)
+                    if (checks.isNotEmpty()) {
+                        val runs = coroutineScope {
+                            checks.map { agent ->
+                                async { agent to runCatching { container.repo.getRun(agent.id, agent.latestRunId!!) }.getOrNull() }
+                            }.awaitAll()
+                        }
+                        applyRunChecks(container.runSettle, runs)
+                    }
+                    val agents = mergeInboxAgents(items, incoming)
+                    applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
+                    if (reason != RefreshReason.Tick || tick % 2 == 0) {
+                        container.runSettle.sweep(
+                            items,
+                            onSettled = { agent, run ->
+                                container.notifier.notifyIfNeeded(agent.id, agent.name, run.id, run.status, run.result)
+                            },
+                        ) { agentId, runId ->
+                            runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
+                        }
+                    }
+                    metas = container.chats.snapshot()
+                    runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                    git = loadGit()
+                    val clock = System.currentTimeMillis()
+                    if (InboxPollPolicy.machinesDue(reason, machinesAt, clock)) {
+                        machinesAt = clock
+                        val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
+                        if (next != null) {
+                            computers = next
+                            machinePrefs = container.machines.prefs()
+                            container.catalog.saveComputers(next)
+                        }
+                    }
+                    true
+                },
+            )
+        } finally {
+            VisibleAgent.inboxPolling(false)
         }
+    }
+
+    var noticesOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(noticesOpen, notices) {
+        if (noticesOpen) container.notices.markAllRead()
     }
 
     val approvalIds = notices.mapNotNull { notice ->
         notice.agentId.takeIf { notice.kind == "approval" }
     }.toSet()
+    val pendingArchive = remember { HashSet<String>() }
+    fun archiveWithUndo(agent: AgentSummary) {
+        if (!pendingArchive.add(agent.id)) return
+        val name = container.chats.displayName(agent.id, agent.name)
+        val previous = agent.status
+        scope.launch {
+            val ok = runCatching { container.repo.archive(agent.id) }.isSuccess
+            if (!ok) {
+                pendingArchive.remove(agent.id)
+                snackbar.showSnackbar("Couldn't archive")
+                return@launch
+            }
+            items = items.map {
+                if (it.id == agent.id) it.copy(archived = true, status = "ARCHIVED") else it
+            }
+            container.catalog.saveAgents(items)
+            val result = snackbar.showSnackbar(
+                message = "$name archived",
+                actionLabel = "Undo",
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                runCatching { container.repo.unarchive(agent.id) }
+                items = items.map {
+                    if (it.id == agent.id) it.copy(archived = false, status = previous) else it
+                }
+                container.catalog.saveAgents(items)
+            }
+            pendingArchive.remove(agent.id)
+        }
+    }
+
+    if (noticesOpen) {
+        NoticePopup(
+            notices = notices,
+            onOpen = { notice ->
+                container.notices.dismiss(notice.id)
+                container.notifier.rememberDismissed(notice.id)
+                noticesOpen = false
+                onSelect(notice.agentId)
+            },
+            onDismiss = { id ->
+                container.notices.dismiss(id)
+                container.notifier.rememberDismissed(id)
+            },
+            onClearAll = {
+                val ids = notices.map { it.id }
+                container.notices.dismissAll()
+                ids.forEach { container.notifier.rememberDismissed(it) }
+            },
+            onClose = { noticesOpen = false },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
+        snackbarHost = { SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -238,6 +441,10 @@ fun InboxScreen(
                     Text("Agents", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 },
                 actions = {
+                    NoticeBell(
+                        unread = unreadCount(notices),
+                        onClick = { noticesOpen = true },
+                    )
                     Button(
                         onClick = { onCompose(tab.composeTarget(), null) },
                         shape = RoundedCornerShape(50),
@@ -262,23 +469,26 @@ fun InboxScreen(
                 .fillMaxSize()
                 .scaffoldBars(padding),
         ) {
-            NoticeTray(
-                notices = notices,
-                onOpen = { notice ->
-                    container.notices.dismiss(notice.id)
-                    container.notifier.rememberDismissed(notice.id)
-                    onSelect(notice.agentId)
-                },
-                onDismiss = { id ->
-                    container.notices.dismiss(id)
-                    container.notifier.rememberDismissed(id)
-                },
-                onClear = {
-                    val ids = notices.map { it.id }
-                    container.notices.dismissAll()
-                    ids.forEach { container.notifier.rememberDismissed(it) }
-                },
-            )
+            if (!linkNote.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        linkNote,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    IconButton(onClick = onDismissLinkNote) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Dismiss")
+                    }
+                }
+            }
             InboxTabStrip(
                 tabs = tabs,
                 selected = tab,
@@ -289,13 +499,14 @@ fun InboxScreen(
                 onRefresh = { reload(showSpinner = true) },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                val listed = items.visibleInbox(showArchived, hiddenIds, showHidden).forInboxTab(tab, tabs)
+                val listed = markLocalActive(items, localActive).visibleInbox(showArchived, hiddenIds, showHidden).forInboxTab(tab, tabs)
                 run {
                     AgentList(
                         items = listed,
                         approvalIds = approvalIds,
-                        computers = if (tab == InboxTab.Remote) computers else emptyList(),
+                        computers = if (tab == InboxTab.Remote) shownComputers else emptyList(),
                         onSelectComputer = { onCompose("machine", it.name) },
+                        onComputerMenu = { machineAction = it },
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
@@ -358,15 +569,7 @@ fun InboxScreen(
                             ids.forEach { container.chats.setHidden(it, hidden) }
                             metas = container.chats.snapshot()
                         },
-                        onArchive = { agent ->
-                            scope.launch {
-                                runCatching { container.repo.archive(agent.id) }
-                                items = items.map {
-                                    if (it.id == agent.id) it.copy(archived = true, status = "ARCHIVED") else it
-                                }
-                                container.catalog.saveAgents(items)
-                            }
-                        },
+                        onArchive = { agent -> archiveWithUndo(agent) },
                         onUnarchive = { agent ->
                             scope.launch {
                                 runCatching { container.repo.unarchive(agent.id) }
@@ -395,6 +598,29 @@ fun InboxScreen(
                         },
                         onDelete = { deleteIds = listOf(it.id) },
                         onDeleteIds = { deleteIds = it.toList() },
+                        cloud = tab == InboxTab.Agents,
+                        groupByRepo = groupByRepo,
+                        compactCards = compactCards,
+                        hideFinishedDays = hideFinishedDays,
+                        cloudFilter = cloudFilter,
+                        onCloudFilter = { cloudFilter = it },
+                        revealFinished = revealFinished,
+                        onRevealFinished = { revealFinished = !revealFinished },
+                        groupPrefs = groupPrefs,
+                        onGroupPrefs = { next ->
+                            groupPrefs = next
+                            container.chats.repoGroupPrefs = next
+                        },
+                        collapsedRepos = collapsedRepos,
+                        onToggleRepo = { key ->
+                            collapsedRepos = if (key in collapsedRepos) collapsedRepos - key else collapsedRepos + key
+                            container.chats.collapsedRepos = collapsedRepos
+                        },
+                        onTogglePin = { id ->
+                            val pinned = metas[id]?.pinned == true
+                            container.chats.setPinned(id, !pinned)
+                            metas = container.chats.snapshot()
+                        },
                     )
                 }
             }
@@ -440,66 +666,14 @@ fun InboxScreen(
     }
 }
 
-@Composable
-private fun NoticeTray(
-    notices: List<Notice>,
-    onOpen: (Notice) -> Unit,
-    onDismiss: (String) -> Unit,
-    onClear: () -> Unit,
-) {
-    if (notices.isEmpty()) return
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .heightIn(max = 220.dp)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Notifications", style = MaterialTheme.typography.labelLarge)
-            TextButton(onClick = onClear) { Text("Clear") }
-        }
-        notices.forEach { notice ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpen(notice) }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(notice.title, style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        notice.body,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when (notice.kind) {
-                            "working", "approval" -> MaterialTheme.colorScheme.primary
-                            "error" -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-                IconButton(onClick = { onDismiss(notice.id) }) {
-                    Icon(Icons.Outlined.Close, contentDescription = "Dismiss")
-                }
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AgentList(
     items: List<AgentSummary>,
     approvalIds: Set<String>,
     computers: List<Computer>,
     onSelectComputer: (Computer) -> Unit,
+    onComputerMenu: (Computer) -> Unit,
     selectedId: String?,
     metas: Map<String, ChatMeta>,
     git: Map<String, GitSnap>,
@@ -529,6 +703,19 @@ private fun AgentList(
     onArchiveIds: (Collection<String>, Boolean) -> Unit,
     onDelete: (AgentSummary) -> Unit,
     onDeleteIds: (Collection<String>) -> Unit,
+    cloud: Boolean,
+    groupByRepo: Boolean,
+    compactCards: Boolean,
+    hideFinishedDays: Int,
+    cloudFilter: CloudFilter,
+    onCloudFilter: (CloudFilter) -> Unit,
+    revealFinished: Boolean,
+    onRevealFinished: () -> Unit,
+    groupPrefs: RepoGroupPrefs,
+    onGroupPrefs: (RepoGroupPrefs) -> Unit,
+    collapsedRepos: Set<String>,
+    onToggleRepo: (String) -> Unit,
+    onTogglePin: (String) -> Unit,
 ) {
     var selecting by remember { mutableStateOf(false) }
     var checkedIds by remember { mutableStateOf(setOf<String>()) }
@@ -556,7 +743,7 @@ private fun AgentList(
     val newest = items
         .map { overlayWorking(it, live) }
         .filter { agent ->
-            if (workingOnly && !agent.isWorking()) return@filter false
+            if (!cloud && workingOnly && !agent.isWorking()) return@filter false
             if (needle.isBlank()) return@filter true
             val title = metas[agent.id]?.title
             val snap = git[agent.id]
@@ -572,8 +759,31 @@ private fun AgentList(
             ).any { it.contains(needle, ignoreCase = true) }
         }
         .sortedByDescending { it.sortKey() }
-    val favorites = newest.filter { it.id in favoriteIds }
-    val rest = newest.filter { it.id !in favoriteIds }
+    val arranged = if (cloud) {
+        arrangeCloudAgents(
+            agents = newest,
+            git = git,
+            pinnedAt = metas.filterValues { it.pinned }.mapValues { it.value.pinnedAt },
+            favoriteIds = favoriteIds,
+            approvalIds = approvalIds,
+            filter = cloudFilter,
+            hideFinishedDays = hideFinishedDays,
+            revealFinished = revealFinished,
+            groupByRepo = groupByRepo,
+            nowMillis = System.currentTimeMillis(),
+            groupPrefs = groupPrefs,
+        )
+    } else {
+        null
+    }
+    val favorites = arranged?.favorites ?: newest.filter { it.id in favoriteIds }
+    val rest = arranged?.rest ?: newest.filter { it.id !in favoriteIds }
+    val cloudEmpty = arranged != null &&
+        arranged.pinned.isEmpty() &&
+        arranged.groups.isEmpty() &&
+        arranged.favorites.isEmpty() &&
+        arranged.rest.isEmpty() &&
+        arranged.hiddenFinished == 0
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
@@ -588,25 +798,41 @@ private fun AgentList(
                         label = { Text("Search chats") },
                         singleLine = true,
                     )
-                    Row(
-                        modifier = Modifier.padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        FilterChip(
-                            selected = workingOnly,
-                            onClick = { onWorkingOnly(!workingOnly) },
-                            label = { Text("Working") },
-                        )
-                        FilterChip(
-                            selected = showArchived,
-                            onClick = { onShowArchived(!showArchived) },
-                            label = { Text("Archived") },
-                        )
-                        FilterChip(
-                            selected = showHidden,
-                            onClick = { onShowHidden(!showHidden) },
-                            label = { Text("Hidden") },
-                        )
+                    if (cloud) {
+                        FlowRow(
+                            modifier = Modifier.padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CloudFilter.entries.forEach { item ->
+                                FilterChip(
+                                    selected = cloudFilter == item,
+                                    onClick = { onCloudFilter(item) },
+                                    label = { Text(item.label) },
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            FilterChip(
+                                selected = workingOnly,
+                                onClick = { onWorkingOnly(!workingOnly) },
+                                label = { Text("Working") },
+                            )
+                            FilterChip(
+                                selected = showArchived,
+                                onClick = { onShowArchived(!showArchived) },
+                                label = { Text("Archived") },
+                            )
+                            FilterChip(
+                                selected = showHidden,
+                                onClick = { onShowHidden(!showHidden) },
+                                label = { Text("Hidden") },
+                            )
+                        }
                     }
                 }
                 if (selecting) {
@@ -709,10 +935,14 @@ private fun AgentList(
                     )
                 }
             }
-            newest.isEmpty() && computers.isEmpty() && !refreshing -> {
+            (if (cloud) cloudEmpty else newest.isEmpty()) && computers.isEmpty() && !refreshing -> {
                 item(key = "empty") {
                     Text(
-                        inboxEmptyCopy(showHidden, showArchived, workingOnly, query),
+                        if (cloud) {
+                            cloudEmptyCopy(cloudFilter, query, showHidden, showArchived)
+                        } else {
+                            inboxEmptyCopy(showHidden, showArchived, workingOnly, query)
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(24.dp),
                     )
@@ -722,9 +952,71 @@ private fun AgentList(
                 if (computers.isNotEmpty()) {
                     item(key = "machines") { SectionLabel("Machines") }
                     items(computers, key = { "pc:${it.workerId ?: it.name}" }) { computer ->
-                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
+                        ComputerRow(
+                            computer = computer,
+                            onClick = { onSelectComputer(computer) },
+                            onMenu = { onComputerMenu(computer) },
+                        )
                     }
                 }
+                if (arranged != null) {
+                    cloudAgentBlocks(
+                        arrangement = arranged,
+                        groupActions = RepoGroupActions(
+                            manualOrder = groupPrefs.order.isNotEmpty(),
+                            onRename = { key, name ->
+                                onGroupPrefs(groupPrefs.withStyle(key) { it.copy(name = name) })
+                            },
+                            onFavorite = { key ->
+                                onGroupPrefs(groupPrefs.withStyle(key) { it.copy(favorite = !it.favorite) })
+                            },
+                            onColor = { key, color ->
+                                onGroupPrefs(groupPrefs.withStyle(key) { it.copy(color = color) })
+                            },
+                            onOrder = { keys -> onGroupPrefs(groupPrefs.withOrder(keys)) },
+                            onResetOrder = { onGroupPrefs(groupPrefs.resetOrder()) },
+                        ),
+                        groupByRepo = groupByRepo,
+                        collapsed = collapsedRepos,
+                        onToggleGroup = onToggleRepo,
+                        revealFinished = revealFinished,
+                        onToggleReveal = onRevealFinished,
+                    ) { agent ->
+                        SwipeArchiveRow(
+                            enabled = !selecting && !agent.isArchived(),
+                            onArchive = { onArchive(agent) },
+                        ) {
+                            AgentRow(
+                                agent = agent,
+                                title = metas[agent.id]?.title,
+                                git = if (compactCards) null else git[agent.id],
+                                needsApproval = agent.id in approvalIds,
+                                selected = agent.id == selectedId,
+                                favorite = agent.id in favoriteIds,
+                                hidden = metas[agent.id]?.hidden == true,
+                                muted = metas[agent.id]?.muted == true,
+                                selecting = selecting,
+                                checked = agent.id in checkedIds,
+                                compact = compactCards,
+                                pinned = metas[agent.id]?.pinned == true,
+                                longPressMenu = true,
+                                onClick = {
+                                    if (selecting) toggleChecked(agent.id) else onSelect(agent.id)
+                                },
+                                onLongClick = { startSelecting(agent.id) },
+                                onToggleFavorite = { onToggleFavorite(agent.id) },
+                                onToggleMute = { onToggleMute(agent.id) },
+                                onTogglePin = { onTogglePin(agent.id) },
+                                onRename = { onRename(agent) },
+                                onHide = { onHide(agent) },
+                                onUnhide = { onUnhide(agent) },
+                                onArchive = { onArchive(agent) },
+                                onUnarchive = { onUnarchive(agent) },
+                                onDelete = { onDelete(agent) },
+                            )
+                        }
+                    }
+                } else {
                 if (favorites.isNotEmpty()) {
                     item(key = "hdr-fav") {
                         SectionLabel("Favorites")
@@ -784,6 +1076,7 @@ private fun AgentList(
                         onUnarchive = { onUnarchive(agent) },
                         onDelete = { onDelete(agent) },
                     )
+                }
                 }
             }
         }
@@ -934,16 +1227,10 @@ private fun RemotePane(
 private fun ComputerRow(
     computer: Computer,
     onClick: () -> Unit,
+    onMenu: () -> Unit = {},
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    MachineMenuRow(onClick = onClick, onLongClick = onMenu, onMore = onMenu) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(computer.name, style = MaterialTheme.typography.titleSmall)
             Text(
                 buildString {
@@ -963,7 +1250,7 @@ private fun ComputerRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AgentRow(
+internal fun AgentRow(
     agent: AgentSummary,
     title: String?,
     git: GitSnap?,
@@ -974,10 +1261,14 @@ private fun AgentRow(
     muted: Boolean,
     selecting: Boolean,
     checked: Boolean,
+    compact: Boolean = false,
+    pinned: Boolean = false,
+    longPressMenu: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleMute: () -> Unit,
+    onTogglePin: () -> Unit = {},
     onRename: () -> Unit,
     onHide: () -> Unit,
     onUnhide: () -> Unit,
@@ -990,15 +1281,23 @@ private fun AgentRow(
     val context = LocalContext.current
     val archived = agent.isArchived()
     val indicator = runIndicator(agent.status, approvalPending = needsApproval)
-    val subtitle = buildString {
-        append(agentCardSubtitle(agent.env?.type, agent.env?.name, git?.repoUrl))
-        if (muted) append(" · muted")
-        git?.line()?.takeIf { it.isNotBlank() }?.let {
-            append(" · ")
-            append(it)
+    val subtitle = if (compact) {
+        if (muted) "Muted" else ""
+    } else {
+        buildString {
+            append(agentCardSubtitle(agent.env?.type, agent.env?.name, git?.repoUrl))
+            if (muted) append(" · muted")
+            git?.line()?.takeIf { it.isNotBlank() }?.let {
+                append(" · ")
+                append(it)
+            }
         }
     }
     val whenLabel = relativeAge(agent.updatedAt ?: agent.createdAt)
+    val compactTime = listOfNotNull(
+        whenLabel.takeIf { it.isNotBlank() },
+        "Muted".takeIf { muted },
+    ).joinToString(" · ")
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1009,36 +1308,64 @@ private fun AgentRow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(if (selected) Color(0xFF24302E) else PlayColors.Card)
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        if (longPressMenu) menu = true else onLongClick()
+                    },
+                )
+                .padding(start = 14.dp, end = 6.dp, top = if (compact) 6.dp else 10.dp, bottom = if (compact) 6.dp else 10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             if (selecting) {
                 Checkbox(checked = checked, onCheckedChange = null)
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-                if (subtitle.isNotBlank()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        name,
+                        modifier = Modifier.weight(1f),
+                        style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = if (compact) 1 else 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StatusPill(indicator)
+                    val lineTime = if (compact) compactTime else whenLabel
+                    if (lineTime.isNotBlank()) {
+                        Text(
+                            lineTime,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = PlayColors.Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (!compact && subtitle.isNotBlank()) {
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = PlayColors.Muted,
-                    )
-                }
-                if (whenLabel.isNotBlank()) {
-                    Text(
-                        whenLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PlayColors.Muted,
+                        modifier = Modifier.padding(end = 8.dp),
                     )
                 }
                 val prUrl = git?.prUrl
-                if (!prUrl.isNullOrBlank()) {
+                if (!compact && !prUrl.isNullOrBlank()) {
                     Text(
                         "Open PR",
                         style = MaterialTheme.typography.labelSmall,
@@ -1049,14 +1376,24 @@ private fun AgentRow(
                     )
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                StatusPill(indicator)
-                IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
-                }
-            }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            if (longPressMenu) {
+                DropdownMenuItem(
+                    text = { Text(if (pinned) "Unpin" else "Pin") },
+                    onClick = {
+                        menu = false
+                        onTogglePin()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Select") },
+                    onClick = {
+                        menu = false
+                        onLongClick()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text(if (favorite) "Unfavorite" else "Favorite") },
                 onClick = {

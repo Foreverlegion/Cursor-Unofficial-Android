@@ -21,6 +21,7 @@ object ApprovalStreamHub {
         val app = context.applicationContext as? CursorAndroidApp ?: return
         if (!app.container.store.notifyOnApproval) return
         if (runId.isBlank() || runId in closed || jobs[runId]?.isActive == true) return
+        if (VisibleAgent.isOpenInForeground(agentId)) return
         jobs[runId] = scope.launch {
             try {
                 app.container.repo.stream(agentId, runId)
@@ -42,6 +43,7 @@ object ApprovalStreamHub {
                             }
                             is StreamEvent.Result -> {
                                 if (isTerminalStatus(event.status)) {
+                                    app.container.runSettle.publish(agentId, runId, event.status, event.text)
                                     close(runId)
                                     detach(app, runId)
                                 }

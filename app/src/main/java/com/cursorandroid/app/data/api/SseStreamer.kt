@@ -41,6 +41,7 @@ class SseStreamer(
     private val client: OkHttpClient,
     private val json: Json,
     private val baseUrl: String = "https://api.cursor.com/",
+    private val probe: ((type: String, data: String) -> Unit)? = null,
 ) {
     fun stream(agentId: String, runId: String, apiKey: String, lastEventId: String? = null): Flow<StreamEvent> {
         return callbackFlow {
@@ -65,6 +66,7 @@ class SseStreamer(
                     type: String?,
                     data: String,
                 ) {
+                    probe?.invoke(type.orEmpty(), data)
                     val event = parse(id, type, data) ?: return
                     trySend(event)
                     if (event is StreamEvent.Done) {

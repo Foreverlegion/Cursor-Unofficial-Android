@@ -14,6 +14,7 @@ class SettingsSnapshotTest {
         assertEquals(false, meta.hidden)
         assertEquals(false, meta.favorite)
         assertEquals(false, meta.muted)
+        assertEquals(false, meta.pinned)
     }
 
     @Test
@@ -24,6 +25,11 @@ class SettingsSnapshotTest {
         assertEquals(0xFFF54E00.toInt(), snap.themeColor)
         assertTrue(snap.showInboxEnvs)
         assertTrue(snap.showInboxRemote)
+        assertTrue(snap.groupByRepo)
+        assertTrue(snap.compactCards)
+        assertEquals(0, snap.hideFinishedDays)
+        assertTrue(snap.forges.isEmpty())
+        assertTrue(snap.repoDefaults.isEmpty())
     }
 
     @Test

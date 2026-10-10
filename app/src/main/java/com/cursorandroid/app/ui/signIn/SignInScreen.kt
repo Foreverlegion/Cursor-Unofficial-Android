@@ -220,6 +220,7 @@ fun SignInScreen(
             ) {
                 Text("Enter demo")
             }
+            com.cursorandroid.app.ui.settings.SecureStorageNotice(container.store)
             Text(
                 "Or paste a key from cursor.com/dashboard/api",
                 style = MaterialTheme.typography.bodySmall,

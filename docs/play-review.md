@@ -25,4 +25,4 @@ Testers join in the open. Do not use an email list.
 
 In Play Console, use Open testing, or Closed testing set to open join (anyone with the link). Testers opt in from that public link. No invite list.
 
-Upload the signed 1.0.27 (127) app bundle to that track.
+Upload the signed 1.0.28 (128) app bundle to that track.

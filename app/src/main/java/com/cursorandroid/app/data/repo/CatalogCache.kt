@@ -6,6 +6,7 @@ import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
+import com.cursorandroid.app.data.api.MeResponse
 import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.api.WorkerPool
 import kotlinx.serialization.encodeToString
@@ -69,6 +70,37 @@ class CatalogCache(
         val next = gitSnaps().toMutableMap()
         next[snap.agentId] = snap
         active().edit { putString("git", json.encodeToString(next)) }
+    }
+
+    fun me(): MeResponse? {
+        val raw = active().getString("me", null) ?: return null
+        return runCatching { json.decodeFromString<MeResponse>(raw) }.getOrNull()
+    }
+
+    fun saveMe(value: MeResponse) {
+        active().edit { putString("me", json.encodeToString(value)) }
+    }
+
+    fun usage(): UsageSample? {
+        val raw = active().getString("usage_sample", null) ?: return null
+        return runCatching { json.decodeFromString<UsageSample>(raw) }.getOrNull()
+    }
+
+    fun saveUsage(value: UsageSample) {
+        active().edit { putString("usage_sample", json.encodeToString(value)) }
+    }
+
+    /** Repo URL per agent from its Get Agent record. A blank value means the agent has no repo. */
+    fun agentRepos(): Map<String, String> {
+        val raw = active().getString("agent_repos", null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    fun saveAgentRepos(found: Map<String, String>) {
+        if (found.isEmpty()) return
+        val next = agentRepos().toMutableMap()
+        next.putAll(found)
+        active().edit { putString("agent_repos", json.encodeToString(next)) }
     }
 
     fun removeGit(agentId: String) {

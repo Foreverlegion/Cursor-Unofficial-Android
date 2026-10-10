@@ -50,7 +50,6 @@ import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.cloudCreateTarget
 import com.cursorandroid.app.data.api.gitHost
 import com.cursorandroid.app.data.api.gitPath
-import com.cursorandroid.app.data.api.listedProviders
 import com.cursorandroid.app.data.api.machineCreateTarget
 import com.cursorandroid.app.data.api.matchRepo
 import com.cursorandroid.app.data.api.prettyProvider
@@ -75,12 +74,25 @@ import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.DraftSubagent
 import com.cursorandroid.app.data.repo.GithubRepos
+import com.cursorandroid.app.data.repo.mcpServersFor
+import com.cursorandroid.app.data.repo.prefixPrompt
 import com.cursorandroid.app.data.repo.toApi
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.VoiceButton
+import com.cursorandroid.app.data.repo.ForgeClient
+import com.cursorandroid.app.data.repo.machineKey
+import com.cursorandroid.app.data.repo.visibleMachines
+import com.cursorandroid.app.ui.MachineActionsDialog
+import com.cursorandroid.app.ui.MachineMenuRow
+import com.cursorandroid.app.data.repo.filterRepos
+import com.cursorandroid.app.data.repo.forgeForLabel
+import com.cursorandroid.app.data.repo.forgeSupportsRepoList
+import com.cursorandroid.app.data.repo.mergeRepos
+import com.cursorandroid.app.data.repo.sourceLabels
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,6 +113,11 @@ fun NewAgentScreen(
     var envName by remember { mutableStateOf(initialEnvName.orEmpty()) }
     var repos by remember { mutableStateOf(container.catalog.repos()) }
     var provider by remember { mutableStateOf("") }
+    var forges by remember { mutableStateOf(container.store.forges()) }
+    var forgeRepos by remember { mutableStateOf<List<RepositoryItem>>(emptyList()) }
+    var forgePage by remember { mutableStateOf(1) }
+    var forgeMore by remember { mutableStateOf(false) }
+    var forgeLoading by remember { mutableStateOf(false) }
     var repoUrl by remember { mutableStateOf("") }
     var startingRef by remember { mutableStateOf("") }
     var branches by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -110,6 +127,11 @@ fun NewAgentScreen(
     var workOnBranch by remember { mutableStateOf(false) }
     var skipReviewer by remember { mutableStateOf(false) }
     var prUrl by remember { mutableStateOf("") }
+    var promptPrefix by remember { mutableStateOf("") }
+    var repoMcpIds by remember { mutableStateOf<List<String>?>(null) }
+    var openFinishedPr by remember { mutableStateOf(false) }
+    var seededRepo by remember { mutableStateOf<String?>(null) }
+    var heldBranchRepo by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("agent") }
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelId by remember { mutableStateOf("") }
@@ -117,10 +139,11 @@ fun NewAgentScreen(
     var modelMenu by remember { mutableStateOf(false) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var computerMenu by remember { mutableStateOf(false) }
+    var machinePrefs by remember { mutableStateOf(container.machines.prefs()) }
+    var machineAction by remember { mutableStateOf<Computer?>(null) }
     var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var pools by remember { mutableStateOf(container.catalog.pools()) }
     var poolMenu by remember { mutableStateOf(false) }
-    var providerMenu by remember { mutableStateOf(false) }
     var repoMenu by remember { mutableStateOf(false) }
     var branchMenu by remember { mutableStateOf(false) }
     var repoQuery by remember { mutableStateOf("") }
@@ -152,16 +175,34 @@ fun NewAgentScreen(
     var draftReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val providers = remember(repos) { listedProviders(repos) }
-    val providerRepos = remember(repos, provider) {
-        repos.filter { provider.isBlank() || it.providerLabel() == provider }
+    val shownComputers = remember(computers, machinePrefs) {
+        visibleMachines(computers, machinePrefs, container.machines.now())
     }
-    val selectedRepo = remember(repos, repoUrl) { matchRepo(repos, repoUrl) }
+    val allRepos = remember(repos, forgeRepos) { mergeRepos(repos, forgeRepos) }
+    val providers = remember(repos, forges) { sourceLabels(repos, forges) }
+    val createForge = remember(forges, provider) { forgeForLabel(forges, provider) }
+    val listsRepos = createForge != null && forgeSupportsRepoList(createForge)
+    val providerRepos = remember(allRepos, provider) {
+        allRepos.filter { provider.isBlank() || it.providerLabel() == provider }
+    }
+    val selectedRepo = remember(allRepos, repoUrl) { matchRepo(allRepos, repoUrl) }
     fun adoptRepo(url: String) {
         repoUrl = url
-        val item = matchRepo(repos, url)
+        val item = matchRepo(allRepos, url)
         val label = item?.providerLabel() ?: prettyProvider(gitHost(url))
         if (label.isNotBlank()) provider = label
+    }
+    fun loadMoreForgeRepos() {
+        val forge = createForge ?: return
+        scope.launch {
+            forgeLoading = true
+            val next = forgePage + 1
+            val page = ForgeClient.listRepos(forge, repoQuery, next)
+            forgePage = next
+            forgeRepos = mergeRepos(forgeRepos, page.repos)
+            forgeMore = page.hasMore
+            forgeLoading = false
+        }
     }
     val cloudChoices = environmentChoices(
         savedEnvs,
@@ -211,7 +252,49 @@ fun NewAgentScreen(
         }
         if (saved.modelParams.isNotEmpty()) modelParams = saved.modelParams
         subagents = saved.resolvedSubagents()
+        seededRepo = repoUrl
         draftReady = true
+    }
+
+    LaunchedEffect(repoUrl, draftReady) {
+        if (!draftReady) return@LaunchedEffect
+        val seed = seededRepo ?: return@LaunchedEffect
+        if (repoUrl == seed) return@LaunchedEffect
+        val defaults = container.store.repoDefault(repoUrl)
+        if (defaults == null) {
+            promptPrefix = ""
+            repoMcpIds = null
+            openFinishedPr = false
+            heldBranchRepo = ""
+            val fallback = container.store.defaultModel
+            if (fallback.isNotBlank()) {
+                modelId = fallback
+                modelParams = models.firstOrNull { it.id == fallback }?.defaultParams().orEmpty()
+            }
+            return@LaunchedEffect
+        }
+        if (defaults.modelId.isNotBlank()) {
+            modelId = defaults.modelId
+            modelParams = defaults.modelParams
+        }
+        if (defaults.branch.isNotBlank()) {
+            startingRef = defaults.branch
+            heldBranchRepo = repoUrl
+        } else {
+            heldBranchRepo = ""
+        }
+        defaults.autoCreatePr?.let { autoPr = it }
+        defaults.skipReviewer?.let { skipReviewer = it }
+        promptPrefix = defaults.promptPrefix
+        repoMcpIds = defaults.mcpIds
+        openFinishedPr = defaults.openFinishedPr
+        if (defaults.environmentName.isNotBlank()) {
+            envType = "cloud"
+            cloudFromEnv = true
+            envName = defaults.environmentName
+            selectedEnvId = defaults.environmentId.takeIf { it.isNotBlank() }
+                ?: savedEnvs.firstOrNull { it.name.equals(defaults.environmentName, ignoreCase = true) }?.id
+        }
     }
 
     LaunchedEffect(
@@ -287,12 +370,14 @@ fun NewAgentScreen(
     LaunchedEffect(Unit) {
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
         scope.launch {
-            computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
+            computers = runCatching { container.repo.listComputers(container.catalog.agents()) }.getOrDefault(computers)
+            machinePrefs = container.machines.prefs()
             pools = runCatching { container.repo.listPools() }.getOrDefault(pools)
             if (envType == "machine") {
-                val picked = computers.firstOrNull { it.name.equals(envName, ignoreCase = true) && it.online }
-                    ?: computers.firstOrNull { it.name.equals(envName, ignoreCase = true) }
-                    ?: computers.firstOrNull { it.online }
+                val usable = visibleMachines(computers, machinePrefs, container.machines.now())
+                val picked = usable.firstOrNull { it.name.equals(envName, ignoreCase = true) && it.online }
+                    ?: usable.firstOrNull { it.name.equals(envName, ignoreCase = true) }
+                    ?: usable.firstOrNull { it.online }
                 if (picked != null) {
                     envName = picked.name
                     selectedWorkerId = picked.workerId
@@ -320,8 +405,28 @@ fun NewAgentScreen(
         }
     }
 
+    LaunchedEffect(provider, forges, repoQuery) {
+        val forge = createForge
+        forgePage = 1
+        if (forge == null || !listsRepos) {
+            forgeMore = false
+            forgeLoading = false
+            return@LaunchedEffect
+        }
+        if (repoQuery.isNotBlank()) delay(350)
+        forgeLoading = true
+        val page = ForgeClient.listRepos(forge, repoQuery, 1)
+        forgeRepos = mergeRepos(forgeRepos, page.repos)
+        forgeMore = page.hasMore
+        forgeLoading = false
+    }
+
+    LaunchedEffect(resetTick, envType) {
+        forges = container.store.forges()
+    }
+
     LaunchedEffect(provider) {
-        if (provider != "GitHub") {
+        if (createForge == null) {
             createRepo = false
             newRepoName = ""
         }
@@ -343,22 +448,24 @@ fun NewAgentScreen(
             return@LaunchedEffect
         }
         loadingBranches = true
+        fun fillBranch(names: List<String>) {
+            val hold = heldBranchRepo == repoUrl && startingRef.isNotBlank()
+            if (hold) return
+            if (startingRef.isBlank() || (names.isNotEmpty() && startingRef !in names)) {
+                startingRef = selectedRepo?.defaultBranch?.takeIf { it in names }
+                    ?: names.firstOrNull().orEmpty()
+            }
+        }
         val cached = container.catalog.branches(repoUrl)
         if (cached.isNotEmpty()) {
             branches = cached
-            if (startingRef.isBlank() || startingRef !in cached) {
-                startingRef = selectedRepo?.defaultBranch?.takeIf { it in cached }
-                    ?: cached.firstOrNull().orEmpty()
-            }
+            fillBranch(cached)
         }
         val next = runCatching {
             container.repo.branches(repoUrl, selectedRepo?.defaultBranch)
         }.getOrDefault(cached)
         branches = next
-        if (startingRef.isBlank() || startingRef !in next) {
-            startingRef = selectedRepo?.defaultBranch?.takeIf { it in next }
-                ?: next.firstOrNull().orEmpty()
-        }
+        fillBranch(next)
         loadingBranches = false
     }
 
@@ -504,30 +611,22 @@ fun NewAgentScreen(
                             },
                         )
                     } else {
-                    ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
-                        OutlinedTextField(
-                            value = provider.ifBlank { if (loadingRepos) "Loading…" else "No source connected" },
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Source") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu) },
-                            modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
+                    SourcePicker(
+                        sources = providers,
+                        selected = provider,
+                        loading = loadingRepos,
+                        emptyLabel = "No source connected",
+                        onPick = { provider = it },
+                    )
+                    if (listsRepos) {
+                        ForgeRepoSearch(
+                            query = repoQuery,
+                            onQuery = { repoQuery = it },
+                            loading = forgeLoading,
+                            hasMore = forgeMore,
+                            onMore = { loadMoreForgeRepos() },
                         )
-                        ExposedDropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                            providers.forEach { name ->
-                                DropdownMenuItem(
-                                    text = { Text(name) },
-                                    onClick = {
-                                        provider = name
-                                        providerMenu = false
-                                    },
-                                )
-                            }
-                        }
-                    }
-                    if (providerRepos.size > 12) {
+                    } else if (providerRepos.size > 12) {
                         OutlinedTextField(
                             value = repoQuery,
                             onValueChange = { repoQuery = it },
@@ -536,14 +635,7 @@ fun NewAgentScreen(
                             singleLine = true,
                         )
                     }
-                    val visibleRepos = if (repoQuery.isBlank()) {
-                        providerRepos
-                    } else {
-                        providerRepos.filter {
-                            it.displayName().contains(repoQuery, ignoreCase = true) ||
-                                it.url.contains(repoQuery, ignoreCase = true)
-                        }
-                    }
+                    val visibleRepos = filterRepos(providerRepos, repoQuery)
                     ExposedDropdownMenuBox(expanded = repoMenu, onExpandedChange = { repoMenu = it }) {
                         OutlinedTextField(
                             value = when {
@@ -562,7 +654,7 @@ fun NewAgentScreen(
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(expanded = repoMenu, onDismissRequest = { repoMenu = false }) {
-                            if (provider == "GitHub") {
+                            if (createForge != null) {
                                 DropdownMenuItem(
                                     text = { Text("Create new repo") },
                                     onClick = {
@@ -615,7 +707,7 @@ fun NewAgentScreen(
                     )
                     if (createRepo && repoUrl.isBlank()) {
                         val sanitized = GithubRepos.sanitizeName(newRepoName)
-                        val hasToken = !container.store.githubToken.isNullOrBlank()
+                        val hasToken = createForge != null
                         OutlinedTextField(
                             value = newRepoName,
                             onValueChange = { newRepoName = it },
@@ -627,11 +719,11 @@ fun NewAgentScreen(
                                 Text(
                                     when {
                                         !hasToken ->
-                                            "Add a GitHub token with repo access in Settings > Connections."
+                                            "Add a forge with a token in Settings > Connections."
                                         sanitized.isNotBlank() && sanitized != newRepoName.trim() ->
                                             "Will be $sanitized"
                                         else ->
-                                            "Creates a private repo under the token account, with a README on main."
+                                            "Creates a private repo on ${createForge?.displayName() ?: "this forge"}."
                                     },
                                 )
                             },
@@ -718,7 +810,7 @@ fun NewAgentScreen(
                         }
                     }
                 } else if (envType == "machine") {
-                    val online = computers.filter { it.online }
+                    val online = shownComputers.filter { it.online }
                     ExposedDropdownMenuBox(expanded = computerMenu, onExpandedChange = { computerMenu = it }) {
                         OutlinedTextField(
                             value = envName.ifBlank { "Select a computer" },
@@ -739,75 +831,87 @@ fun NewAgentScreen(
                                 )
                             }
                             online.forEach { computer ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(computer.name)
-                                            val detail = buildString {
-                                                append(if (computer.inUse) "Busy" else "Idle")
-                                                computer.detail?.let {
-                                                    append(" · ")
-                                                    append(it)
-                                                }
-                                            }
-                                            Text(detail, style = MaterialTheme.typography.bodySmall)
+                                MachineMenuRow(
+                                    onClick = {
+                                        envName = computer.name
+                                        selectedWorkerId = computer.workerId
+                                        computer.boundRepo()?.let { adoptRepo(it) }
+                                        computerMenu = false
+                                    },
+                                    onLongClick = { machineAction = computer },
+                                    onMore = { machineAction = computer },
+                                ) {
+                                    Text(computer.name)
+                                    val detail = buildString {
+                                        append(if (computer.inUse) "Busy" else "Idle")
+                                        computer.detail?.let {
+                                            append(" · ")
+                                            append(it)
                                         }
-                                    },
-                                    onClick = {
-                                        envName = computer.name
-                                        selectedWorkerId = computer.workerId
-                                        computer.boundRepo()?.let { adoptRepo(it) }
-                                        computerMenu = false
-                                    },
-                                )
+                                    }
+                                    Text(detail, style = MaterialTheme.typography.bodySmall)
+                                }
                             }
-                            computers.filter { !it.online }.forEach { computer ->
-                                DropdownMenuItem(
-                                    text = { Text("${computer.name} · offline") },
+                            shownComputers.filter { !it.online }.forEach { computer ->
+                                MachineMenuRow(
                                     onClick = {
                                         envName = computer.name
                                         selectedWorkerId = computer.workerId
                                         computer.boundRepo()?.let { adoptRepo(it) }
                                         computerMenu = false
                                     },
-                                )
+                                    onLongClick = { machineAction = computer },
+                                    onMore = { machineAction = computer },
+                                ) {
+                                    Text("${computer.name} · offline")
+                                }
                             }
                         }
+                    }
+                    machineAction?.let { target ->
+                        MachineActionsDialog(
+                            name = target.name,
+                            onHide = {
+                                container.machines.hide(target.machineKey(), target.name)
+                                machinePrefs = container.machines.prefs()
+                                machineAction = null
+                            },
+                            onDelete = {
+                                container.machines.forget(target.machineKey(), target.name)
+                                machinePrefs = container.machines.prefs()
+                                machineAction = null
+                            },
+                            onDismiss = { machineAction = null },
+                        )
+                    }
+                    val hiddenCount = computers.size - shownComputers.size
+                    if (hiddenCount > 0) {
+                        Text(
+                            "$hiddenCount hidden. Unhide them under Settings, Connections, Machines. Long-press a machine to hide or delete it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Text(
                         "Online machines you are signed into. The PC must stay awake with Remote Control or a My Machines worker. The public API needs a repo on the request, even when the checkout is already on the PC.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
-                        OutlinedTextField(
-                            value = provider.ifBlank { if (loadingRepos) "Loading…" else "Any source" },
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Source") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu) },
-                            modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
+                    SourcePicker(
+                        sources = providers,
+                        selected = provider,
+                        loading = loadingRepos,
+                        emptyLabel = "Any source",
+                        onPick = { provider = it },
+                    )
+                    if (listsRepos) {
+                        ForgeRepoSearch(
+                            query = repoQuery,
+                            onQuery = { repoQuery = it },
+                            loading = forgeLoading,
+                            hasMore = forgeMore,
+                            onMore = { loadMoreForgeRepos() },
                         )
-                        ExposedDropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                            if (providers.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No connected sources yet") },
-                                    onClick = { providerMenu = false },
-                                    enabled = false,
-                                )
-                            }
-                            providers.forEach { name ->
-                                DropdownMenuItem(
-                                    text = { Text(name) },
-                                    onClick = {
-                                        provider = name
-                                        providerMenu = false
-                                    },
-                                )
-                            }
-                        }
                     }
                     OutlinedTextField(
                         value = repoUrl,
@@ -837,14 +941,15 @@ fun NewAgentScreen(
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(expanded = repoMenu, onDismissRequest = { repoMenu = false }) {
-                            if (providerRepos.isEmpty()) {
+                            val shownRepos = filterRepos(providerRepos, repoQuery)
+                            if (shownRepos.isEmpty()) {
                                 DropdownMenuItem(
                                     text = { Text("No repos for this source") },
                                     onClick = { repoMenu = false },
                                     enabled = false,
                                 )
                             }
-                            providerRepos.forEach { repo ->
+                            shownRepos.forEach { repo ->
                                 DropdownMenuItem(
                                     text = { Text(repo.displayName()) },
                                     onClick = {
@@ -932,8 +1037,24 @@ fun NewAgentScreen(
                     )
                     val selectedPool = pools.firstOrNull { it.poolName.equals(envName.trim(), ignoreCase = true) }
                     if (selectedPool?.acceptsManyRepos() == true) {
+                        SourcePicker(
+                            sources = providers,
+                            selected = provider,
+                            loading = loadingRepos,
+                            emptyLabel = "Any source",
+                            onPick = { provider = it },
+                        )
+                        if (listsRepos) {
+                            ForgeRepoSearch(
+                                query = repoQuery,
+                                onQuery = { repoQuery = it },
+                                loading = forgeLoading,
+                                hasMore = forgeMore,
+                                onMore = { loadMoreForgeRepos() },
+                            )
+                        }
                         ExtraReposField(
-                            repos = repos,
+                            repos = filterRepos(providerRepos, repoQuery),
                             selected = extraRepos,
                             primaryUrl = "",
                             onSelected = { extraRepos = it },
@@ -1100,7 +1221,8 @@ fun NewAgentScreen(
                                 val subs = allSubs.toApi()
                                 val named = agentName.trim().takeIf { it.isNotEmpty() }
                                 if (envType == "cloud" && !cloudFromEnv && createRepo && repoUrl.isBlank()) {
-                                    val made = container.repo.createGithubRepo(
+                                    val made = container.repo.createOnForge(
+                                        providerLabel = provider,
                                         name = newRepoName,
                                         privateRepo = newRepoPrivate,
                                         description = null,
@@ -1170,7 +1292,7 @@ fun NewAgentScreen(
                                 }
                                 val picked = models.firstOrNull { it.id == modelId }
                                 val body = CreateAgentRequest(
-                                    prompt = Attachments.prompt(prompt, ready),
+                                    prompt = Attachments.prompt(prefixPrompt(promptPrefix, prompt), ready),
                                     model = picked?.selection(modelParams),
                                     name = named,
                                     env = when (envType) {
@@ -1191,10 +1313,14 @@ fun NewAgentScreen(
                                     autoCreatePR = if (envType == "cloud") autoPr else null,
                                     skipReviewerRequest = if (envType == "cloud" && autoPr && skipReviewer) true else null,
                                     mode = mode,
-                                    mcpServers = container.store.mcpServers(),
+                                    mcpServers = mcpServersFor(container.store.storedMcps(), repoMcpIds),
                                     customSubagents = subs,
                                 )
                                 val created = container.repo.createAgent(body)
+                                container.runModels.recordRun(created.agent.id, created.run.id, body.model, explicit = true)
+                                if (openFinishedPr) {
+                                    container.chats.setOpenFinishedPr(created.agent.id, true)
+                                }
                                 if (named != null) {
                                     container.chats.setTitle(created.agent.id, named)
                                 }
@@ -1253,7 +1379,7 @@ fun NewAgentScreen(
                                 envName.trim().isNotBlank()
                             } else if (createRepo && repoUrl.isBlank()) {
                                 GithubRepos.sanitizeName(newRepoName).isNotBlank() &&
-                                    !container.store.githubToken.isNullOrBlank()
+                                    createForge != null
                             } else {
                                 repoUrl.isNotBlank() && (startingRef.isNotBlank() || prUrl.isNotBlank())
                             }

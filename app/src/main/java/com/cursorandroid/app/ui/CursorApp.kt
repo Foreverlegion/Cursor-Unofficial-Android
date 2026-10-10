@@ -27,6 +27,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -36,6 +38,7 @@ import androidx.window.core.layout.WindowSizeClass
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.LaunchRequest
 import com.cursorandroid.app.data.notify.BatteryExemption
+import com.cursorandroid.app.data.notify.BatteryPromptPolicy
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.Attachments
@@ -49,6 +52,11 @@ import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
+import com.cursorandroid.app.ui.theme.Appearance
+import com.cursorandroid.app.ui.theme.ChatDensity
+import com.cursorandroid.app.ui.theme.CodeFont
+import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -56,21 +64,30 @@ import kotlinx.coroutines.withContext
 
 private enum class Pane { Inbox, Compose, Settings }
 
+private fun readAppearance(container: AppContainer) = Appearance(
+    uiFont = UiFont.fromId(container.store.uiFont),
+    codeFont = CodeFont.fromId(container.store.codeFont),
+    textScalePct = clampTextScale(container.store.textScalePct),
+    density = ChatDensity.fromId(container.store.chatDensity),
+)
+
 @Composable
 fun CursorApp(
     container: AppContainer,
     launch: LaunchRequest,
 ) {
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
+    var appearance by remember { mutableStateOf(readAppearance(container)) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
     fun refreshAppearance() {
         themeColor = container.store.themeColor
+        appearance = readAppearance(container)
         showInboxEnvs = container.store.showInboxEnvs
         showInboxRemote = container.store.showInboxRemote
     }
 
-    CursorTheme(accentArgb = themeColor) {
+    CursorTheme(accentArgb = themeColor, appearance = appearance) {
         CursorAppContent(
             container = container,
             launch = launch,
@@ -89,42 +106,34 @@ private fun CursorAppContent(
     showInboxRemote: Boolean,
     onAppearanceChanged: () -> Unit,
 ) {
+    var settingsEpoch by remember { mutableIntStateOf(0) }
+    val refreshSettings = {
+        onAppearanceChanged()
+        settingsEpoch += 1
+    }
     var signedIn by rememberSaveable { mutableStateOf(container.store.hasSession()) }
     var demo by rememberSaveable { mutableStateOf(container.store.demoMode) }
-    var askedBattery by rememberSaveable { mutableStateOf(container.store.batteryAsked) }
     var askedFeedback by rememberSaveable { mutableStateOf(container.store.feedbackNoticeSeen) }
     val context = LocalContext.current
-    LaunchedEffect(askedBattery) {
-        if (!askedBattery && BatteryExemption.isExempt(context)) {
-            container.store.batteryAsked = true
-            askedBattery = true
-        }
+    var batteryExempt by remember { mutableStateOf(BatteryExemption.isExempt(context)) }
+    var batteryAsked by remember { mutableStateOf(container.store.batteryAsked) }
+    var batteryKnownExempt by remember { mutableStateOf(container.store.batteryKnownExempt) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        batteryExempt = BatteryExemption.isExempt(context)
     }
-    if (!askedBattery && !BatteryExemption.isExempt(context)) {
-        BatteryPrompt { allow ->
-            container.store.batteryAsked = true
-            askedBattery = true
-            if (allow) {
-                BatteryExemption.requestExempt(context)
-            }
-        }
-        return
-    }
-    if (!signedIn) {
-        SignInScreen(
-            container = container,
-            onSignedIn = {
-                onAppearanceChanged()
-                demo = container.store.demoMode
-                signedIn = true
-            },
-        )
-        return
+    val batteryDecision = BatteryPromptPolicy.decide(batteryExempt, batteryAsked, batteryKnownExempt)
+    LaunchedEffect(batteryDecision) {
+        if (batteryAsked == batteryDecision.asked && batteryKnownExempt == batteryDecision.knownExempt) return@LaunchedEffect
+        batteryAsked = batteryDecision.asked
+        batteryKnownExempt = batteryDecision.knownExempt
+        container.store.batteryAsked = batteryDecision.asked
+        container.store.batteryKnownExempt = batteryDecision.knownExempt
     }
     val windowSize = currentWindowAdaptiveInfo().windowSizeClass
     val twoPane = windowSize.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
     var pane by rememberSaveable { mutableStateOf(Pane.Inbox) }
     var selectedId by rememberSaveable { mutableStateOf(launch.agentId) }
+    var linkNote by rememberSaveable { mutableStateOf<String?>(null) }
     var composeEnvType by rememberSaveable { mutableStateOf("cloud") }
     var composeEnvName by rememberSaveable { mutableStateOf<String?>(null) }
     var composeTick by rememberSaveable { mutableStateOf(0) }
@@ -133,7 +142,6 @@ private fun CursorAppContent(
         if (signedIn && !demo) RunWatchScheduler.resume(context.applicationContext)
         FeedbackReplyScheduler.sync(context.applicationContext)
     }
-
     LaunchedEffect(launch.nonce) {
         if (launch.nonce == 0L) return@LaunchedEffect
         if (launch.openSettings) {
@@ -143,6 +151,11 @@ private fun CursorAppContent(
         if (launch.agentId != null) {
             selectedId = launch.agentId
             pane = Pane.Inbox
+            linkNote = null
+        } else if (launch.invalidAgentLink) {
+            selectedId = null
+            pane = Pane.Inbox
+            linkNote = LaunchRequest.INVALID_AGENT_LINK
         }
         val hasShare = !launch.shareText.isNullOrBlank() || launch.shareUris.isNotEmpty()
         if (hasShare) {
@@ -169,7 +182,38 @@ private fun CursorAppContent(
             composeTick += 1
         }
     }
-
+    if (!signedIn) {
+        SignInScreen(
+            container = container,
+            onSignedIn = {
+                onAppearanceChanged()
+                demo = container.store.demoMode
+                signedIn = true
+            },
+        )
+        return
+    }
+    if (batteryDecision.show) {
+        BatteryPrompt(
+            onAllow = {
+                batteryAsked = true
+                container.store.batteryAsked = true
+                BatteryExemption.requestExempt(context)
+            },
+            onSkip = {
+                batteryAsked = true
+                container.store.batteryAsked = true
+            },
+        )
+        return
+    }
+    if (!askedFeedback) {
+        FeedbackNoticePrompt {
+            container.store.feedbackNoticeSeen = true
+            askedFeedback = true
+        }
+        return
+    }
     val topBars = WindowInsets.statusBars.union(
         WindowInsets.displayCutout.only(WindowInsetsSides.Top),
     )
@@ -183,18 +227,14 @@ private fun CursorAppContent(
                 .fillMaxWidth()
                 .then(if (demo) Modifier.consumeWindowInsets(topBars) else Modifier),
         ) {
-    if (!askedFeedback) {
-        FeedbackNoticePrompt {
-            container.store.feedbackNoticeSeen = true
-            askedFeedback = true
-        }
-    } else {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (twoPane) {
             Row(Modifier.fillMaxSize()) {
                 InboxScreen(
                     container = container,
                     selectedId = selectedId,
+                    linkNote = linkNote,
+                    onDismissLinkNote = { linkNote = null },
                     onSelect = {
                         selectedId = it
                         pane = Pane.Inbox
@@ -208,6 +248,7 @@ private fun CursorAppContent(
                     onSettings = { pane = Pane.Settings },
                     showEnvs = showInboxEnvs,
                     showRemote = showInboxRemote,
+                    settingsEpoch = settingsEpoch,
                     modifier = Modifier
                         .weight(0.38f)
                         .fillMaxHeight(),
@@ -224,7 +265,7 @@ private fun CursorAppContent(
                             onBack = { pane = Pane.Inbox },
                             onSignedOut = { signedIn = false },
                             onSessionChanged = { demo = container.store.demoMode },
-                            onAppearanceChanged = onAppearanceChanged,
+                            onAppearanceChanged = refreshSettings,
                             openAccountTick = accountTick,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -261,7 +302,7 @@ private fun CursorAppContent(
                     onBack = { pane = Pane.Inbox },
                     onSignedOut = { signedIn = false },
                     onSessionChanged = { demo = container.store.demoMode },
-                    onAppearanceChanged = onAppearanceChanged,
+                    onAppearanceChanged = refreshSettings,
                     openAccountTick = accountTick,
                 )
                 pane == Pane.Compose -> NewAgentScreen(
@@ -286,6 +327,8 @@ private fun CursorAppContent(
                 else -> InboxScreen(
                     container = container,
                     selectedId = selectedId,
+                    linkNote = linkNote,
+                    onDismissLinkNote = { linkNote = null },
                     onSelect = { selectedId = it },
                     onCompose = { type, name ->
                         composeEnvType = type
@@ -296,10 +339,10 @@ private fun CursorAppContent(
                     onSettings = { pane = Pane.Settings },
                     showEnvs = showInboxEnvs,
                     showRemote = showInboxRemote,
+                    settingsEpoch = settingsEpoch,
                 )
             }
         }
-    }
     }
         }
     }

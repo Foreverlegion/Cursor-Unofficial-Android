@@ -1,6 +1,7 @@
 package com.cursorandroid.app.data.api
 
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
@@ -70,6 +71,8 @@ data class AgentDetail(
     val updatedAt: String? = null,
     val latestRunId: String? = null,
     val archived: Boolean? = null,
+    @Serializable(with = FlexibleModelSerializer::class)
+    val model: ModelSelection? = null,
 )
 
 @Serializable
@@ -98,6 +101,13 @@ data class ModelSelection(
 )
 
 @Serializable
+data class McpAuth(
+    @SerialName("CLIENT_ID") val clientId: String,
+    @SerialName("CLIENT_SECRET") val clientSecret: String? = null,
+    val scopes: List<String>? = null,
+)
+
+@Serializable
 data class McpServer(
     val name: String,
     val type: String? = null,
@@ -106,6 +116,7 @@ data class McpServer(
     val args: List<String>? = null,
     val headers: Map<String, String>? = null,
     val env: Map<String, String>? = null,
+    val auth: McpAuth? = null,
 )
 
 @Serializable
@@ -243,6 +254,8 @@ data class Run(
     val git: GitState? = null,
     @Serializable(with = FlexiblePromptSerializer::class)
     val prompt: Prompt? = null,
+    @Serializable(with = FlexibleModelSerializer::class)
+    val model: ModelSelection? = null,
 )
 
 @Serializable
@@ -868,8 +881,11 @@ data class ArtifactItem(
     val path: String,
     val sizeBytes: Long? = null,
     val updatedAt: String? = null,
+    val createdAt: String? = null,
 ) {
     fun fileName(): String = path.substringAfterLast('/')
+
+    fun whenIso(): String? = updatedAt?.takeIf { it.isNotBlank() } ?: createdAt?.takeIf { it.isNotBlank() }
 }
 
 @Serializable
@@ -902,24 +918,11 @@ data class TokenUsage(
     }
 }
 
+@Serializable
 data class AgentUsageRow(
     val id: String,
     val name: String,
     val tokens: Long,
-)
-
-data class AccountOverview(
-    val me: MeResponse? = null,
-    val agentCount: Int = 0,
-    val modelNames: List<String> = emptyList(),
-    val repoCount: Int = 0,
-    val computerCount: Int = 0,
-    val computersOnline: Int = 0,
-    val poolCount: Int = 0,
-    val poolsConnected: Int = 0,
-    val usage: TokenUsage = TokenUsage(),
-    val sampledAgents: Int = 0,
-    val top: List<AgentUsageRow> = emptyList(),
 )
 
 @Serializable
@@ -990,6 +993,28 @@ internal object FlexiblePromptSerializer : KSerializer<Prompt> {
             el is JsonPrimitive && el.isString -> Prompt(el.content)
             el is JsonObject -> json.json.decodeFromJsonElement(Prompt.serializer(), el)
             else -> Prompt("")
+        }
+    }
+}
+
+internal object FlexibleModelSerializer : KSerializer<ModelSelection> {
+    override val descriptor = ModelSelection.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: ModelSelection) {
+        encoder.encodeSerializableValue(ModelSelection.serializer(), value)
+    }
+
+    override fun deserialize(decoder: Decoder): ModelSelection {
+        val json = decoder as? JsonDecoder ?: return ModelSelection.serializer().deserialize(decoder)
+        val el = json.decodeJsonElement()
+        return when {
+            el is JsonPrimitive && el.isString -> ModelSelection(el.content)
+            el is JsonObject -> runCatching {
+                json.json.decodeFromJsonElement(ModelSelection.serializer(), el)
+            }.getOrElse {
+                ModelSelection((el["id"] as? JsonPrimitive)?.content.orEmpty())
+            }
+            else -> ModelSelection("")
         }
     }
 }

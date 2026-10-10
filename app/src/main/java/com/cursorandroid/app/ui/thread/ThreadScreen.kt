@@ -59,6 +59,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +71,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -76,12 +80,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
+import com.cursorandroid.app.ui.theme.LocalAppearance
 import android.content.Intent
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -106,17 +113,25 @@ import com.cursorandroid.app.data.api.gitPath
 import com.cursorandroid.app.data.api.isActive
 import com.cursorandroid.app.data.api.isCloudEnvType
 import com.cursorandroid.app.data.api.isLiveStatus
+import com.cursorandroid.app.data.api.AgentConversation
+import com.cursorandroid.app.data.api.ConversationMessage
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
+import com.cursorandroid.app.data.repo.RunSettled
 import com.cursorandroid.app.data.repo.mergeConversationTranscript
+import com.cursorandroid.app.data.repo.runsOldestFirst
+import com.cursorandroid.app.data.repo.settledAgentStatus
 import com.cursorandroid.app.data.repo.mergeRunTranscript
 import com.cursorandroid.app.data.repo.mergeTranscript
 import com.cursorandroid.app.data.api.isTerminal
 import com.cursorandroid.app.data.notify.ApprovalCopy
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
+import com.cursorandroid.app.data.repo.RunStopper
+import com.cursorandroid.app.data.repo.StopOutcome
 import com.cursorandroid.app.data.repo.TranscriptLine
+import com.cursorandroid.app.data.repo.visibleUserText
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.defaultParams
@@ -127,6 +142,11 @@ import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.QueuedItem
+import com.cursorandroid.app.data.repo.QueueProbe
+import com.cursorandroid.app.data.repo.applyQueuedFlags
+import com.cursorandroid.app.data.repo.leftoverLocalLines
+import com.cursorandroid.app.data.repo.lineShowsQueued
+import com.cursorandroid.app.data.repo.staleQueueIds
 import com.cursorandroid.app.data.repo.RepoBehind
 import com.cursorandroid.app.data.repo.looksLikeGitSha
 import com.cursorandroid.app.data.repo.toDraft
@@ -139,6 +159,7 @@ import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.ui.status.PlayColors
 import com.cursorandroid.app.ui.status.foreground
 import com.cursorandroid.app.ui.status.runIndicator
+import com.cursorandroid.app.ui.status.repoNameOnly
 import com.cursorandroid.app.ui.status.shortRepo
 import com.cursorandroid.app.ui.status.threadSubtitle
 import com.cursorandroid.app.ui.status.toolCallParts
@@ -147,11 +168,26 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+
+private const val STOPPING = "Stopping..."
+private const val STOP_LOOKUP_LIMIT = 5
+private const val PROMPT_LOOKUPS = 6
+
+data class SnackEvent(val seq: Int, val text: String, val indefinite: Boolean = false)
+
+internal fun stopMessage(outcome: StopOutcome): String = when (outcome) {
+    StopOutcome.Stopped -> "Stopped"
+    StopOutcome.AlreadyFinished -> "Run already finished"
+    is StopOutcome.Failed -> "Couldn't stop: ${outcome.reason}"
+}
 
 class ThreadViewModel(
     private val container: AppContainer,
@@ -167,6 +203,10 @@ class ThreadViewModel(
         private set
     var busy by mutableStateOf(false)
         private set
+    var snack by mutableStateOf<SnackEvent?>(null)
+        private set
+    private var snackSeq = 0
+    private var stopping = false
     var streaming by mutableStateOf(false)
         private set
     var receiving by mutableStateOf(false)
@@ -177,6 +217,20 @@ class ThreadViewModel(
         private set
     var usage by mutableStateOf<AgentUsageResponse?>(null)
         private set
+    var pendingPrUrl by mutableStateOf<String?>(null)
+        private set
+    var modelBook by mutableStateOf(container.runModels.load(agentId))
+        private set
+
+    private fun noteApiModels(detail: AgentDetail? = null, runs: List<Run> = emptyList()) {
+        val fromRuns = runs.mapNotNull { item -> item.model?.let { item.id to it } }.toMap()
+        if (fromRuns.isEmpty() && detail?.model == null) return
+        modelBook = container.runModels.recordApi(agentId, fromRuns, detail?.model)
+    }
+
+    fun consumePendingPr() {
+        pendingPrUrl = null
+    }
     var behind by mutableStateOf<RepoBehind?>(null)
         private set
     var approvalPending by mutableStateOf(false)
@@ -194,11 +248,68 @@ class ThreadViewModel(
     private var sendingId: String? = null
     private var appContext: android.content.Context? = null
     private val refreshLock = Mutex()
+    private val settleLock = Mutex()
+    private val settledRuns = HashSet<String>()
+    private var runOrder: List<String> = emptyList()
+    private var settledKey: String? = null
+    private var afterNonAssistant = false
     private val lineGate = Any()
 
     init {
         viewModelScope.launch { refresh() }
         startWatch()
+        viewModelScope.launch {
+            container.runSettle.settled.collect { map -> map[agentId]?.let { onSettled(it) } }
+        }
+    }
+
+    private suspend fun onSettled(ended: RunSettled) {
+        val current = run
+        if (current != null && current.id != ended.runId) return
+        val fetched = runCatching { container.repo.getRun(agentId, ended.runId) }.getOrNull()
+        val latest = fetched ?: (current ?: Run(id = ended.runId)).copy(
+            status = ended.status,
+            result = ended.result ?: current?.result,
+        )
+        if (latest.isActive()) return
+        settleRun(latest)
+    }
+
+    private suspend fun settleRun(ended: Run) {
+        settleLock.withLock {
+            val key = "${ended.id}:${ended.status}"
+            if (settledKey == key) return
+            val current = run
+            if (current != null && current.id != ended.id && current.isActive()) return
+            if (streamedRunId == ended.id) streamJob?.cancel()
+            clearApprovals()
+            streaming = false
+            receiving = false
+            run = ended
+            settledRuns += ended.id
+            if (!ended.result.isNullOrBlank()) {
+                upsert("assistant-${ended.id}", "assistant", ended.result, ended.id)
+            }
+            persist(immediate = true)
+            runCatching { container.repo.getAgent(agentId) }.getOrNull()?.let { detail ->
+                agent = detail
+                noteApiModels(detail = detail)
+            }
+            var covered = false
+            for (attempt in 0 until SETTLE_FETCHES) {
+                if (attempt > 0) delay(SETTLE_RETRY_MS)
+                val convo = mergeConversation()
+                if (convo != null && conversationCovers(convo.messages, ended.result)) {
+                    covered = true
+                    break
+                }
+            }
+            if (!covered) mergeConversation()
+            refreshArtifacts()
+            settledKey = key
+            persist(immediate = true)
+        }
+        flushOutbound()
     }
 
     fun refresh() {
@@ -216,15 +327,23 @@ class ThreadViewModel(
                     persist(immediate = true)
                     val detail = container.repo.getAgent(agentId)
                     agent = detail
-                    mergeServerRuns()
-                    mergeConversationHistory()
+                    noteApiModels(detail = detail)
+                    val serverRuns = mergeServerRuns()
+                    val serverTexts = mergeConversationHistory()
+                    dropDeliveredQueue(
+                        serverRuns,
+                        serverTexts,
+                        idle = !detail.isWorking() && run?.isActive() != true && !busy,
+                    )
                     val runId = detail.latestRunId
                     if (runId != null) {
                         val latest = container.repo.getRun(agentId, runId)
+                        noteApiModels(runs = listOf(latest))
                         latest.git?.branches?.firstOrNull()?.let { git ->
                             container.catalog.saveGit(
                                 GitSnap(agentId, git.branch, git.prUrl, git.repoUrl),
                             )
+                            container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
                         }
                         usage = container.repo.usage(agentId)
                         adoptRun(latest)
@@ -273,7 +392,7 @@ class ThreadViewModel(
             queued = run?.isActive() == true || outbound.isNotEmpty(),
             thumbs = thumbs,
         )
-        outbound.add(QueuedOutbound(localId, prompt, attaches, caption))
+        outbound.add(QueuedOutbound(localId, prompt, attaches, caption, at = System.currentTimeMillis()))
         persistQueue()
         viewModelScope.launch {
             if (run?.isActive() == true) {
@@ -348,8 +467,15 @@ class ThreadViewModel(
     }
 
     private fun ingestArtifacts(items: List<ArtifactItem>) {
-        pinnedArtifact = container.artifactHistory.ingest(agentId, items)
+        pinnedArtifact = container.artifactHistory.ingest(agentId, items, artifactProducedAt())
         artifactHistory = container.artifactHistory.history(agentId)
+    }
+
+    private fun artifactProducedAt(): String? {
+        return run?.updatedAt?.takeIf { it.isNotBlank() }
+            ?: run?.createdAt?.takeIf { it.isNotBlank() }
+            ?: agent?.updatedAt?.takeIf { it.isNotBlank() }
+            ?: agent?.createdAt?.takeIf { it.isNotBlank() }
     }
 
     private fun hidePinnedArtifact() {
@@ -410,18 +536,28 @@ class ThreadViewModel(
         behind = if (stale != null && stale.remoteSha != meta.ignoredRemoteSha) stale else null
     }
 
+    private val stopper = RunStopper(
+        cancel = { id, runId -> container.repo.cancel(id, runId) },
+        listRuns = { id -> container.repo.listRuns(id, STOP_LOOKUP_LIMIT) },
+    )
+
     fun cancel() {
-        val runId = run?.id ?: return
+        if (stopping) return
+        stopping = true
         viewModelScope.launch {
             try {
-                container.repo.cancel(agentId, runId)
+                say(STOPPING, indefinite = true)
+                val outcome = stopper.stop(agentId, run?.id, agent?.latestRunId)
+                say(stopMessage(outcome))
                 refresh()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = displayError(e)
+            } finally {
+                stopping = false
             }
         }
+    }
+
+    private fun say(text: String, indefinite: Boolean = false) {
+        snack = SnackEvent(++snackSeq, text, indefinite)
     }
 
     private suspend fun flushOutbound() {
@@ -436,18 +572,26 @@ class ThreadViewModel(
         persist()
         error = null
         try {
+            val sent = followModel.takeIf { it.isNotBlank() }?.let {
+                ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
+            }
             val created = container.repo.followUp(
                 agentId,
                 outboundPrompt(next),
                 mode = followMode.takeIf { it.isNotBlank() },
-                model = followModel.takeIf { it.isNotBlank() }?.let {
-                    ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
-                },
+                model = sent,
             )
             outbound.removeAll { it.id == next.id }
             persistQueue()
             Attachments.forget(next.attaches)
             run = created
+            container.runSettle.clear(agentId)
+            modelBook = container.runModels.recordRun(
+                agentId,
+                created.id,
+                sent,
+                explicit = false,
+            )
             assistantBuf = StringBuilder()
             thinkingBuf = StringBuilder()
             lastEventId = null
@@ -479,38 +623,63 @@ class ThreadViewModel(
     }
 
     private fun restoreQueue() {
-        if (outbound.isNotEmpty()) return
-        val saved = container.drafts.loadQueue(agentId)
-        if (saved.isEmpty()) {
-            val leftover = lines.filter { it.kind == "user" && it.queued && it.runId == null }
-            leftover.forEach { line ->
-                val thumbs = line.thumbs.mapIndexed { index, path ->
-                    Attachments.fromCache(path, "image-$index.jpg", "image/jpeg")
-                }.filter { it.ok }
-                outbound.add(
-                    QueuedOutbound(
-                        id = line.id,
-                        prompt = Attachments.prompt(line.text, thumbs),
-                        attaches = thumbs,
-                        caption = line.text,
-                    ),
-                )
-            }
-        } else {
-            saved.forEach { item ->
-                val attaches = item.attaches.toItems()
-                val caption = item.caption.ifBlank { item.text }
-                outbound.add(
-                    QueuedOutbound(
-                        id = item.id,
-                        prompt = Attachments.prompt(caption, attaches),
-                        attaches = attaches,
-                        caption = caption,
-                    ),
-                )
+        if (outbound.isEmpty()) {
+            val saved = container.drafts.loadQueue(agentId)
+            if (saved.isEmpty()) {
+                leftoverLocalLines(lines).forEach { line ->
+                    val thumbs = line.thumbs.mapIndexed { index, path ->
+                        Attachments.fromCache(path, "image-$index.jpg", "image/jpeg")
+                    }.filter { it.ok }
+                    outbound.add(
+                        QueuedOutbound(
+                            id = line.id,
+                            prompt = Attachments.prompt(line.text, thumbs),
+                            attaches = thumbs,
+                            caption = line.text,
+                        ),
+                    )
+                }
+            } else {
+                saved.forEach { item ->
+                    val attaches = item.attaches.toItems()
+                    val caption = item.caption.ifBlank { item.text }
+                    outbound.add(
+                        QueuedOutbound(
+                            id = item.id,
+                            prompt = Attachments.prompt(caption, attaches),
+                            attaches = attaches,
+                            caption = caption,
+                            at = item.at,
+                        ),
+                    )
+                }
             }
         }
-        if (outbound.isNotEmpty()) markUsersQueued()
+        syncQueuedFlags()
+    }
+
+    private fun syncQueuedFlags() {
+        synchronized(lineGate) {
+            val next = applyQueuedFlags(lines, outbound.filter { it.id != sendingId }.map { it.id }.toSet())
+            if (next !== lines) {
+                lines = next
+                persist()
+            }
+        }
+    }
+
+    private fun dropDeliveredQueue(runs: List<Run>, serverTexts: List<String>, idle: Boolean) {
+        if (outbound.isEmpty()) return
+        val stale = staleQueueIds(
+            outbound.map { QueueProbe(it.id, listOf(it.caption, it.prompt.text), it.at) },
+            runs,
+            serverTexts,
+            idle,
+        )
+        if (stale.isEmpty()) return
+        outbound.removeAll { it.id in stale }
+        persistQueue()
+        syncQueuedFlags()
     }
 
     private fun outboundPrompt(item: QueuedOutbound): Prompt {
@@ -531,16 +700,44 @@ class ThreadViewModel(
         container.drafts.saveQueue(
             agentId,
             outbound.map { item ->
-                QueuedItem(item.id, item.prompt.text, item.attaches.toDraft(), item.caption)
+                QueuedItem(item.id, item.prompt.text, item.attaches.toDraft(), item.caption, item.at)
             },
         )
     }
 
     private var probedPrompts = false
 
-    private suspend fun mergeServerRuns() {
+    var runHints by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    private val promptChecked = HashSet<String>()
+
+    private fun noteRunPrompt(item: Run) {
+        val text = item.prompt?.text
+        if (text.isNullOrBlank()) return
+        promptChecked += item.id
+        val hint = promptModelHint(visibleUserText(text)) ?: return
+        if (runHints[item.id] != hint) runHints = runHints + (item.id to hint)
+    }
+
+    /** The run's own prompt carries the hint. List Runs may omit the prompt, so Get Run fills it in. */
+    suspend fun ensureRunHint(runId: String?) {
+        val id = runId?.takeIf { it.isNotBlank() && it !in promptChecked } ?: return
+        val full = runCatching { container.repo.getRun(agentId, id) }.getOrNull() ?: return
+        noteRunPrompt(full)
+        if (full.prompt?.text.isNullOrBlank()) promptChecked += id
+    }
+
+    private suspend fun mergeServerRuns(): List<Run> {
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
+        noteApiModels(runs = runs)
+        if (runs.isNotEmpty()) runOrder = runsOldestFirst(runs).map { it.id }
+        runs.forEach { noteRunPrompt(it) }
+        runsOldestFirst(runs).asReversed()
+            .filter { it.id !in promptChecked }
+            .take(PROMPT_LOOKUPS)
+            .forEach { ensureRunHint(it.id) }
         var filled = runs.map { item -> hydrateRun(item, force = false) }
+        filled.filter { it.isTerminal() }.forEach { settledRuns += it.id }
         var merged = mergeRunTranscript(lines, filled)
         val hasUser = merged.any { it.kind == "user" }
         val hasPrompt = filled.any { !it.prompt?.text.isNullOrBlank() }
@@ -562,18 +759,26 @@ class ThreadViewModel(
                 persist()
             }
         }
+        return filled
     }
 
-    private suspend fun mergeConversationHistory() {
-        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return
-        if (convo.messages.isEmpty()) return
+    private suspend fun mergeConversationHistory(): List<String> {
+        val convo = mergeConversation() ?: return emptyList()
+        return convo.messages.filter { it.transcriptKind() == "user" }.map { it.text.orEmpty() }
+    }
+
+    private suspend fun mergeConversation(): AgentConversation? {
+        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return null
+        if (convo.messages.isEmpty()) return null
         synchronized(lineGate) {
-            val merged = mergeConversationTranscript(lines, convo.messages)
+            val liveRun = (runOrder + listOfNotNull(run?.id)).distinct().lastOrNull()
+            val merged = mergeConversationTranscript(lines, convo.messages, settledRuns.toSet(), runOrder, liveRun)
             if (merged != lines) {
                 lines = merged
                 persist()
             }
         }
+        return convo
     }
 
     private suspend fun hydrateRun(item: Run, force: Boolean): Run {
@@ -626,6 +831,7 @@ class ThreadViewModel(
         if (!latest.result.isNullOrBlank()) {
             upsert("assistant-${latest.id}", "assistant", latest.result, latest.id)
         }
+        if (latest.isTerminal()) viewModelScope.launch { settleRun(latest) }
         flushOutbound()
     }
 
@@ -640,6 +846,7 @@ class ThreadViewModel(
         if (replay || streamedRunId != runId) {
             assistantBuf = StringBuilder()
             thinkingBuf = StringBuilder()
+            afterNonAssistant = false
             lastEventId = null
             streamedRunId = runId
         }
@@ -663,16 +870,19 @@ class ThreadViewModel(
                     when (event) {
                         is StreamEvent.Assistant -> {
                             receiving = true
-                            assistantBuf.append(event.text)
+                            appendAssistantSegment(assistantBuf, event.text, afterNonAssistant)
+                            afterNonAssistant = false
                             upsert("assistant-$runId", "assistant", assistantBuf.toString(), runId)
                         }
                         is StreamEvent.Thinking -> {
                             receiving = true
+                            afterNonAssistant = true
                             thinkingBuf.append(event.text)
                             upsert("think-$runId", "thinking", thinkingBuf.toString(), runId)
                         }
                         is StreamEvent.ToolCall -> {
                             receiving = true
+                            afterNonAssistant = true
                             noteToolApproval(event.callId, event.status)
                             upsert(
                                 event.callId ?: "tool-$runId-${event.name}",
@@ -702,6 +912,7 @@ class ThreadViewModel(
                             streaming = false
                             receiving = false
                             container.notifier.notifyIfNeeded(agentId, agent?.name, runId, event.status, event.text)
+                            run?.let { ended -> viewModelScope.launch { settleRun(ended) } }
                             refreshArtifacts()
                             flushOutbound()
                         }
@@ -724,6 +935,7 @@ class ThreadViewModel(
                                 if (!latest.result.isNullOrBlank()) {
                                     upsert("assistant-$runId", "assistant", latest.result, runId)
                                 }
+                                if (!latest.isActive()) viewModelScope.launch { settleRun(latest) }
                             }
                             refreshArtifacts()
                             flushOutbound()
@@ -746,11 +958,20 @@ class ThreadViewModel(
     private suspend fun attachLatestRun() {
         val detail = runCatching { container.repo.getAgent(agentId) }.getOrNull() ?: return
         agent = detail
+        noteApiModels(detail = detail)
         val runId = detail.latestRunId ?: return
         val live = runId == streamedRunId && (streaming || streamJob?.isActive == true)
-        if (live) return
+        if (live) {
+            if (isLiveStatus(detail.status) || run?.isActive() != true) return
+            val ended = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
+            if (ended.isActive()) return
+            settleRun(ended)
+            container.notifier.notifyIfNeeded(agentId, agent?.name, ended.id, ended.status, ended.result)
+            return
+        }
         if (runId == run?.id && run?.isActive() != true && !streaming) return
         val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
+        noteApiModels(runs = listOf(latest))
         run = latest
         latest.git?.branches?.firstOrNull()?.let { git ->
             container.catalog.saveGit(
@@ -767,6 +988,7 @@ class ThreadViewModel(
             refreshArtifacts()
         }
         if (latest.isTerminal()) {
+            settleRun(latest)
             container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
         }
     }
@@ -774,17 +996,15 @@ class ThreadViewModel(
     private fun startPoll(runId: String) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
+            var tick = 0
             while (isActive && run?.id == runId && run?.isActive() == true) {
-                delay(4_000)
+                val step = tick++
+                delay(runPollDelayMs(receiving, step))
+                if (pullConversationOnTick(receiving, step)) mergeConversationHistory()
                 val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
                 run = latest
                 if (!latest.isActive()) {
-                    clearApprovals()
-                    streaming = false
-                    receiving = false
-                    if (!latest.result.isNullOrBlank()) {
-                        upsert("assistant-$runId", "assistant", latest.result, runId)
-                    }
+                    settleRun(latest)
                     container.notifier.notifyIfNeeded(
                         agentId,
                         agent?.name,
@@ -792,8 +1012,6 @@ class ThreadViewModel(
                         latest.status,
                         latest.result,
                     )
-                    refreshArtifacts()
-                    flushOutbound()
                     break
                 }
             }
@@ -811,6 +1029,7 @@ class ThreadViewModel(
                 startStream(runId, replay = lastEventId == null)
                 return
             }
+            viewModelScope.launch { settleRun(latest) }
         }
         streaming = false
         receiving = false
@@ -851,10 +1070,7 @@ class ThreadViewModel(
     }
 
     private fun markUsersQueued() {
-        lines = lines.map { line ->
-            if (line.kind == "user" && line.runId == null) line.copy(queued = true) else line
-        }
-        persist()
+        syncQueuedFlags()
     }
 
     private fun persist(immediate: Boolean = false) {
@@ -906,6 +1122,7 @@ data class QueuedOutbound(
     val prompt: Prompt,
     val attaches: List<AttachItem> = emptyList(),
     val caption: String = "",
+    val at: Long = 0L,
 )
 
 class ThreadVmFactory(
@@ -947,30 +1164,43 @@ fun ThreadScreen(
     var modelMenu by remember { mutableStateOf(false) }
     val listState = remember(agentId) { LazyListState() }
     val context = LocalContext.current
+    val pendingPr = vm.pendingPrUrl
+    LaunchedEffect(pendingPr) {
+        if (!pendingPr.isNullOrBlank()) {
+            SafeLinks.open(context, pendingPr)
+            vm.consumePendingPr()
+        }
+    }
     val scope = rememberCoroutineScope()
-    val working = showWorkBar(
+    val agentStatus = settledAgentStatus(vm.agent?.status, vm.agent?.latestRunId, vm.run)
+    val runState = threadRunState(
         lines = vm.lines,
-        receiving = vm.receiving,
+        agentStatus = agentStatus,
+        runStatus = vm.run?.status,
         busy = vm.busy,
-        agentStatus = vm.agent?.status,
-        runStatus = vm.run?.status,
-    )
-    val canKill = isLiveStatus(vm.agent?.status) || vm.run?.isActive() == true
-    val title = localTitle ?: vm.agent?.name ?: "Agent"
-    val indicator = runIndicator(
-        agentStatus = vm.agent?.status,
-        runStatus = vm.run?.status,
+        streaming = vm.streaming,
+        receiving = vm.receiving,
         approvalPending = vm.approvalPending,
     )
-    val repoLabel = shortRepo(vm.run?.git?.branches?.firstOrNull()?.repoUrl)
-        ?: shortRepo(container.catalog.gitSnaps()[agentId]?.repoUrl)
-        ?: shortRepo(vm.agent?.repos?.firstOrNull()?.url)
+    val working = runState.active
+    val canKill = runState.active
+    LaunchedEffect(runState.active, agentId) {
+        container.runSettle.setLocalActive(agentId, runState.active)
+    }
+    DisposableEffect(agentId) {
+        onDispose { container.runSettle.setLocalActive(agentId, false) }
+    }
+    val title = localTitle ?: vm.agent?.name ?: "Agent"
+    val indicator = runState.indicator
+    val repoLabel = repoNameOnly(vm.run?.git?.branches?.firstOrNull()?.repoUrl)
+        ?: repoNameOnly(container.catalog.gitSnaps()[agentId]?.repoUrl)
+        ?: repoNameOnly(vm.agent?.repos?.firstOrNull()?.url)
         ?: vm.agent?.env?.name?.takeIf { it.isNotBlank() }
     val subtitle = threadSubtitle(repoLabel, indicator)
     val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
     val activity = workActivityLine(
         receiving = vm.receiving,
-        agentStatus = vm.agent?.status,
+        agentStatus = agentStatus,
         runStatus = vm.run?.status,
         envType = vm.agent?.env?.type,
         toolName = if (working) latestTool else null,
@@ -978,19 +1208,31 @@ fun ThreadScreen(
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
-    val rows = remember(vm.lines, showTools, showThinking) {
-        groupChatRows(vm.lines, showTools, showThinking)
+    val shownLines by produceState(vm.lines, vm) {
+        snapshotFlow { vm.lines }.coalesced(STREAM_COALESCE_MS).collect { value = it }
     }
+    val rows = remember(shownLines, showTools, showThinking) {
+        groupChatRows(shownLines, showTools, showThinking)
+    }
+    val runHints = vm.runHints
+    val lineHints = remember(shownLines, runHints) { lineModelHints(shownLines, runHints) }
+    val workingModel = runModelLabel(
+        vm.modelBook,
+        vm.run?.id,
+        currentModelHint(shownLines, runHints, vm.run?.id),
+        models,
+    )
+    LaunchedEffect(vm.run?.id) { vm.ensureRunHint(vm.run?.id) }
     val currentRunId = vm.run?.id
-    val liveThink = remember(vm.lines, currentRunId, working) {
-        liveThinkingLine(vm.lines, currentRunId, working)
+    val liveThink = remember(shownLines, currentRunId, working) {
+        liveThinkingLine(shownLines, currentRunId, working)
     }
     val showLiveThink = showThinking && liveThink != null
     val showTyping = working && !showLiveThink
     val waitText = if (showTyping) {
         waitCopy(
             receiving = vm.receiving,
-            agentStatus = vm.agent?.status,
+            agentStatus = agentStatus,
             runStatus = vm.run?.status,
             envType = vm.agent?.env?.type,
         )
@@ -1094,9 +1336,19 @@ fun ThreadScreen(
         }
     }
 
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(vm.snack) {
+        val event = vm.snack ?: return@LaunchedEffect
+        snackbar.showSnackbar(
+            event.text,
+            duration = if (event.indefinite) SnackbarDuration.Indefinite else SnackbarDuration.Short,
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -1209,7 +1461,7 @@ fun ThreadScreen(
                 .scaffoldBars(padding),
         ) {
             if (working) {
-                WorkingBar(activity)
+                WorkingBar(activity, workingModel, onStop = if (canKill) ({ vm.cancel() }) else null)
             }
             if (vm.error != null) {
                 Text(
@@ -1221,30 +1473,52 @@ fun ThreadScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .clipToBounds()
+                    .testTag("chat-list"),
             ) {
                 LazyColumn(
                     state = listState,
+                    reverseLayout = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp, Alignment.Top),
                 ) {
-                    items(rows, key = { row ->
-                        when (row) {
-                            is ChatRow.Message -> row.line.id
-                            is ChatRow.Tools -> "tools-${row.id}"
+                    if (liveThink != null && showThinking) {
+                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
+                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
                         }
-                    }) { row ->
+                    } else if (showTyping) {
+                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
+                            TypingBubble(detail = waitText, model = workingModel)
+                        }
+                    }
+                    val latest = vm.pinnedArtifact
+                    if (latest != null) {
+                        item(key = "artifact-${latest.path}-${latest.whenIso().orEmpty()}") {
+                            LatestArtifactCard(
+                                item = latest,
+                                onOpen = { openArtifact(latest) },
+                                onSave = { saveArtifact(latest) },
+                            )
+                        }
+                    }
+                    items(rows.asReversed(), key = ::chatRowKey, contentType = ::chatRowType) { row ->
                         when (row) {
-                            is ChatRow.Message ->                             TranscriptBubble(
+                            is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
+                                modelText = if (row.line.kind == "assistant") {
+                                    runModelLabel(vm.modelBook, lineRunId(row.line), lineHints[row.line.id], models)
+                                } else {
+                                    null
+                                },
                                 onCopy = { text -> copyMessage(context, text) },
                                 onQuote = { text ->
                                     val block = quoteBlock(text)
                                     draft = if (draft.isBlank()) "$block\n\n" else "${draft.trimEnd()}\n\n$block\n\n"
                                 },
-                                onEditQueued = if (row.line.queued) {
+                                onEditQueued = if (lineShowsQueued(row.line)) {
                                     {
                                         vm.editQueued(row.line.id)?.let { item ->
                                             draft = item.caption.ifBlank { item.prompt.text }
@@ -1254,7 +1528,7 @@ fun ThreadScreen(
                                 } else {
                                     null
                                 },
-                                onCancelQueued = if (row.line.queued) {
+                                onCancelQueued = if (lineShowsQueued(row.line)) {
                                     { vm.cancelQueued(row.line.id) }
                                 } else {
                                     null
@@ -1264,25 +1538,6 @@ fun ThreadScreen(
                                 tools = row.tools,
                                 onCopy = { text -> copyMessage(context, text) },
                             )
-                        }
-                    }
-                    val latest = vm.pinnedArtifact
-                    if (latest != null) {
-                        item(key = "artifact-${latest.path}") {
-                            LatestArtifactCard(
-                                item = latest,
-                                onOpen = { openArtifact(latest) },
-                                onSave = { saveArtifact(latest) },
-                            )
-                        }
-                    }
-                    if (liveThink != null && showThinking) {
-                        item(key = "live-think") {
-                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
-                        }
-                    } else if (showTyping) {
-                        item(key = "typing") {
-                            TypingBubble(detail = waitText)
                         }
                     }
                 }
@@ -1370,6 +1625,7 @@ fun ThreadScreen(
             )
             Row(
                 modifier = Modifier
+                    .testTag("chat-composer")
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(28.dp))
@@ -1476,7 +1732,7 @@ fun ThreadScreen(
             .ifBlank { null }
         ChatPropertiesDialog(
             title = title,
-            status = vm.agent?.status ?: vm.run?.status,
+            status = agentStatus ?: vm.run?.status,
             env = env,
             branch = git?.branch ?: cached?.branch,
             repoUrl = git?.repoUrl ?: cached?.repoUrl,
@@ -1498,9 +1754,49 @@ fun ThreadScreen(
     }
 }
 
+/** Streaming deltas arrive per token. The list takes at most one update per this window. */
+internal const val STREAM_COALESCE_MS = 120L
+
+internal const val LIVE_TAIL_KEY = "live-tail"
+
+private const val SETTLE_FETCHES = 3
+private const val SETTLE_RETRY_MS = 1_500L
+
+internal fun appendAssistantSegment(buf: StringBuilder, text: String, afterOther: Boolean) {
+    if (afterOther && buf.isNotEmpty() && text.isNotEmpty() && !buf.endsWith("\n")) buf.append("\n\n")
+    buf.append(text)
+}
+
+internal fun conversationCovers(messages: List<ConversationMessage>, result: String?): Boolean {
+    val needle = result?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+    if (needle.isEmpty()) return messages.isNotEmpty()
+    return messages.any { msg ->
+        msg.transcriptKind() == "assistant" &&
+            msg.text.orEmpty().replace(Regex("\\s+"), " ").contains(needle)
+    }
+}
+
+/** Emits at once after a quiet period, then at most once per [windowMs], always ending on the latest value. */
+internal fun <T> Flow<T>.coalesced(windowMs: Long): Flow<T> = flow {
+    conflate().collect { value ->
+        emit(value)
+        delay(windowMs)
+    }
+}
+
 internal sealed class ChatRow {
     data class Message(val line: TranscriptLine) : ChatRow()
     data class Tools(val id: String, val tools: List<TranscriptLine>) : ChatRow()
+}
+
+internal fun chatRowKey(row: ChatRow): String = when (row) {
+    is ChatRow.Message -> "m-${row.line.id}"
+    is ChatRow.Tools -> "tools-${row.id}"
+}
+
+internal fun chatRowType(row: ChatRow): String = when (row) {
+    is ChatRow.Message -> "m-${row.line.kind}"
+    is ChatRow.Tools -> "tools"
 }
 
 internal fun threadScrollKey(
@@ -1574,6 +1870,7 @@ internal fun groupChatRows(
 @Composable
 private fun TranscriptBubble(
     line: TranscriptLine,
+    modelText: String? = null,
     onCopy: (String) -> Unit = {},
     onQuote: (String) -> Unit = {},
     onEditQueued: (() -> Unit)? = null,
@@ -1587,6 +1884,7 @@ private fun TranscriptBubble(
         NoticeBlock(line, onCopy = onCopy)
         return
     }
+    val appearance = LocalAppearance.current
     val isUser = line.kind == "user"
     val align = if (isUser) Alignment.End else Alignment.Start
     val bubbleColor = if (isUser) PlayColors.UserBubble else PlayColors.AgentBubble
@@ -1596,7 +1894,11 @@ private fun TranscriptBubble(
     } else {
         RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
     }
-    val label = if (line.kind == "user" && line.queued) "Queued" else null
+    val label = when {
+        lineShowsQueued(line) -> "Queued"
+        line.kind == "assistant" -> senderLabel(modelText)
+        else -> null
+    }
     var menu by remember(line.id) { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val copyText = line.text.trim()
@@ -1610,6 +1912,8 @@ private fun TranscriptBubble(
                 label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -1629,7 +1933,7 @@ private fun TranscriptBubble(
                             menu = true
                         },
                     )
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = appearance.bubblePadH.dp, vertical = appearance.bubblePadV.dp),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (line.thumbs.isNotEmpty()) {
@@ -1649,7 +1953,7 @@ private fun TranscriptBubble(
                             }
                         }
                     }
-                    Text(line.text, color = textColor, style = MaterialTheme.typography.bodyMedium)
+                    MessageText(line.text, textColor)
                 }
             }
             MessageClipMenu(
@@ -1851,7 +2155,7 @@ private fun ToolCallsBlock(
 }
 
 @Composable
-private fun WorkingBar(text: String) {
+internal fun WorkingBar(text: String, model: String? = null, onStop: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -1868,21 +2172,46 @@ private fun WorkingBar(text: String) {
                 .clip(CircleShape)
                 .background(PlayColors.Teal),
         )
-        Text(text, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text,
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!model.isNullOrBlank()) {
+                Text(
+                    model,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onStop != null) {
+            TextButton(onClick = onStop, modifier = Modifier.testTag("stop-run")) { Text("Stop") }
+        }
     }
 }
 
+private fun lineRunId(line: TranscriptLine): String? =
+    line.runId ?: line.id.removePrefix("assistant-").takeIf { line.id.startsWith("assistant-") }
+
 @Composable
-private fun TypingBubble(detail: String? = null) {
+private fun TypingBubble(detail: String? = null, model: String? = null) {
     val transition = rememberInfiniteTransition(label = "typing")
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start,
     ) {
         Text(
-            "Agent",
+            senderLabel(model),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
         if (!detail.isNullOrBlank()) {
@@ -1991,25 +2320,15 @@ internal fun quoteBlock(text: String): String {
     }
 }
 
-private suspend fun LazyListState.scrollToBottom() {
-    val last = layoutInfo.totalItemsCount - 1
-    if (last < 0) return
-    scrollToItem(last)
-    val info = layoutInfo
-    val lastItem = info.visibleItemsInfo.lastOrNull() ?: return
-    val overflow = lastItem.offset + lastItem.size - info.viewportEndOffset
-    if (overflow != 0) {
-        scrollBy(overflow.toFloat())
-    }
+/**
+ * The chat list is laid out bottom-up, so index 0 is the newest row and growth of any row near the
+ * bottom extends upward without a scroll call. This only re-anchors after rows are added or removed
+ * at the bottom, where the list would otherwise keep the previous first row in place.
+ */
+internal suspend fun LazyListState.scrollToBottom() {
+    if (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0) scrollToItem(0)
 }
 
-/** True only when the last row's bottom is near the viewport bottom. */
-private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean {
-    val info = layoutInfo
-    val last = info.totalItemsCount - 1
-    if (last < 0) return true
-    val lastItem = info.visibleItemsInfo.lastOrNull() ?: return false
-    if (lastItem.index != last) return false
-    val gap = info.viewportEndOffset - (lastItem.offset + lastItem.size)
-    return gap >= -thresholdPx
-}
+/** True while the newest row's bottom is near the viewport bottom. */
+private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean =
+    firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset <= thresholdPx

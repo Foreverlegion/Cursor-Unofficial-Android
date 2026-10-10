@@ -2,6 +2,8 @@ package com.cursorandroid.app
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import com.cursorandroid.app.data.api.ApiShape
+import com.cursorandroid.app.data.api.CancelLog
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
@@ -16,7 +18,13 @@ import com.cursorandroid.app.data.repo.DemoCursorApi
 import com.cursorandroid.app.data.repo.DemoSession
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
+import com.cursorandroid.app.data.repo.InboxRefreshHub
 import com.cursorandroid.app.data.repo.LocalChatStore
+import com.cursorandroid.app.data.repo.RunModelStore
+import com.cursorandroid.app.data.repo.RunSettleHub
+import com.cursorandroid.app.data.repo.MachineStore
+import com.cursorandroid.app.data.repo.UiPrefsStore
+import com.cursorandroid.app.data.repo.settleAgents
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,14 +35,24 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
 
 class AppContainer(context: Context) {
-    val store = ApiKeyStore(context)
+    val ui = UiPrefsStore.open(context)
+    val store = ApiKeyStore(context, ui)
     val conversations = ConversationStore(context)
-    val chats = LocalChatStore(context)
+    val chats = LocalChatStore(ui)
+    val machines = MachineStore(ui)
     val drafts = DraftStore(context)
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
+    val runModels = RunModelStore(context)
     val notices = NoticeStore(context)
-    val notifier = RunNotifier(context.applicationContext, store, notices, chats)
+    val inboxRefresh = InboxRefreshHub()
+    val runSettle = RunSettleHub { ended ->
+        conversations.settle(ended.agentId, ended.runId, ended.status)
+        val agents = catalog.agents()
+        val settled = settleAgents(agents, mapOf(ended.agentId to ended))
+        if (settled !== agents) catalog.saveAgents(settled)
+    }
+    val notifier = RunNotifier(context.applicationContext, store, notices, chats, runSettle, inboxRefresh)
     val feedback = FeedbackStore(context)
 
     fun renameChat(agentId: String, name: String) {
@@ -77,6 +95,8 @@ class AppContainer(context: Context) {
         .addInterceptor(authInterceptor)
         .apply {
             if (debug) {
+                addInterceptor(ApiShape.interceptor(json))
+                addInterceptor(CancelLog.interceptor())
                 addInterceptor(
                     HttpLoggingInterceptor().apply {
                         level = HttpLoggingInterceptor.Level.BASIC
@@ -92,6 +112,7 @@ class AppContainer(context: Context) {
         drafts.clear(agentId)
         drafts.clearQueue(agentId)
         artifactHistory.remove(agentId)
+        runModels.remove(agentId)
         notices.dismissAgent(agentId)
         catalog.removeGit(agentId)
     }
@@ -114,10 +135,11 @@ class AppContainer(context: Context) {
 
     val repo = AgentRepository(
         api = api,
-        sse = SseStreamer(http, json),
+        sse = SseStreamer(http, json, probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null),
         store = store,
         catalog = catalog,
         publicHttp = publicHttp,
         json = json,
+        machines = machines,
     )
 }

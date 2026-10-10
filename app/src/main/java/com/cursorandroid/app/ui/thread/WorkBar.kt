@@ -3,23 +3,6 @@ package com.cursorandroid.app.ui.thread
 import com.cursorandroid.app.data.api.isCreatingStatus
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isRemoteEnvType
-import com.cursorandroid.app.data.repo.TranscriptLine
-
-internal fun showWorkBar(
-    lines: List<TranscriptLine>,
-    receiving: Boolean,
-    busy: Boolean,
-    agentStatus: String?,
-    runStatus: String?,
-): Boolean {
-    if (receiving || busy) return true
-    if (isLiveStatus(agentStatus) || isLiveStatus(runStatus)) return true
-    if (isCreatingStatus(agentStatus) || isCreatingStatus(runStatus)) return true
-    val lastUser = lines.indexOfLast { it.kind == "user" }
-    if (lastUser < 0) return false
-    val lastAssistant = lines.indexOfLast { it.kind == "assistant" }
-    return lastUser > lastAssistant
-}
 
 internal fun waitCopy(
     receiving: Boolean,

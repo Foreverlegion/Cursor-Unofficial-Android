@@ -1,3 +1,30 @@
+# 1.0.28
+
+- The app download is much smaller. Release builds are shrunk and optimized.
+- Cursor agent links (cursor.com/agents/...) open in the app. Other cursor.com links stay in your browser.
+- Fixed a blank screen after signing in with the browser.
+- Agent list: grouped by repo, compact cards, filter chips, swipe to archive with Undo, pin a chat. Long-press a repo group to rename it, favorite it, color it, or move it.
+- Settings is now a list of pages instead of tabs. New pages: Appearance (accent color, fonts, text size, chat density), Agent list, Repo defaults, Forges, Machines.
+- Repo defaults: set a model, branch, MCP servers, environment, and a prompt prefix per repo, and New agent fills them in.
+- Forges: save tokens for GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Origin and custom hosts. Every saved forge is a Source in New agent, and GitLab projects are listed with your token.
+- Machines: long-press a machine to hide or delete it, with a Machines page and auto-hide for machines not seen for 7 to 90 days. Machines you have seen stay listed as offline until you hide them. Cursor's API cannot remove a worker, so Delete forgets it on this phone only.
+- MCP: follow-ups keep the servers the agent was created with. OAuth client, SSE type, presets, and mcp.json import and export.
+- Settings export leaves out secrets unless you seal them with a passphrase. Saved settings and tokens are kept across the update.
+- Agent messages show the model that produced the run, including a `Model:` first line from other clients.
+- Threads: one status for the header, work bar and list card, a Stop button on the working bar, and Kill process now works when the run id was missing.
+- Fixed old messages showing as Queued, old messages jumping to the bottom of a thread, and the chat list flashing while a run streams.
+- Fixed the crash when opening Settings, Forges.
+- Artifacts show their date and time, and long file names are no longer cut off.
+- Messages show code blocks in a scrollable box using the code font you pick in Appearance.
+- Settings, About shows saved numbers at once and fills each row as it loads. Usage covers chats active in the last 30 days.
+- The battery and first-run notice screens are readable after signing in with the browser.
+- Fixed Running staying on a finished agent in the list and thread.
+- Faster polling right after a send and steadier background run watching.
+- The Inbox now shows an agent as Running when a run starts on another device, without pulling to refresh. It checks every few seconds while something runs and less often when all is idle, refreshes at once when you return to the app or a run notification arrives, and stops in the background.
+- Notifications moved off the Inbox page into a popup behind a bell next to New. The bell shows an unread count, opening it marks them read, and each item can be opened or dismissed, with Clear all. Read and dismissed state is kept across restarts and updates.
+
+---
+
 # 1.0.27
 
 Owner tools in Settings match the public GitHub login Foreverlegion. The in-app Ban button is shown only for that login. The privacy policy contact is that GitHub profile and this project's issues.

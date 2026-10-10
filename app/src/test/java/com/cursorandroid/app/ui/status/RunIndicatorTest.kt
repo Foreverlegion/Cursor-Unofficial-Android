@@ -54,4 +54,17 @@ class RunIndicatorTest {
         assertEquals("app/.../McpSettings.kt", path)
         assertEquals("shell" to null, toolCallParts("shell completed"))
     }
+
+    @Test
+    fun repoNameOnlyDropsOwnerAndNamespaceForEveryForge() {
+        assertEquals("stocks", repoNameOnly("https://github.com/Foreverlegion/stocks"))
+        assertEquals("stocks", repoNameOnly("https://github.com/Foreverlegion/stocks.git"))
+        assertEquals("Fleet-Widget", repoNameOnly("https://origin.cursor.com/git/legion/Fleet-Widget"))
+        assertEquals("Fleet-Widget", repoNameOnly("git@origin.cursor.com:git/legion/Fleet-Widget.git"))
+        assertEquals("app", repoNameOnly("https://gitlab.com/group/sub/app.git"))
+        assertEquals("app", repoNameOnly("https://gitlab.com/group/sub/app/"))
+        assertEquals("solo", repoNameOnly("solo"))
+        assertNull(repoNameOnly("  "))
+        assertNull(repoNameOnly(null))
+    }
 }
