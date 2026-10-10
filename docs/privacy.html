@@ -62,7 +62,7 @@
   <ul>
     <li>The app is <strong>free</strong>. No ads, no in-app purchases, no paid unlocks from the developer.</li>
     <li>No third-party advertising SDKs, analytics SDKs, crash reporters, or trackers are embedded by the developer.</li>
-    <li>Your Cursor API key and optional GitHub token are stored <strong>on your device</strong> (encrypted SharedPreferences where available).</li>
+    <li>Your Cursor API key and optional GitHub token are stored <strong>on your device</strong> (encrypted SharedPreferences; if the device cannot provide that, they are kept in memory only and never written to disk in plain text).</li>
     <li>Network traffic is for Cursor’s public Cloud Agents APIs, and (when you use those features) GitHub for releases/auto-update, optional repo create, and issues/feedback.</li>
   </ul>
 

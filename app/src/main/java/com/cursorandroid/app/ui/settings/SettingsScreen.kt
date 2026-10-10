@@ -100,12 +100,12 @@ private const val BATTERY_INFO =
     "WorkManager polls for agent notifications while a run is active, then every 15 minutes. Android Doze stops that work when battery use is optimized."
 private const val ALERT_INFO = "Alerts stay on this phone. Cursor has no mobile push, so a finish notice can lag in the background."
 private const val MCP_INFO =
-    "Saved on this phone. Enabled servers are attached to new agents and follow-ups. The agent calls their tools."
+    "Saved on this phone, with headers and secrets encrypted. Enabled servers are attached to new agents. A follow-up keeps the set its agent started with. The agent calls their tools."
 private const val GITHUB_INFO = "Forge tokens stay encrypted on this phone. They list branches and create repos from New agent. A GitHub token already saved on this phone is kept as a GitHub forge."
 private const val REMOTE_INFO =
     "On the PC: Cursor 3.9.8 or newer, Agents Window, Settings, Agents, Remote Control, then /remote-control. Local remotes show under Remote. To start new work on a named machine, use New agent, Machine."
 private const val BACKUP_INFO =
-    "Export includes the API key, forge tokens, repo defaults, theme, inbox tabs, alerts, model, MCP, chat names, favorites, pins, drafts, and cached transcripts. Keep the file private."
+    "Export includes repo defaults, theme, inbox tabs, alerts, model, MCP servers, chat names, favorites, pins, drafts, and cached transcripts. The API key, forge tokens, and MCP header, env, and OAuth values are left out unless you turn on Include secrets, which seals them with a passphrase. Keep the file private."
 private const val KEY_INFO =
     "The key stays on this phone across updates, stored encrypted. Uninstall wipes it unless you import an export."
 private const val USAGE_INFO =
@@ -299,6 +299,7 @@ internal fun SettingsScreenContent(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
+                SecureStorageNotice(container.store)
                 when (page) {
                     SettingsPage.Home -> {
                         SettingsPage.entries.filter { it != SettingsPage.Home && it != SettingsPage.Forges }.forEach { item ->

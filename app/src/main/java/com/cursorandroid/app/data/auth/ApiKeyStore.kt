@@ -39,10 +39,16 @@ class ApiKeyStore internal constructor(
     private val app = context.applicationContext
     private val primary = secureOpener(app, PREFS)
     private val backup = secureOpener(app, PREFS_BAK)
-    // Survives uninstall/downgrade when Android keeps app data or restores backup.
-    // Encrypted prefs cannot: Keystore keys die with the package.
+    // Plaintext file from builds that fell back to it. Read so nothing is lost, moved into the encrypted
+    // store as soon as that works, and never written to again.
     private val fallback = app.getSharedPreferences(PREFS_FALLBACK, Context.MODE_PRIVATE)
     private val notifyPrefs = app.getSharedPreferences(PREFS_NOTIFY, Context.MODE_PRIVATE)
+
+    // Holds secrets only when the Keystore-backed store cannot be opened. Never written to disk.
+    private val memory = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** False when secrets live in memory only, so they are lost when the app closes. */
+    val secureStorage: Boolean = primary != null || backup != null
 
     init {
         recover()
@@ -78,18 +84,6 @@ class ApiKeyStore internal constructor(
         get() = notifyPrefs.getBoolean(SHOW_THINKING, true)
         set(value) {
             notifyPrefs.edit { putBoolean(SHOW_THINKING, value) }
-        }
-
-    var mcpName: String
-        get() = storedMcps().firstOrNull { !it.isStdio() }?.name.orEmpty()
-        set(value) {
-            upsertLegacyHttp(name = value, url = mcpUrl)
-        }
-
-    var mcpUrl: String
-        get() = storedMcps().firstOrNull { !it.isStdio() }?.url.orEmpty()
-        set(value) {
-            upsertLegacyHttp(name = mcpName, url = value)
         }
 
     var defaultModel: String
@@ -207,43 +201,14 @@ class ApiKeyStore internal constructor(
         saveRepoDefaults(repoDefaults().filterNot { com.cursorandroid.app.data.api.repoKey(it.repoUrl) == key })
     }
 
-    fun storedMcps(): List<StoredMcpServer> {
-        val stored = decodeStoredMcps(readSecret(MCP_LIST))
-        if (stored.isNotEmpty()) return stored
-        val legacy = migrateLegacyMcp(
-            notifyPrefs.getString(MCP_NAME, "").orEmpty(),
-            notifyPrefs.getString(MCP_URL, "").orEmpty(),
-        ) ?: return emptyList()
-        saveStoredMcps(listOf(legacy))
-        return listOf(legacy)
-    }
+    fun storedMcps(): List<StoredMcpServer> = decodeStoredMcps(readSecret(MCP_LIST))
 
     fun saveStoredMcps(items: List<StoredMcpServer>) {
         val next = items.take(50)
         writeSecret(MCP_LIST, if (next.isEmpty()) null else encodeStoredMcps(next))
-        val first = next.firstOrNull { !it.isStdio() }
-        notifyPrefs.edit {
-            putString(MCP_NAME, first?.name.orEmpty())
-            putString(MCP_URL, first?.url.orEmpty())
-        }
     }
 
     fun mcpServers(): List<McpServer>? = storedMcpsToApi(storedMcps())
-
-    private fun upsertLegacyHttp(name: String, url: String) {
-        val items = storedMcps().toMutableList()
-        val idx = items.indexOfFirst { !it.isStdio() }
-        val next = StoredMcpServer(
-            id = items.getOrNull(idx)?.id ?: java.util.UUID.randomUUID().toString(),
-            enabled = items.getOrNull(idx)?.enabled ?: true,
-            name = name,
-            type = com.cursorandroid.app.data.repo.TYPE_HTTP,
-            url = url,
-            headers = items.getOrNull(idx)?.headers.orEmpty(),
-        )
-        if (idx >= 0) items[idx] = next else items.add(next)
-        saveStoredMcps(items)
-    }
 
     var demoMode: Boolean
         get() = notifyPrefs.getBoolean(DEMO_MODE, false)
@@ -269,21 +234,28 @@ class ApiKeyStore internal constructor(
         return listOf(primary, backup)
             .mapNotNull { it?.getString(name, null)?.trim()?.takeIf { key -> key.isNotEmpty() } }
             .firstOrNull()
+            ?: memory[name]?.trim()?.takeIf { it.isNotEmpty() }
             ?: fallback.getString(name, null)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun writeSecret(name: String, value: String?) {
-        val stored = value.orEmpty()
+        val text = value?.takeIf { it.isNotEmpty() }
         val encrypted = listOfNotNull(primary, backup)
-        encrypted.forEach { prefs ->
-            prefs.edit { if (value.isNullOrEmpty()) remove(name) else putString(name, stored) }
-        }
-        fallback.edit {
-            if (encrypted.isEmpty() && !value.isNullOrEmpty()) {
-                putString(name, value)
+        if (encrypted.isEmpty()) {
+            if (text == null) {
+                memory.remove(name)
+                fallback.edit { remove(name) }
             } else {
-                remove(name)
+                memory[name] = text
             }
+            return
+        }
+        memory.remove(name)
+        encrypted.forEach { prefs ->
+            prefs.edit { if (text == null) remove(name) else putString(name, text) }
+        }
+        if (encrypted.any { it.getString(name, null) == text }) {
+            fallback.edit { remove(name) }
         }
     }
 
@@ -305,18 +277,53 @@ class ApiKeyStore internal constructor(
     }
 
     /**
-     * Versioned. 0 -> 1 moves the pre-forge `github_token` into the forge list. The new entry is read
-     * back before any legacy copy is removed, an existing GitHub token in the forge list is never
-     * replaced, and the version is recorded only when every step held, so a failed run repeats.
+     * Versioned, one step at a time; a step's version is recorded only when every part of it held, so a
+     * failed step repeats on the next launch.
+     * 0 -> 1 moves the pre-forge `github_token` into the forge list. The new entry is read back before any
+     * legacy copy is removed and an existing GitHub token in the forge list is never replaced.
+     * 1 -> 2 moves the plaintext `mcp_name`/`mcp_url` mirror into the encrypted MCP list and deletes it.
      */
     private fun migrateSecrets() {
-        if (notifyPrefs.getInt(SECRETS_SCHEMA, 0) >= SECRETS_VERSION) return
-        if (!migrateGithubToken()) return
-        notifyPrefs.edit(commit = true) { putInt(SECRETS_SCHEMA, SECRETS_VERSION) }
+        var version = notifyPrefs.getInt(SECRETS_SCHEMA, 0)
+        if (version < 1) {
+            if (!migrateGithubToken()) return
+            version = 1
+            notifyPrefs.edit(commit = true) { putInt(SECRETS_SCHEMA, version) }
+        }
+        if (version < 2) {
+            if (!migrateLegacyMcpPrefs()) return
+            notifyPrefs.edit(commit = true) { putInt(SECRETS_SCHEMA, 2) }
+        }
+    }
+
+    private fun migrateLegacyMcpPrefs(): Boolean {
+        if (!notifyPrefs.contains(MCP_NAME) && !notifyPrefs.contains(MCP_URL)) return true
+        // Without the encrypted store the legacy copy may be the only one on disk, so keep it for now.
+        if (!secureStorage) return false
+        val raw = readSecret(MCP_LIST)
+        val stored = decodeStoredMcps(raw)
+        if (stored.isEmpty() && !raw.isNullOrBlank()) return false
+        if (stored.isEmpty()) {
+            val legacy = migrateLegacyMcp(
+                notifyPrefs.getString(MCP_NAME, "").orEmpty(),
+                notifyPrefs.getString(MCP_URL, "").orEmpty(),
+            )
+            if (legacy != null) {
+                saveStoredMcps(listOf(legacy))
+                val held = decodeStoredMcps(readSecret(MCP_LIST)).any { it.name == legacy.name && it.url == legacy.url }
+                if (!held) return false
+            }
+        }
+        notifyPrefs.edit(commit = true) {
+            remove(MCP_NAME)
+            remove(MCP_URL)
+        }
+        return true
     }
 
     private fun migrateGithubToken(): Boolean {
         val legacy = legacyGithubTokens().firstOrNull() ?: return true
+        if (!secureStorage) return false
         val raw = readSecret(FORGES)
         val stored = decodeForges(raw)
         if (stored.isEmpty() && !raw.isNullOrBlank()) return false
@@ -372,7 +379,6 @@ class ApiKeyStore internal constructor(
         private const val GITHUB = "github_token"
         private const val UNREADABLE = "_unreadable"
         private const val SECRETS_SCHEMA = "secrets_schema"
-        private const val SECRETS_VERSION = 1
         private const val FORGES = "forges"
         private const val REPO_DEFAULTS = "repo_defaults"
         private const val NOTIFY = "notify_on_complete"

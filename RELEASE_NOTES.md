@@ -4,6 +4,10 @@ Owner tools in Settings match the public GitHub login Foreverlegion. The in-app 
 
 Chats started in the app show the model on each agent message. Cursor's API does not report which model a run used, so chats started on another device show plain "Agent". To get a label there, start the prompt with a first line like `Model: Opus 5.5`. The line stays in the message. Ids such as `claude-opus-5-5` show as Opus 5.5, and other text is shown as written.
 
+MCP: a follow-up no longer replaces the servers an agent was created with. The app now omits the list on follow-ups so the agent keeps its set. HTTP servers take an OAuth client (client ID, optional secret, scopes), and the type SSE is available with a note that Cursor does not support it for cloud agents. Settings, Connections, MCP has presets, import from a pasted or chosen `mcp.json` (preview, pick servers, ask before replacing), and export to `mcp.json`.
+
+Settings export leaves out the API key, forge tokens, and MCP header, env, and OAuth values unless you turn on Include secrets, which seals them with a passphrase you choose. Import asks for that passphrase. If the phone's secure storage cannot be opened, secrets stay in memory only and a warning shows. The old plain `mcp_name` and `mcp_url` copy is moved into the encrypted list and deleted. Saved settings are kept across the update.
+
 ---
 
 # 1.0.26
