@@ -17,9 +17,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        launch = LaunchRequest.from(intent, System.currentTimeMillis())
         val app = application as CursorAndroidApp
-        consumeNotice(intent, app)
+        // Recreation (theme, locale, process restore) must not replay the launch intent: shares would be appended twice.
+        if (savedInstanceState == null) {
+            launch = LaunchRequest.from(intent, System.currentTimeMillis())
+            consumeNotice(intent, app)
+        }
         setContent {
             CursorApp(
                 container = app.container,
