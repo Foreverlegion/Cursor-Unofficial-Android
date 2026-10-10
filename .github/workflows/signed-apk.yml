@@ -63,12 +63,12 @@ jobs:
           cp "$apk" "$out"
 
           "$tools/apksigner" verify --verbose --print-certs "$out" | tee new-certs.txt
-          new=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' new-certs.txt | head -1)
+          new=$(grep -m1 'certificate SHA-256 digest' new-certs.txt | grep -oE '[0-9a-f]{64}' || true)
 
           mkdir -p reference
           gh release download "$REFERENCE_TAG" --pattern app-release.apk --dir reference
           "$tools/apksigner" verify --print-certs reference/app-release.apk | tee ref-certs.txt
-          ref=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' ref-certs.txt | head -1)
+          ref=$(grep -m1 'certificate SHA-256 digest' ref-certs.txt | grep -oE '[0-9a-f]{64}' || true)
 
           badge=$("$tools/aapt2" dump badging "$out" | head -1)
           {
