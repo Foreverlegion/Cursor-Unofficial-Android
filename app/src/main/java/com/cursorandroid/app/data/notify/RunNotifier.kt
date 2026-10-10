@@ -14,7 +14,9 @@ import com.cursorandroid.app.R
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.repo.InboxRefreshHub
 import com.cursorandroid.app.data.repo.LocalChatStore
+import com.cursorandroid.app.data.repo.RefreshReason
 import com.cursorandroid.app.data.repo.RunSettleHub
 
 class RunNotifier(
@@ -23,6 +25,7 @@ class RunNotifier(
     private val notices: NoticeStore,
     private val chats: LocalChatStore,
     private val runSettle: RunSettleHub? = null,
+    private val refresh: InboxRefreshHub? = null,
 ) {
     private val seen = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -68,6 +71,7 @@ class RunNotifier(
         val noticeId = "approval-$id"
         val title = chatTitle(agentId, agentName)
         if (!notices.recordApproval(agentId, title, id, ask.body)) return
+        refresh?.request(RefreshReason.Notification)
         if (skipShade(agentId)) return
         if (!NotifyPermission.granted(context)) return
         ensureChannel()
@@ -101,6 +105,7 @@ class RunNotifier(
 
     fun notifyIfNeeded(agentId: String, agentName: String?, runId: String, status: String?, result: String?) {
         runSettle?.publish(agentId, runId, status, result)
+        refresh?.request(RefreshReason.Notification)
         val title = chatTitle(agentId, agentName)
         val fresh = notices.record(agentId, title, runId, status, result)
         if (!store.notifyOnComplete) return

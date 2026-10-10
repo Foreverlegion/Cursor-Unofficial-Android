@@ -9,9 +9,11 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.cursorandroid.app.CursorAndroidApp
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
+import com.cursorandroid.app.data.repo.RefreshReason
 import java.util.concurrent.TimeUnit
 
 object RunWatchScheduler {
@@ -21,6 +23,7 @@ object RunWatchScheduler {
         runId: String,
         agentName: String?,
         status: String? = null,
+        announce: Boolean = true,
     ) {
         val app = context.applicationContext
         val recorded = status?.uppercase()?.takeIf { it.isNotBlank() } ?: "RUNNING"
@@ -32,7 +35,12 @@ object RunWatchScheduler {
         val already = RunWatchStore.all(app).any { it.runId == runId }
         RunWatchStore.add(app, WatchItem(agentId, runId, agentName))
         ApprovalStreamHub.attach(app, agentId, runId, agentName)
-        if (!already) enqueuePoll(app, agentId, runId, agentName)
+        if (!already) {
+            enqueuePoll(app, agentId, runId, agentName)
+            if (announce) {
+                (app as? CursorAndroidApp)?.container?.inboxRefresh?.request(RefreshReason.RunStarted)
+            }
+        }
         ensureSweep(app)
     }
 
@@ -51,7 +59,7 @@ object RunWatchScheduler {
         rememberStatuses(context, agents)
         agents.filter { it.isWorking() }.forEach { agent ->
             val runId = agent.latestRunId ?: return@forEach
-            watch(context, agent.id, runId, agent.name, agent.status)
+            watch(context, agent.id, runId, agent.name, agent.status, announce = false)
         }
     }
 

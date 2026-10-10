@@ -18,6 +18,7 @@ import com.cursorandroid.app.data.repo.DemoCursorApi
 import com.cursorandroid.app.data.repo.DemoSession
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
+import com.cursorandroid.app.data.repo.InboxRefreshHub
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
 import com.cursorandroid.app.data.repo.RunSettleHub
@@ -44,13 +45,14 @@ class AppContainer(context: Context) {
     val artifactHistory = ArtifactHistoryStore(context)
     val runModels = RunModelStore(context)
     val notices = NoticeStore(context)
+    val inboxRefresh = InboxRefreshHub()
     val runSettle = RunSettleHub { ended ->
         conversations.settle(ended.agentId, ended.runId, ended.status)
         val agents = catalog.agents()
         val settled = settleAgents(agents, mapOf(ended.agentId to ended))
         if (settled !== agents) catalog.saveAgents(settled)
     }
-    val notifier = RunNotifier(context.applicationContext, store, notices, chats, runSettle)
+    val notifier = RunNotifier(context.applicationContext, store, notices, chats, runSettle, inboxRefresh)
     val feedback = FeedbackStore(context)
 
     fun renameChat(agentId: String, name: String) {

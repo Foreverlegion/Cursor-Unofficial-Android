@@ -17,6 +17,12 @@ data class RunSettled(
     val result: String? = null,
 )
 
+data class LiveRun(
+    val agentId: String,
+    val runId: String,
+    val status: String,
+)
+
 /**
  * Shared "this run ended" state. Notification watchers, the inbox sweep and the open thread all
  * publish here; the inbox list and the thread subscribe, so a finished run flips every surface
@@ -26,11 +32,29 @@ class RunSettleHub(private val persist: (RunSettled) -> Unit = {}) {
     private val state = MutableStateFlow<Map<String, RunSettled>>(emptyMap())
     val settled: StateFlow<Map<String, RunSettled>> = state.asStateFlow()
 
+    private val liveState = MutableStateFlow<Map<String, LiveRun>>(emptyMap())
+
+    /** Runs known to be live whose agent card may still say idle (a run started on another device). */
+    val liveRuns: StateFlow<Map<String, LiveRun>> = liveState.asStateFlow()
+
+    fun publishLive(agentId: String, runId: String, status: String?): Boolean {
+        val key = status?.trim()?.uppercase().orEmpty()
+        if (agentId.isBlank() || runId.isBlank() || !isLiveStatus(key)) return false
+        synchronized(this) {
+            if (state.value[agentId]?.runId == runId) return false
+            val next = LiveRun(agentId, runId, key)
+            if (liveState.value[agentId] == next) return false
+            liveState.value = liveState.value + (agentId to next)
+        }
+        return true
+    }
+
     fun publish(agentId: String, runId: String, status: String?, result: String? = null): Boolean {
         val key = status?.trim()?.uppercase().orEmpty()
         if (agentId.isBlank() || runId.isBlank() || !isEndedRun(key)) return false
         val next = RunSettled(agentId, runId, key, result?.takeIf { it.isNotBlank() })
         synchronized(this) {
+            if (liveState.value[agentId] != null) liveState.value = liveState.value - agentId
             val current = state.value[agentId]
             if (current != null && current.runId == runId && current.status == key &&
                 (next.result == null || next.result == current.result)
@@ -60,6 +84,7 @@ class RunSettleHub(private val persist: (RunSettled) -> Unit = {}) {
     fun clear(agentId: String) {
         synchronized(this) {
             if (agentId in state.value) state.value = state.value - agentId
+            if (agentId in liveState.value) liveState.value = liveState.value - agentId
         }
     }
 
@@ -69,6 +94,7 @@ class RunSettleHub(private val persist: (RunSettled) -> Unit = {}) {
     suspend fun sweep(
         agents: List<AgentSummary>,
         limit: Int = SWEEP_LIMIT,
+        onSettled: (AgentSummary, Run) -> Unit = { _, _ -> },
         fetch: suspend (agentId: String, runId: String) -> Run?,
     ): Int {
         val targets = agents
@@ -82,7 +108,9 @@ class RunSettleHub(private val persist: (RunSettled) -> Unit = {}) {
             }.map { it.await() }
         }
         return runs.count { (agent, run) ->
-            run != null && publish(agent.id, run.id, run.status, run.result)
+            val done = run != null && publish(agent.id, run.id, run.status, run.result)
+            if (done) onSettled(agent, run!!)
+            done
         }
     }
 
@@ -93,18 +121,27 @@ class RunSettleHub(private val persist: (RunSettled) -> Unit = {}) {
 
 private fun isEndedRun(status: String): Boolean = status != "ARCHIVED" && isTerminalStatus(status)
 
-fun settleAgent(agent: AgentSummary, settled: RunSettled?): AgentSummary {
-    if (settled == null || settled.agentId != agent.id) return agent
-    if (agent.latestRunId != settled.runId) return agent
-    if (!isLiveStatus(agent.status)) return agent
-    return agent.copy(status = settled.status)
+fun settleAgent(agent: AgentSummary, settled: RunSettled?, live: LiveRun? = null): AgentSummary {
+    if (settled != null && settled.agentId == agent.id && agent.latestRunId == settled.runId) {
+        return if (isLiveStatus(agent.status)) agent.copy(status = settled.status) else agent
+    }
+    if (live != null && live.agentId == agent.id && agent.latestRunId == live.runId &&
+        !isLiveStatus(agent.status) && !agent.status.equals("ARCHIVED", true)
+    ) {
+        return agent.copy(status = live.status)
+    }
+    return agent
 }
 
-fun settleAgents(agents: List<AgentSummary>, settled: Map<String, RunSettled>): List<AgentSummary> {
-    if (settled.isEmpty()) return agents
+fun settleAgents(
+    agents: List<AgentSummary>,
+    settled: Map<String, RunSettled>,
+    live: Map<String, LiveRun> = emptyMap(),
+): List<AgentSummary> {
+    if (settled.isEmpty() && live.isEmpty()) return agents
     var changed = false
     val out = agents.map { agent ->
-        val next = settleAgent(agent, settled[agent.id])
+        val next = settleAgent(agent, settled[agent.id], live[agent.id])
         if (next !== agent) changed = true
         next
     }

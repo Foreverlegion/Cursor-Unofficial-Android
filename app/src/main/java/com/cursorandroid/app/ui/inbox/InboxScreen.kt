@@ -101,11 +101,21 @@ import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.visibleInbox
 import com.cursorandroid.app.data.notify.Notice
 import com.cursorandroid.app.data.notify.RunWatchScheduler
+import com.cursorandroid.app.data.notify.VisibleAgent
+import com.cursorandroid.app.data.repo.InboxPollPolicy
+import com.cursorandroid.app.data.repo.RefreshReason
+import com.cursorandroid.app.data.repo.applyRunChecks
+import com.cursorandroid.app.data.repo.inboxRefreshLoop
+import com.cursorandroid.app.data.repo.runCheckTargets
+import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.repo.ChatMeta
 import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -184,7 +194,7 @@ fun InboxScreen(
     var reloadJob by remember { mutableStateOf<Job?>(null) }
 
     fun applyAgents(incoming: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
-        val agents = settleAgents(incoming, container.runSettle.settled.value)
+        val agents = settleAgents(incoming, container.runSettle.settled.value, container.runSettle.liveRuns.value)
         items = agents
         nextCursor = cursor
         container.catalog.saveAgents(agents)
@@ -253,8 +263,9 @@ fun InboxScreen(
 
     val settledRuns by container.runSettle.settled.collectAsStateWithLifecycle()
     val localActive by container.runSettle.localActive.collectAsStateWithLifecycle()
-    LaunchedEffect(settledRuns) {
-        val next = settleAgents(items, settledRuns)
+    val liveRuns by container.runSettle.liveRuns.collectAsStateWithLifecycle()
+    LaunchedEffect(settledRuns, liveRuns) {
+        val next = settleAgents(items, settledRuns, liveRuns)
         if (next !== items) {
             items = next
             container.catalog.saveAgents(next)
@@ -279,31 +290,77 @@ fun InboxScreen(
     LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
     }
+    val newestNotice = notices.maxByOrNull { it.at }?.id
+    val noticeAtOpen = remember { newestNotice }
+    LaunchedEffect(newestNotice) {
+        if (newestNotice != null && newestNotice != noticeAtOpen) {
+            container.inboxRefresh.request(RefreshReason.Notification)
+        }
+    }
     LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
         if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
-        while (true) {
-            delay(5_000)
-            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
-            if (reloadJob?.isActive == true && refreshing) continue
-            try {
-                val page = container.repo.listAgentsPage(includeArchived = true)
-                val incoming = container.repo.hydrateStatuses(page.entries())
-                val agents = mergeInboxAgents(items, incoming)
-                applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
-                container.runSettle.sweep(items) { agentId, runId ->
-                    runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
-                }
-                metas = container.chats.snapshot()
-                runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
-                git = loadGit()
-                val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
-                if (next != null) {
-                    computers = next
-                    machinePrefs = container.machines.prefs()
-                    container.catalog.saveComputers(next)
-                }
-            } catch (_: Exception) {
-            }
+        val hub = container.inboxRefresh
+        hub.drain()
+        VisibleAgent.inboxPolling(true)
+        var machinesAt = 0L
+        try {
+            inboxRefreshLoop(
+                first = RefreshReason.Resume,
+                intervalMs = { failures ->
+                    InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures)
+                },
+                now = System::currentTimeMillis,
+                awaitTrigger = { hub.await(it) },
+                pause = { delay(it) },
+                poll = poll@{ reason, tick ->
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
+                    if (reloadJob?.isActive == true && refreshing) return@poll true
+                    val page = container.repo.listAgentsPage(includeArchived = true)
+                    val fresh = page.entries()
+                    val checks = runCheckTargets(items, fresh, container.runSettle.settled.value)
+                    val full = InboxPollPolicy.fullHydrate(reason, tick)
+                    val only = if (full) null else {
+                        (fresh.filter { isLiveStatus(it.status) } + checks).map { it.id }.toSet()
+                    }
+                    val incoming = container.repo.hydrateStatuses(fresh, only = only)
+                    if (checks.isNotEmpty()) {
+                        val runs = coroutineScope {
+                            checks.map { agent ->
+                                async { agent to runCatching { container.repo.getRun(agent.id, agent.latestRunId!!) }.getOrNull() }
+                            }.awaitAll()
+                        }
+                        applyRunChecks(container.runSettle, runs)
+                    }
+                    val agents = mergeInboxAgents(items, incoming)
+                    applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
+                    if (reason != RefreshReason.Tick || tick % 2 == 0) {
+                        container.runSettle.sweep(
+                            items,
+                            onSettled = { agent, run ->
+                                container.notifier.notifyIfNeeded(agent.id, agent.name, run.id, run.status, run.result)
+                            },
+                        ) { agentId, runId ->
+                            runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
+                        }
+                    }
+                    metas = container.chats.snapshot()
+                    runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                    git = loadGit()
+                    val clock = System.currentTimeMillis()
+                    if (InboxPollPolicy.machinesDue(reason, machinesAt, clock)) {
+                        machinesAt = clock
+                        val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
+                        if (next != null) {
+                            computers = next
+                            machinePrefs = container.machines.prefs()
+                            container.catalog.saveComputers(next)
+                        }
+                    }
+                    true
+                },
+            )
+        } finally {
+            VisibleAgent.inboxPolling(false)
         }
     }
 

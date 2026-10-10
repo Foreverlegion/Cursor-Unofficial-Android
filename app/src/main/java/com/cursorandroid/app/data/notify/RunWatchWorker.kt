@@ -24,7 +24,7 @@ class RunWatchWorker(
         val agentId = inputData.getString(KEY_AGENT_ID) ?: return Result.failure()
         val runId = inputData.getString(KEY_RUN_ID) ?: return Result.failure()
         val agentName = inputData.getString(KEY_AGENT_NAME)
-        if (VisibleAgent.isOpenInForeground(agentId)) {
+        if (VisibleAgent.isOpenInForeground(agentId) || VisibleAgent.inboxCoversRuns()) {
             RunWatchScheduler.chainNextPoll(applicationContext, agentId, runId, agentName)
             return Result.success()
         }

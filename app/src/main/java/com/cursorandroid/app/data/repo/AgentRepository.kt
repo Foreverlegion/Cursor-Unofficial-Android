@@ -177,8 +177,12 @@ class AgentRepository(
         }
     }
 
-    suspend fun hydrateStatuses(agents: List<AgentSummary>, limit: Int = 15): List<AgentSummary> {
-        val targets = agents.take(limit)
+    suspend fun hydrateStatuses(
+        agents: List<AgentSummary>,
+        limit: Int = 15,
+        only: Set<String>? = null,
+    ): List<AgentSummary> {
+        val targets = agents.take(limit).filter { only == null || it.id in only }
         if (targets.isEmpty()) return agents
         val foundRepos = HashMap<String, String>()
         val fresh = coroutineScope {

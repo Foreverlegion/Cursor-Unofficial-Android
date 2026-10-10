@@ -7,6 +7,15 @@ object VisibleAgent {
     private val id = AtomicReference<String?>(null)
     private val started = AtomicInteger(0)
 
+    private val inbox = AtomicInteger(0)
+
+    fun inboxPolling(active: Boolean) {
+        if (active) inbox.incrementAndGet() else inbox.updateAndGet { (it - 1).coerceAtLeast(0) }
+    }
+
+    /** The visible inbox polls the agent list and the live runs itself, so background watchers sit out. */
+    fun inboxCoversRuns(): Boolean = started.get() > 0 && inbox.get() > 0
+
     fun set(agentId: String?) {
         id.set(agentId)
     }
@@ -28,5 +37,6 @@ object VisibleAgent {
     internal fun resetForTest() {
         id.set(null)
         started.set(0)
+        inbox.set(0)
     }
 }
