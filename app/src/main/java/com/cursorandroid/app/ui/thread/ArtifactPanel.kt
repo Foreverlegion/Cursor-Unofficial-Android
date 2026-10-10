@@ -19,8 +19,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.api.ArtifactItem
+import com.cursorandroid.app.data.repo.ArtifactHistoryLogic
+import com.cursorandroid.app.data.repo.ArtifactTime
 
 @Composable
 fun LatestArtifactCard(
@@ -60,6 +63,9 @@ fun ArtifactHistoryDialog(
             if (items.isEmpty()) {
                 Text("None saved in the last few days.")
             } else {
+                val ordered = items.sortedWith(
+                    compareByDescending { ArtifactHistoryLogic.sortMillis(it.whenIso()) },
+                )
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -67,7 +73,7 @@ fun ArtifactHistoryDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items.forEach { item ->
+                    ordered.forEach { item ->
                         ArtifactRow(
                             item = item,
                             onOpen = { onOpen(item) },
@@ -95,15 +101,32 @@ private fun ArtifactRow(
             .widthIn(max = 520.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            item.fileName(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
+        Row(
             modifier = Modifier
                 .weight(1f)
                 .clickable(onClick = onOpen)
                 .padding(end = 8.dp),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                item.fileName(),
+                modifier = Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val whenLabel = ArtifactTime.format(item.whenIso())
+            if (whenLabel.isNotEmpty()) {
+                Text(
+                    whenLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
         TextButton(onClick = onSave) { Text("Save") }
     }
 }

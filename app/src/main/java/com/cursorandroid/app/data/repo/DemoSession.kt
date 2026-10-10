@@ -68,7 +68,17 @@ class DemoSession {
     fun pools(): List<WorkerPool> = POOLS
 
     fun artifacts(id: String): List<ArtifactItem> = synchronized(lock) {
-        if (id == NOTES) listOf(ArtifactItem(path = "release-notes.md", sizeBytes = 840)) else emptyList()
+        if (id == NOTES) {
+            listOf(
+                ArtifactItem(
+                    path = "release-notes.md",
+                    sizeBytes = 840,
+                    updatedAt = "2026-10-06T18:20:00Z",
+                ),
+            )
+        } else {
+            emptyList()
+        }
     }
 
     fun usage(id: String): AgentUsageResponse {

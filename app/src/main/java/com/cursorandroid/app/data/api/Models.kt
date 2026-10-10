@@ -868,8 +868,11 @@ data class ArtifactItem(
     val path: String,
     val sizeBytes: Long? = null,
     val updatedAt: String? = null,
+    val createdAt: String? = null,
 ) {
     fun fileName(): String = path.substringAfterLast('/')
+
+    fun whenIso(): String? = updatedAt?.takeIf { it.isNotBlank() } ?: createdAt?.takeIf { it.isNotBlank() }
 }
 
 @Serializable

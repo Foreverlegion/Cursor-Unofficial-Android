@@ -348,8 +348,15 @@ class ThreadViewModel(
     }
 
     private fun ingestArtifacts(items: List<ArtifactItem>) {
-        pinnedArtifact = container.artifactHistory.ingest(agentId, items)
+        pinnedArtifact = container.artifactHistory.ingest(agentId, items, artifactProducedAt())
         artifactHistory = container.artifactHistory.history(agentId)
+    }
+
+    private fun artifactProducedAt(): String? {
+        return run?.updatedAt?.takeIf { it.isNotBlank() }
+            ?: run?.createdAt?.takeIf { it.isNotBlank() }
+            ?: agent?.updatedAt?.takeIf { it.isNotBlank() }
+            ?: agent?.createdAt?.takeIf { it.isNotBlank() }
     }
 
     private fun hidePinnedArtifact() {
@@ -1268,7 +1275,7 @@ fun ThreadScreen(
                     }
                     val latest = vm.pinnedArtifact
                     if (latest != null) {
-                        item(key = "artifact-${latest.path}") {
+                        item(key = "artifact-${latest.path}-${latest.whenIso().orEmpty()}") {
                             LatestArtifactCard(
                                 item = latest,
                                 onOpen = { openArtifact(latest) },
