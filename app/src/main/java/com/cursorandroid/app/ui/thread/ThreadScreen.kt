@@ -210,12 +210,21 @@ class ThreadViewModel(
     private val refreshLock = Mutex()
     private val lineGate = Any()
 
+    @Volatile
+    private var refreshedAt = 0L
+
+    @Volatile
+    var foreground = true
+
     init {
-        viewModelScope.launch { refresh() }
+        refresh(force = true)
         startWatch()
     }
 
-    fun refresh() {
+    fun refresh(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - refreshedAt in 0 until REFRESH_MIN_GAP_MS) return
+        refreshedAt = now
         viewModelScope.launch {
             refreshLock.withLock {
                 try {
@@ -402,6 +411,10 @@ class ThreadViewModel(
     }
 
     private suspend fun checkBehind(detail: AgentDetail) {
+        val now = System.currentTimeMillis()
+        val last = behindCheckedAt[agentId] ?: 0L
+        if (now - last in 0 until BEHIND_MIN_GAP_MS) return
+        behindCheckedAt[agentId] = now
         val meta = container.chats.meta(agentId)
         val snap = container.catalog.gitSnaps()[agentId]
         val git = run?.git?.branches?.firstOrNull()
@@ -439,7 +452,7 @@ class ThreadViewModel(
         viewModelScope.launch {
             try {
                 container.repo.cancel(agentId, runId)
-                refresh()
+                refresh(force = true)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -769,11 +782,14 @@ class ThreadViewModel(
         watchJob?.cancel()
         watchJob = viewModelScope.launch {
             while (isActive) {
-                delay(2_000)
-                if (!busy) attachLatestRun()
+                delay(WATCH_MS)
+                if (!foreground || busy || streamLive()) continue
+                attachLatestRun()
             }
         }
     }
+
+    private fun streamLive(): Boolean = streaming && streamJob?.isActive == true
 
     private suspend fun attachLatestRun() {
         val detail = runCatching { container.repo.getAgent(agentId) }.getOrNull() ?: return
@@ -809,7 +825,8 @@ class ThreadViewModel(
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             while (isActive && run?.id == runId && run?.isActive() == true) {
-                delay(4_000)
+                delay(if (streamLive()) POLL_STREAMING_MS else POLL_MS)
+                if (!foreground && streamLive()) continue
                 val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
                 run = latest
                 if (!latest.isActive()) {
@@ -932,6 +949,17 @@ class ThreadViewModel(
         pollJob?.cancel()
         watchJob?.cancel()
         super.onCleared()
+    }
+
+    private companion object {
+        const val WATCH_MS = 4_000L
+        const val POLL_MS = 4_000L
+        const val POLL_STREAMING_MS = 15_000L
+        const val REFRESH_MIN_GAP_MS = 15_000L
+
+        // Behind-base check uses unauthenticated GitHub/GitLab calls (60/hour/IP on GitHub).
+        const val BEHIND_MIN_GAP_MS = 10L * 60L * 1000L
+        val behindCheckedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
     }
 }
 
@@ -1060,6 +1088,14 @@ fun ThreadScreen(
 
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
         vm.persistNow()
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        vm.foreground = true
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        vm.foreground = false
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
