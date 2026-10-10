@@ -7,6 +7,7 @@ import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
+import com.cursorandroid.app.data.api.MeResponse
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.api.WorkerPool
@@ -89,6 +90,37 @@ class CatalogCache(
         active().edit { putString("git", json.encodeToString(next)) }
     }
 
+    fun me(): MeResponse? {
+        val raw = active().getString("me", null) ?: return null
+        return runCatching { json.decodeFromString<MeResponse>(raw) }.getOrNull()
+    }
+
+    fun saveMe(value: MeResponse) {
+        active().edit { putString("me", json.encodeToString(value)) }
+    }
+
+    fun usage(): UsageSample? {
+        val raw = active().getString("usage_sample", null) ?: return null
+        return runCatching { json.decodeFromString<UsageSample>(raw) }.getOrNull()
+    }
+
+    fun saveUsage(value: UsageSample) {
+        active().edit { putString("usage_sample", json.encodeToString(value)) }
+    }
+
+    /** Repo URL per agent from its Get Agent record. A blank value means the agent has no repo. */
+    fun agentRepos(): Map<String, String> {
+        val raw = active().getString("agent_repos", null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    fun saveAgentRepos(found: Map<String, String>) {
+        if (found.isEmpty()) return
+        val next = agentRepos().toMutableMap()
+        next.putAll(found)
+        active().edit { putString("agent_repos", json.encodeToString(next)) }
+    }
+
     fun removeGit(agentId: String) {
         val next = gitSnaps().toMutableMap()
         if (next.remove(agentId) != null) {
@@ -127,6 +159,8 @@ class CatalogCache(
             remove("settled_$agentId")
         }
         removeGit(agentId)
+        val repos = agentRepos()
+        if (agentId in repos) active().edit { putString("agent_repos", json.encodeToString(repos - agentId)) }
     }
 
     fun forgeLogin(fingerprint: String): String? {
@@ -154,10 +188,15 @@ class CatalogCache(
             val oldBranches = branchAt.drop(maxBranchLists).flatMap { listOf(it, it.removeSuffix("_at")) }
             val git = gitSnapsIn(prefs)
             val goneGit = git.keys.filter { it !in keepAgents }
-            if (agentRows.isEmpty() && oldBranches.isEmpty() && goneGit.isEmpty()) continue
+            val repos = prefs.getString("agent_repos", null)
+                ?.let { raw -> runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrNull() }
+                .orEmpty()
+            val goneRepos = repos.keys.filter { it !in keepAgents }
+            if (agentRows.isEmpty() && oldBranches.isEmpty() && goneGit.isEmpty() && goneRepos.isEmpty()) continue
             prefs.edit {
                 (agentRows + oldBranches).forEach { remove(it) }
                 if (goneGit.isNotEmpty()) putString("git", json.encodeToString(git - goneGit.toSet()))
+                if (goneRepos.isNotEmpty()) putString("agent_repos", json.encodeToString(repos - goneRepos.toSet()))
             }
         }
     }

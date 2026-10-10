@@ -81,6 +81,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
+import com.cursorandroid.app.ui.theme.LocalAppearance
 import android.content.Intent
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -1331,7 +1332,7 @@ fun ThreadScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp),
                 ) {
                     items(rows, key = { row ->
                         when (row) {
@@ -1700,6 +1701,7 @@ private fun TranscriptBubble(
         NoticeBlock(line, onCopy = onCopy)
         return
     }
+    val appearance = LocalAppearance.current
     val isUser = line.kind == "user"
     val align = if (isUser) Alignment.End else Alignment.Start
     val bubbleColor = if (isUser) PlayColors.UserBubble else PlayColors.AgentBubble
@@ -1748,7 +1750,7 @@ private fun TranscriptBubble(
                             menu = true
                         },
                     )
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = appearance.bubblePadH.dp, vertical = appearance.bubblePadV.dp),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (line.thumbs.isNotEmpty()) {
@@ -1768,7 +1770,7 @@ private fun TranscriptBubble(
                             }
                         }
                     }
-                    Text(line.text, color = textColor, style = MaterialTheme.typography.bodyMedium)
+                    MessageText(line.text, textColor)
                 }
             }
             MessageClipMenu(

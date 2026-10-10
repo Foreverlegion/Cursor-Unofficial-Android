@@ -3,6 +3,7 @@ package com.cursorandroid.app.ui.inbox
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.sortKey
+import com.cursorandroid.app.data.repo.RepoGroupPrefs
 import com.cursorandroid.app.ui.status.RunIndicator
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.shortRepo
@@ -41,7 +42,13 @@ data class RepoGroup(
     val label: String,
     val agents: List<AgentSummary>,
     val running: Int,
-)
+    val path: String = "",
+    val customName: String? = null,
+    val favorite: Boolean = false,
+    val color: Int = 0,
+) {
+    val title: String get() = customName ?: label
+}
 
 data class CloudArrangement(
     val pinned: List<AgentSummary>,
@@ -56,6 +63,26 @@ fun repoGroupKey(url: String?): String = shortRepo(url)?.lowercase() ?: ""
 fun repoGroupLabel(url: String?): String {
     val path = shortRepo(url) ?: return "No repo"
     return path.substringAfterLast('/').ifBlank { "No repo" }
+}
+
+/**
+ * Fills a missing repo on each git snapshot. Newer agents often have no run git yet, so the repo
+ * comes from the Get Agent record, then from what the app stored when it launched the chat.
+ */
+fun withRepoFallbacks(
+    git: Map<String, GitSnap>,
+    agentRepos: Map<String, String>,
+    chatRepos: Map<String, String?>,
+): Map<String, GitSnap> {
+    val out = LinkedHashMap(git)
+    val ids = git.keys + agentRepos.keys + chatRepos.keys
+    for (id in ids) {
+        val snap = git[id]
+        if (!snap?.repoUrl.isNullOrBlank()) continue
+        val repo = agentRepos[id]?.takeIf { it.isNotBlank() } ?: chatRepos[id]?.takeIf { it.isNotBlank() } ?: continue
+        out[id] = (snap ?: GitSnap(agentId = id)).copy(repoUrl = repo)
+    }
+    return out
 }
 
 fun cloudBucket(agent: AgentSummary, needsApproval: Boolean): CloudFilter {
@@ -77,6 +104,7 @@ fun arrangeCloudAgents(
     revealFinished: Boolean,
     groupByRepo: Boolean,
     nowMillis: Long,
+    groupPrefs: RepoGroupPrefs = RepoGroupPrefs(),
 ): CloudArrangement {
     val matched = agents.filter { agent ->
         val bucket = cloudBucket(agent, agent.id in approvalIds)
@@ -98,7 +126,7 @@ fun arrangeCloudAgents(
     return if (groupByRepo) {
         CloudArrangement(
             pinned = pinned,
-            groups = repoGroups(body, git, approvalIds),
+            groups = repoGroups(body, git, approvalIds, groupPrefs),
             favorites = emptyList(),
             rest = emptyList(),
             hiddenFinished = aged.size,
@@ -118,21 +146,35 @@ fun repoGroups(
     agents: List<AgentSummary>,
     git: Map<String, GitSnap>,
     approvalIds: Set<String>,
+    prefs: RepoGroupPrefs = RepoGroupPrefs(),
 ): List<RepoGroup> {
     val buckets = LinkedHashMap<String, MutableList<AgentSummary>>()
     for (agent in agents) {
         val key = repoGroupKey(git[agent.id]?.repoUrl)
         buckets.getOrPut(key) { mutableListOf() }.add(agent)
     }
-    return buckets.map { (key, members) ->
+    val byActivity = buckets.map { (key, members) ->
         val sorted = members.sortedByDescending { it.sortKey() }
+        val url = git[sorted.first().id]?.repoUrl
+        val style = prefs.style(key)
         RepoGroup(
             key = key,
-            label = repoGroupLabel(git[sorted.first().id]?.repoUrl),
+            label = repoGroupLabel(url),
             agents = sorted,
             running = sorted.count { cloudBucket(it, it.id in approvalIds) == CloudFilter.Running },
+            path = shortRepo(url).orEmpty(),
+            customName = style.name?.takeIf { it.isNotBlank() },
+            favorite = style.favorite,
+            color = style.color,
         )
     }.sortedByDescending { group -> group.agents.maxOf { it.sortKey() } }
+    val manual = if (prefs.order.isEmpty()) {
+        byActivity
+    } else {
+        val rank = prefs.order.withIndex().associate { it.value to it.index }
+        byActivity.sortedBy { rank[it.key] ?: Int.MAX_VALUE }
+    }
+    return manual.filter { it.favorite } + manual.filterNot { it.favorite }
 }
 
 internal fun finishedTooOld(

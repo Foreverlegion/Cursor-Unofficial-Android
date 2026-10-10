@@ -152,6 +152,15 @@ class LocalChatStore(context: Context) {
             durable.edit { putStringSet(COLLAPSED_REPOS, value.toHashSet()) }
         }
 
+    var repoGroupPrefs: RepoGroupPrefs
+        get() {
+            val raw = durable.getString(REPO_GROUP_PREFS, null) ?: return RepoGroupPrefs()
+            return runCatching { json.decodeFromString<RepoGroupPrefs>(raw) }.getOrDefault(RepoGroupPrefs())
+        }
+        set(value) {
+            durable.edit { putString(REPO_GROUP_PREFS, json.encodeToString(value)) }
+        }
+
     fun setOpenFinishedPr(agentId: String, open: Boolean) {
         update(agentId) { it.copy(openFinishedPr = open) }
     }
@@ -213,6 +222,7 @@ class LocalChatStore(context: Context) {
         private const val COMPACT_CARDS = "agent_compact_cards"
         private const val HIDE_FINISHED = "agent_hide_finished_days"
         private const val COLLAPSED_REPOS = "agent_collapsed_repos"
+        private const val REPO_GROUP_PREFS = "agent_repo_group_prefs"
     }
 }
 

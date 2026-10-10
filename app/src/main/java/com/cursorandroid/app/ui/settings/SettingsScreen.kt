@@ -18,6 +18,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import com.cursorandroid.app.data.repo.USAGE_WINDOW_DAYS
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -55,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
-import com.cursorandroid.app.data.api.AccountOverview
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
@@ -64,7 +68,6 @@ import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.FeedbackPolicy
 import com.cursorandroid.app.data.repo.GithubRepos
 import com.cursorandroid.app.data.repo.SafeLinks
-import com.cursorandroid.app.data.repo.UsageSample
 import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.inbox.HideFinishedAge
@@ -155,14 +158,8 @@ internal fun SettingsScreenContent(
         }
     }
     var info by remember { mutableStateOf<String?>(null) }
-    var overview by remember { mutableStateOf<AccountOverview?>(null) }
-    var overviewError by remember { mutableStateOf<String?>(null) }
-    var overviewLoading by remember { mutableStateOf(true) }
-    var overviewAttempt by remember { mutableIntStateOf(0) }
-    var usageSample by remember { mutableStateOf<UsageSample?>(null) }
-    var usageError by remember { mutableStateOf<String?>(null) }
-    var usageLoading by remember { mutableStateOf(true) }
-    var usageAttempt by remember { mutableIntStateOf(0) }
+    val overview = remember(container) { OverviewModel(container.repo, container.catalog) }
+    val overviewScope = rememberCoroutineScope()
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
     var notifyApprovals by remember { mutableStateOf(container.store.notifyOnApproval) }
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
@@ -219,29 +216,8 @@ internal fun SettingsScreenContent(
         modelItems = runCatching { container.repo.models() }.getOrDefault(modelItems)
         githubLogin = container.repo.githubLogin()
     }
-    LaunchedEffect(overviewAttempt) {
-        overviewLoading = true
-        overviewError = null
-        val result = runCatching { container.repo.accountOverview() }
-        if (result.isSuccess) {
-            overview = result.getOrNull()
-            overviewError = null
-        } else {
-            overviewError = "Couldn't load your stats. Tap to retry."
-        }
-        overviewLoading = false
-    }
-    LaunchedEffect(usageAttempt) {
-        usageLoading = true
-        usageError = null
-        val result = runCatching { container.repo.recentUsage() }
-        if (result.isSuccess) {
-            usageSample = result.getOrNull()
-            usageError = null
-        } else {
-            usageError = "Couldn't load token usage. Tap to retry."
-        }
-        usageLoading = false
+    LaunchedEffect(page == SettingsPage.About) {
+        if (page == SettingsPage.About) overview.refreshAll()
     }
     LaunchedEffect(openAccountTick) {
         if (openAccountTick > 0) page = SettingsPage.Feedback
@@ -327,45 +303,7 @@ internal fun SettingsScreenContent(
                             SettingsLinkRow(item.title, item.summary) { page = item }
                         }
                     }
-                    SettingsPage.Appearance -> {
-                        Text(
-                            "Theme color",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        FlowRow(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            ThemeColorPresets.forEach { color ->
-                                val selected = themeColor == color
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(color))
-                                        .border(
-                                            width = if (selected) 3.dp else 1.dp,
-                                            color = if (selected) {
-                                                MaterialTheme.colorScheme.onBackground
-                                            } else {
-                                                MaterialTheme.colorScheme.outline
-                                            },
-                                            shape = CircleShape,
-                                        )
-                                        .clickable {
-                                            themeColor = color
-                                            container.store.themeColor = color
-                                            onAppearanceChanged()
-                                        },
-                                )
-                            }
-                        }
-                    }
+                    SettingsPage.Appearance -> AppearancePage(container, onAppearanceChanged)
                     SettingsPage.AgentList -> {
                         SettingsSwitchRow(
                             title = "Group by repo",
@@ -604,11 +542,7 @@ internal fun SettingsScreenContent(
                         }
                     }
                     SettingsPage.About -> {
-                        val me = overview?.me
-                        val who = listOfNotNull(
-                            me?.userEmail,
-                            listOfNotNull(me?.userFirstName, me?.userLastName).joinToString(" ").ifBlank { null },
-                        ).joinToString(" · ").ifBlank { me?.apiKeyName ?: "Signed in" }
+                        val who = overview.me.displayLine() ?: "Signed in"
                         SettingsLinkRow(
                             title = who,
                             summary = "Signed in on this phone",
@@ -616,27 +550,28 @@ internal fun SettingsScreenContent(
                             onInfo = { info = it },
                             onClick = { info = KEY_INFO },
                         )
-                        OverviewSection(
-                            loading = overviewLoading,
-                            error = overviewError,
-                            overview = overview,
-                            onRetry = { overviewAttempt++ },
-                        )
-                        val sample = usageSample
+                        OverviewSection(model = overview, scope = overviewScope)
+                        val sample = overview.usage
                         val used = sample?.usage
+                        val usageBusy = OverviewRow.Usage in overview.refreshing
+                        val usageFailed = OverviewRow.Usage in overview.failed
+                        val windowLabel = "Last ${sample?.windowDays ?: USAGE_WINDOW_DAYS} days"
                         val usageSummary = when {
-                            usageLoading -> "Loading token totals…"
-                            usageError != null -> usageError
-                            sample == null -> "Couldn't load token usage. Tap to retry."
-                            sample.sampledAgents == 0 -> "No recent chats"
-                            else -> "${fmt.format(used?.displayTotal() ?: 0)} tokens across ${sample.sampledAgents} recent chats"
+                            sample == null && usageBusy -> "$windowLabel · loading…"
+                            sample == null -> "$windowLabel · couldn't load. Tap to retry."
+                            sample.sampledAgents == 0 -> "$windowLabel · no recent chats"
+                            else -> buildString {
+                                append(windowLabel)
+                                append(" · ")
+                                append(fmt.format(used?.displayTotal() ?: 0))
+                                append(" tokens across ")
+                                append(sample.sampledAgents)
+                                append(if (sample.sampledAgents == 1) " chat" else " chats")
+                                if (usageFailed) append(" · couldn't refresh")
+                            }
                         }
                         val usageDetail = buildString {
                             append(USAGE_INFO)
-                            if (usageError != null) {
-                                append("\n\n")
-                                append(usageError)
-                            }
                             if (used != null && (sample?.sampledAgents ?: 0) > 0) {
                                 append("\n\n")
                                 append("in ${fmt.format(used.inputTokens ?: 0)}")
@@ -653,13 +588,15 @@ internal fun SettingsScreenContent(
                         }
                         SettingsLinkRow(
                             title = "Usage",
-                            summary = usageSummary.orEmpty(),
+                            summary = usageSummary,
                             info = usageDetail,
                             onInfo = { info = it },
+                            refreshing = usageBusy,
+                            summaryLines = 2,
                             onClick = {
-                                if (usageError != null || (!usageLoading && sample == null)) {
-                                    usageAttempt++
-                                } else if (!usageLoading && sample != null) {
+                                if (sample == null || usageFailed) {
+                                    if (!usageBusy) overviewScope.launch { overview.refreshUsage() }
+                                } else {
                                     info = usageDetail
                                 }
                             },
@@ -698,44 +635,115 @@ internal fun SettingsScreenContent(
 }
 
 @Composable
-private fun OverviewSection(
-    loading: Boolean,
-    error: String?,
-    overview: AccountOverview?,
-    onRetry: () -> Unit,
-) {
-    Text(
-        "Overview",
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-    )
-    if (overview == null && !loading) {
-        SettingsLinkRow(
-            title = "Overview",
-            summary = error ?: "Couldn't load your stats. Tap to retry.",
-            onClick = onRetry,
-        )
-        return
-    }
+private fun OverviewSection(model: OverviewModel, scope: CoroutineScope) {
     val fmt = remember { NumberFormat.getIntegerInstance(Locale.getDefault()) }
-    fun value(text: String) = if (loading && overview == null) "Loading…" else text
-    val stats = overview
-    SettingsStaticRow("Cloud agents", value(fmt.format(stats?.agentCount ?: 0)))
-    SettingsStaticRow("Running", value(fmt.format(stats?.runningCount ?: 0)))
-    SettingsStaticRow(
-        "Remote machines online",
-        value("${fmt.format(stats?.computersOnline ?: 0)} of ${fmt.format(stats?.computerCount ?: 0)}"),
-    )
-    SettingsStaticRow("Pools", value(fmt.format(stats?.poolCount ?: 0)))
-    SettingsStaticRow("Cached repos", value(fmt.format(stats?.repoCount ?: 0)))
-    if (error != null && !loading) {
-        SettingsLinkRow(
-            title = "Refresh stats",
-            summary = error,
-            onClick = onRetry,
+    val counts = model.counts()
+    val busy = model.refreshing
+    val failed = model.failed
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Overview",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
         )
+        if (busy.any { it != OverviewRow.Usage }) RefreshDot()
     }
+    fun value(text: String?, vararg rows: OverviewRow): String {
+        val rowFailed = rows.any { it in failed }
+        val rowBusy = rows.any { it in busy }
+        return when {
+            text == null && rowBusy -> "Loading…"
+            text == null -> "Couldn't load. Tap to retry."
+            rowFailed && !rowBusy -> "$text · couldn't refresh"
+            else -> text
+        }
+    }
+    fun retry(row: OverviewRow, run: suspend () -> Unit): (() -> Unit)? =
+        if (row in busy) null else ({ scope.launch { run() } })
+    val agentsText = counts?.let { fmt.format(it.agentCount) }
+    val runningText = counts?.let { fmt.format(it.runningCount) }
+    val machinesText = if (model.agents == null && model.computers == null) {
+        null
+    } else {
+        "${fmt.format(counts?.computersOnline ?: 0)} of ${fmt.format(counts?.computerCount ?: 0)}"
+    }
+    OverviewValueRow(
+        "Cloud agents",
+        value(agentsText, OverviewRow.Agents),
+        OverviewRow.Agents in busy,
+        if (agentsText == null) retry(OverviewRow.Agents) { model.refreshAgentsAndMachines() } else null,
+    )
+    OverviewValueRow(
+        "Running",
+        value(runningText, OverviewRow.Agents),
+        OverviewRow.Agents in busy,
+        if (runningText == null) retry(OverviewRow.Agents) { model.refreshAgentsAndMachines() } else null,
+    )
+    OverviewValueRow(
+        "Remote machines online",
+        value(machinesText, OverviewRow.Machines, OverviewRow.Agents),
+        OverviewRow.Machines in busy,
+        if (machinesText == null) retry(OverviewRow.Machines) { model.refreshAgentsAndMachines() } else null,
+    )
+    val poolsText = model.pools?.let { fmt.format(it.size) }
+        ?: if (OverviewRow.Pools !in busy && OverviewRow.Pools !in failed) "0" else null
+    OverviewValueRow(
+        "Pools",
+        value(poolsText, OverviewRow.Pools),
+        OverviewRow.Pools in busy,
+        if (poolsText == null) retry(OverviewRow.Pools) { model.refreshPools() } else null,
+    )
+    val reposText = model.repoCount?.let { fmt.format(it) }
+    OverviewValueRow(
+        "Cached repos",
+        value(reposText, OverviewRow.Repos),
+        OverviewRow.Repos in busy,
+        if (reposText == null) retry(OverviewRow.Repos) { model.refreshRepos() } else null,
+    )
+}
+
+@Composable
+private fun RefreshDot() {
+    CircularProgressIndicator(
+        modifier = Modifier.size(12.dp),
+        strokeWidth = 1.5.dp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun OverviewValueRow(
+    title: String,
+    value: String,
+    refreshing: Boolean,
+    onRetry: (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onRetry != null) Modifier.clickable(onClick = onRetry) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (refreshing) RefreshDot()
+    }
+    HorizontalDivider()
 }
 
 @Composable
@@ -774,7 +782,7 @@ private fun SettingsSwitchRow(
 }
 
 @Composable
-private fun SettingsChoiceRow(
+internal fun SettingsChoiceRow(
     title: String,
     summary: String,
     onClick: () -> Unit,
@@ -813,6 +821,8 @@ internal fun SettingsLinkRow(
     summary: String,
     info: String? = null,
     onInfo: (String) -> Unit = {},
+    refreshing: Boolean = false,
+    summaryLines: Int = 1,
     onClick: () -> Unit,
 ) {
     Row(
@@ -828,10 +838,11 @@ internal fun SettingsLinkRow(
                 summary,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = summaryLines,
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (refreshing) RefreshDot()
         if (info != null) {
             IconButton(onClick = { onInfo(info) }) {
                 Icon(Icons.Outlined.Info, contentDescription = "About $title")

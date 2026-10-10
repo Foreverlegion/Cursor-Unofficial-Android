@@ -15,6 +15,11 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.theme.Appearance
+import com.cursorandroid.app.ui.theme.ChatDensity
+import com.cursorandroid.app.ui.theme.CodeFont
+import com.cursorandroid.app.ui.theme.CursorTheme
+import com.cursorandroid.app.ui.theme.UiFont
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import org.junit.Before
@@ -78,6 +83,44 @@ class SettingsPagesRenderTest {
             compose.waitForIdle()
             compose.onAllNodesWithText(page.title)[0].assertIsDisplayed()
         }
+    }
+
+    @Test
+    fun appearancePageRendersWithBundledFontsAndScale() {
+        val c = container()
+        c.store.uiFont = "inter"
+        c.store.codeFont = "jetbrains_mono"
+        c.store.textScalePct = 120
+        c.store.chatDensity = "compact"
+        compose.setContent {
+            val appearance = Appearance(
+                uiFont = UiFont.fromId(c.store.uiFont),
+                codeFont = CodeFont.fromId(c.store.codeFont),
+                textScalePct = c.store.textScalePct,
+                density = ChatDensity.fromId(c.store.chatDensity),
+            )
+            CursorTheme(appearance = appearance) {
+                SettingsScreenContent(
+                    container = c,
+                    showBack = true,
+                    onBack = {},
+                    onSignedOut = {},
+                    initialPage = SettingsPage.Appearance,
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Preview").assertIsDisplayed()
+        compose.onNodeWithText("Font").assertExists()
+    }
+
+    @Test
+    fun aboutPageShowsCachedRowsAndUsageWindowWithoutWaiting() {
+        val c = container()
+        render(SettingsPage.About, c)
+        compose.onNodeWithText("Overview").assertIsDisplayed()
+        compose.onNodeWithText("Cloud agents").assertIsDisplayed()
+        compose.onNodeWithText("Usage").assertExists()
     }
 
     @Test
