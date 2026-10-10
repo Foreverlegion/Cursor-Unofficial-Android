@@ -1396,35 +1396,9 @@ fun ThreadScreen(
         )
     }
 
-    var stickToBottom by remember(agentId) { mutableStateOf(true) }
-    var programmaticScroll by remember(agentId) { mutableStateOf(false) }
+    val follow = rememberBottomFollow(agentId, listState)
     val growKey = threadScrollKey(rows, liveThink, showTyping)
-
-    suspend fun snapToBottom() {
-        programmaticScroll = true
-        stickToBottom = true
-        try {
-            listState.scrollToBottom()
-        } finally {
-            programmaticScroll = false
-        }
-    }
-
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            listState.isScrollInProgress to listState.isPinnedToBottom()
-        }.collect { (scrolling, pinned) ->
-            if (programmaticScroll) return@collect
-            if (scrolling && !pinned) stickToBottom = false
-            else if (!scrolling && pinned) stickToBottom = true
-        }
-    }
-
-    LaunchedEffect(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey, stickToBottom) {
-        if (stickToBottom && !listState.isScrollInProgress) {
-            snapToBottom()
-        }
-    }
+    BottomFollowEffects(follow, listOf(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey))
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.snack) {
@@ -1633,7 +1607,7 @@ fun ThreadScreen(
                     }
                 }
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = !stickToBottom,
+                    visible = !follow.stickToBottom,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 12.dp, bottom = 8.dp),
@@ -1642,7 +1616,7 @@ fun ThreadScreen(
                 ) {
                     SmallFloatingActionButton(
                         onClick = {
-                            scope.launch { snapToBottom() }
+                            scope.launch { follow.snapToBottom() }
                         },
                         containerColor = MaterialTheme.colorScheme.surface,
                         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -1760,7 +1734,7 @@ fun ThreadScreen(
                             draft = ""
                             attaches = emptyList()
                             container.drafts.clear(agentId)
-                            scope.launch { snapToBottom() }
+                            scope.launch { follow.snapToBottom() }
                         }
                     },
                     enabled = draft.isNotBlank() || attaches.any { it.ok },
@@ -2410,19 +2384,6 @@ internal fun quoteBlock(text: String): String {
         if (line.isBlank()) ">" else "> $line"
     }
 }
-
-/**
- * The chat list is laid out bottom-up, so index 0 is the newest row and growth of any row near the
- * bottom extends upward without a scroll call. This only re-anchors after rows are added or removed
- * at the bottom, where the list would otherwise keep the previous first row in place.
- */
-internal suspend fun LazyListState.scrollToBottom() {
-    if (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0) scrollToItem(0)
-}
-
-/** True while the newest row's bottom is near the viewport bottom. */
-private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean =
-    firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset <= thresholdPx
 
 @Composable
 private fun RefreshPausedNote(untilMs: Long) {
