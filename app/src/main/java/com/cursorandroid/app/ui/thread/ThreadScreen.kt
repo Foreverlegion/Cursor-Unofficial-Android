@@ -238,9 +238,14 @@ class ThreadViewModel(
                     val detail = container.repo.getAgent(agentId)
                     agent = detail
                     noteApiModels(detail = detail)
-                    mergeServerRuns()
-                    mergeConversationHistory()
                     val runId = detail.latestRunId
+                    // Runs, conversation and artifacts of a finished latest run do not change; served from disk.
+                    val settled = runId != null && !detail.isWorking() &&
+                        container.catalog.settledRun(agentId) == runId && lines.isNotEmpty()
+                    if (!settled) {
+                        mergeServerRuns()
+                        mergeConversationHistory()
+                    }
                     if (runId != null) {
                         val latest = container.repo.getRun(agentId, runId)
                         noteApiModels(runs = listOf(latest))
@@ -250,12 +255,16 @@ class ThreadViewModel(
                             )
                             container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
                         }
-                        usage = container.repo.usage(agentId)
+                        usage = container.repo.settledUsage(agentId, runId, latest.isTerminal())
                         adoptRun(latest)
-                    } else if (run?.isActive() == true) {
-                        attachRun(run!!.id)
+                        if (!settled) {
+                            ingestArtifacts(runCatching { container.repo.artifacts(agentId) }.getOrDefault(emptyList()))
+                        }
+                        container.catalog.saveSettledRun(agentId, runId.takeIf { latest.isTerminal() && !detail.isWorking() })
+                    } else {
+                        if (run?.isActive() == true) attachRun(run!!.id)
+                        ingestArtifacts(runCatching { container.repo.artifacts(agentId) }.getOrDefault(emptyList()))
                     }
-                    ingestArtifacts(runCatching { container.repo.artifacts(agentId) }.getOrDefault(emptyList()))
                     if (!detail.isWorking() && run?.isActive() != true) {
                         checkBehind(detail)
                     }
@@ -1002,7 +1011,7 @@ fun ThreadScreen(
     var chatPropertiesOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
-    var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
+    var models by remember { mutableStateOf(container.repo.cachedModels()) }
     var draftReady by remember { mutableStateOf(false) }
     var modelMenu by remember { mutableStateOf(false) }
     val listState = remember(agentId) { LazyListState() }
@@ -1114,7 +1123,7 @@ fun ThreadScreen(
         vm.followModel = saved.modelId
         vm.followParams = saved.modelParams
         attaches = saved.toItems()
-        models = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        models = runCatching { container.repo.models() }.getOrDefault(models)
         if (vm.followParams.isEmpty() && vm.followModel.isNotBlank()) {
             vm.followParams = models.firstOrNull { it.id == vm.followModel }?.defaultParams().orEmpty()
         }

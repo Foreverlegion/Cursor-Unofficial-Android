@@ -169,7 +169,7 @@ internal fun SettingsScreenContent(
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var defaultModel by remember { mutableStateOf(container.store.defaultModel) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
-    var modelItems by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
+    var modelItems by remember { mutableStateOf(container.repo.cachedModels()) }
     var modelMenu by remember { mutableStateOf(false) }
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
@@ -180,7 +180,7 @@ internal fun SettingsScreenContent(
     var hideFinishedMenu by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
-    var githubLogin by remember { mutableStateOf<String?>(null) }
+    var githubLogin by remember { mutableStateOf(container.repo.cachedGithubLogin()) }
     val context = LocalContext.current
     val lifeState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     var unrestrictedBattery by remember { mutableStateOf(BatteryExemption.isExempt(context)) }
@@ -216,10 +216,8 @@ internal fun SettingsScreenContent(
     }
 
     LaunchedEffect(Unit) {
-        modelItems = runCatching { container.repo.models() }.getOrDefault(emptyList())
-        githubLogin = withContext(Dispatchers.IO) {
-            runCatching { GithubRepos.authenticatedLogin(container.store.githubToken) }.getOrNull()
-        }
+        modelItems = runCatching { container.repo.models() }.getOrDefault(modelItems)
+        githubLogin = container.repo.githubLogin()
     }
     LaunchedEffect(overviewAttempt) {
         overviewLoading = true
@@ -584,6 +582,7 @@ internal fun SettingsScreenContent(
                             }
                             SettingsTransfer(container = container, onImported = { reloadLocal() })
                         }
+                        CacheSection(container)
                     }
                     SettingsPage.Feedback -> {
                         Column(Modifier.padding(horizontal = 16.dp)) {
@@ -868,7 +867,7 @@ internal fun SettingsStaticRow(title: String, summary: String) {
 }
 
 @Composable
-private fun ChoiceDialog(
+internal fun ChoiceDialog(
     title: String,
     selected: String,
     options: List<Pair<String, String>>,

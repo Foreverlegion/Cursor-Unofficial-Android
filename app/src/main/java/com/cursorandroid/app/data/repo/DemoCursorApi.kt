@@ -8,6 +8,7 @@ import com.cursorandroid.app.data.api.ArtifactDownloadResponse
 import com.cursorandroid.app.data.api.ArtifactListResponse
 import com.cursorandroid.app.data.api.BranchListResponse
 import com.cursorandroid.app.data.api.CloudEnvironment
+import com.cursorandroid.app.data.api.EnvironmentListResponse
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.CreateAgentResponse
 import com.cursorandroid.app.data.api.CreateEnvironmentRequest
@@ -96,6 +97,11 @@ class DemoCursorApi(
         )
         session.saveEnvironment(created)
         return created
+    }
+
+    override suspend fun listEnvironments(limit: Int, cursor: String?): EnvironmentListResponse {
+        if (!demo()) return live.listEnvironments(limit, cursor)
+        return EnvironmentListResponse(items = session.environments())
     }
 
     override suspend fun getEnvironment(id: String): CloudEnvironment {

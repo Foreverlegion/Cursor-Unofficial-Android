@@ -10,6 +10,7 @@ import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
+import com.cursorandroid.app.data.repo.CacheJanitor
 import com.cursorandroid.app.data.repo.CatalogCache
 import com.cursorandroid.app.data.repo.ConversationStore
 import com.cursorandroid.app.data.repo.DemoCursorApi
@@ -34,6 +35,7 @@ class AppContainer(context: Context) {
     val drafts = DraftStore(context)
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
+    val cache = CacheJanitor(context, conversations, catalog, artifactHistory, chats, drafts)
     val runModels = RunModelStore(context)
     val notices = NoticeStore(context)
     val notifier = RunNotifier(context.applicationContext, store, notices, chats)
@@ -96,7 +98,7 @@ class AppContainer(context: Context) {
         artifactHistory.remove(agentId)
         runModels.remove(agentId)
         notices.dismissAgent(agentId)
-        catalog.removeGit(agentId)
+        catalog.forgetAgent(agentId)
     }
 
     private val publicHttp = OkHttpClient.Builder()

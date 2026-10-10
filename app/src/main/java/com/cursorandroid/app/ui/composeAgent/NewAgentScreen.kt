@@ -118,7 +118,7 @@ fun NewAgentScreen(
     var seededRepo by remember { mutableStateOf<String?>(null) }
     var heldBranchRepo by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("agent") }
-    var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
+    var models by remember { mutableStateOf(container.repo.cachedModels()) }
     var modelId by remember { mutableStateOf("") }
     var modelParams by remember { mutableStateOf<List<ModelParam>>(emptyList()) }
     var modelMenu by remember { mutableStateOf(false) }
@@ -335,7 +335,7 @@ fun NewAgentScreen(
     }
 
     LaunchedEffect(Unit) {
-        models = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        models = runCatching { container.repo.models() }.getOrDefault(models)
         scope.launch {
             computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
             pools = runCatching { container.repo.listPools() }.getOrDefault(pools)
@@ -357,6 +357,9 @@ fun NewAgentScreen(
         loadingRepos = repos.isEmpty()
         repos = runCatching { container.repo.repositories() }.getOrDefault(repos)
         loadingRepos = false
+        if (runCatching { container.repo.environments() }.isSuccess) {
+            savedEnvs = container.catalog.savedEnvironments()
+        }
     }
 
     LaunchedEffect(providers, envType) {

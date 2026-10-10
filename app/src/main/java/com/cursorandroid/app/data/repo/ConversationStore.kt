@@ -62,6 +62,7 @@ class ConversationStore(context: Context) {
     fun loadSnap(agentId: String): ConversationSnap {
         val file = fileFor(agentId)
         if (file.isFile) {
+            file.setLastModified(System.currentTimeMillis())
             val snap = readFile(file)
             if (snap != null) return snap
         }
@@ -109,6 +110,17 @@ class ConversationStore(context: Context) {
             }
         }
         batch.forEach { (id, item) -> writeFile(id, item.snap, item.version) }
+    }
+
+    /** Stored transcripts as (agentId, bytes, lastOpenedOrWritten). */
+    fun stored(): List<Triple<String, Long, Long>> {
+        return dir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.map { file ->
+            Triple(file.name.removeSuffix(".json"), file.length(), file.lastModified())
+        }.orEmpty()
+    }
+
+    fun clearAll() {
+        stored().forEach { (id, _, _) -> if (liveStatus(id) == null) remove(id) }
     }
 
     fun liveStatuses(): Map<String, String> = synchronized(live) { live.toMap() }
