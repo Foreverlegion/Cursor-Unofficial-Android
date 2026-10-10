@@ -84,9 +84,12 @@ class StatusGateTest {
     }
 
     @Test
-    fun retryAfterIsCappedAtTheMaximumPause() {
-        hit(retryAfterMs = 10 * 60_000)
-        assertEquals(StatusGate.MAX_PAUSE_MS, gate.remainingMs())
+    fun retryAfterIsHonouredUpToTenMinutesAndNoFurther() {
+        hit(retryAfterMs = 120_000)
+        assertEquals(120_000L, gate.remainingMs())
+        clock += 121_000
+        hit(retryAfterMs = 3_600_000)
+        assertEquals(StatusGate.MAX_RETRY_AFTER_MS, gate.remainingMs())
     }
 
     @Test

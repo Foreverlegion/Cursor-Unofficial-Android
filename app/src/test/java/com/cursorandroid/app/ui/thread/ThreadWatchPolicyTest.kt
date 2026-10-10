@@ -48,7 +48,7 @@ class ThreadWatchPolicyTest {
     @Test
     fun aRateLimitPauseStretchesTheDelay() {
         assertEquals(37_000L, ThreadWatchPolicy.nextDelayMs(live.copy(pausedForMs = 37_000)))
-        assertEquals(60_000L, ThreadWatchPolicy.nextDelayMs(live.copy(pausedForMs = 600_000)))
+        assertEquals(600_000L, ThreadWatchPolicy.nextDelayMs(live.copy(pausedForMs = 600_000)))
     }
 
     @Test

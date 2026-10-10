@@ -65,7 +65,7 @@ class StatusCallMeter(
 
 /**
  * One switch in front of every status call. After a 429 it stays shut for an exponentially growing time
- * (5s, 10s, ... 60s) or the server's Retry-After, whichever is longer, and calls made meanwhile fail
+ * (5s, 10s, ... 60s) or the server's Retry-After (up to 10 minutes), whichever is longer, and calls made meanwhile fail
  * locally without touching the network. A success resets the backoff.
  */
 class StatusGate(
@@ -90,7 +90,7 @@ class StatusGate(
             // Calls that were already in flight when the first 429 landed must not count as new strikes.
             if (!live) strikes++
             val backoff = backoffMs(strikes)
-            pause = maxOf(backoff, retryAfterMs ?: 0L).coerceAtMost(MAX_PAUSE_MS)
+            pause = maxOf(backoff, (retryAfterMs ?: 0L).coerceAtMost(MAX_RETRY_AFTER_MS))
             val target = now() + pause
             if (target > until.value) until.value = target
         }
@@ -125,6 +125,7 @@ class StatusGate(
     companion object {
         const val BASE_MS = 5_000L
         const val MAX_PAUSE_MS = 60_000L
+        const val MAX_RETRY_AFTER_MS = 10 * 60_000L
         const val LOCAL_PAUSE = "status_paused"
 
         fun backoffMs(strikes: Int): Long {

@@ -26,7 +26,7 @@ object ThreadWatchPolicy {
     fun nextDelayMs(state: WatchState): Long? {
         if (!state.foreground || state.finished || state.streamLive || state.busy) return null
         val backoff = if (state.failures <= 0) StatusGate.BASE_MS else StatusGate.backoffMs(state.failures + 1)
-        return maxOf(backoff, state.pausedForMs).coerceAtMost(StatusGate.MAX_PAUSE_MS)
+        return maxOf(backoff.coerceAtMost(StatusGate.MAX_PAUSE_MS), state.pausedForMs)
     }
 
     /** A thread whose agent is known to be done: nothing is running, nothing is waiting to be sent. */

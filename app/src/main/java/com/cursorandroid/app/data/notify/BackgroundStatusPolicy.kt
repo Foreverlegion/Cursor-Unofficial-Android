@@ -38,6 +38,6 @@ object RunWatchBackoff {
         val api = error as? ApiException
         val server = if (api?.isRateLimited == true) api.retryAfterMs ?: 0L else 0L
         val gate = if (api?.isRateLimited == true) StatusGate.backoffMs(failures.coerceAtLeast(1)) else 0L
-        return maxOf(NORMAL_MS, grown, server, gate).coerceAtMost(MAX_MS)
+        return maxOf(NORMAL_MS, grown, gate).coerceAtMost(MAX_MS).coerceAtLeast(server)
     }
 }
