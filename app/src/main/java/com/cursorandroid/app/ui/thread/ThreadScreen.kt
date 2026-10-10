@@ -128,6 +128,11 @@ import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.QueuedItem
+import com.cursorandroid.app.data.repo.QueueProbe
+import com.cursorandroid.app.data.repo.applyQueuedFlags
+import com.cursorandroid.app.data.repo.leftoverLocalLines
+import com.cursorandroid.app.data.repo.lineShowsQueued
+import com.cursorandroid.app.data.repo.staleQueueIds
 import com.cursorandroid.app.data.repo.RepoBehind
 import com.cursorandroid.app.data.repo.looksLikeGitSha
 import com.cursorandroid.app.data.repo.toDraft
@@ -232,8 +237,13 @@ class ThreadViewModel(
                     val detail = container.repo.getAgent(agentId)
                     agent = detail
                     noteApiModels(detail = detail)
-                    mergeServerRuns()
-                    mergeConversationHistory()
+                    val serverRuns = mergeServerRuns()
+                    val serverTexts = mergeConversationHistory()
+                    dropDeliveredQueue(
+                        serverRuns,
+                        serverTexts,
+                        idle = !detail.isWorking() && run?.isActive() != true && !busy,
+                    )
                     val runId = detail.latestRunId
                     if (runId != null) {
                         val latest = container.repo.getRun(agentId, runId)
@@ -291,7 +301,7 @@ class ThreadViewModel(
             queued = run?.isActive() == true || outbound.isNotEmpty(),
             thumbs = thumbs,
         )
-        outbound.add(QueuedOutbound(localId, prompt, attaches, caption))
+        outbound.add(QueuedOutbound(localId, prompt, attaches, caption, at = System.currentTimeMillis()))
         persistQueue()
         viewModelScope.launch {
             if (run?.isActive() == true) {
@@ -511,38 +521,63 @@ class ThreadViewModel(
     }
 
     private fun restoreQueue() {
-        if (outbound.isNotEmpty()) return
-        val saved = container.drafts.loadQueue(agentId)
-        if (saved.isEmpty()) {
-            val leftover = lines.filter { it.kind == "user" && it.queued && it.runId == null }
-            leftover.forEach { line ->
-                val thumbs = line.thumbs.mapIndexed { index, path ->
-                    Attachments.fromCache(path, "image-$index.jpg", "image/jpeg")
-                }.filter { it.ok }
-                outbound.add(
-                    QueuedOutbound(
-                        id = line.id,
-                        prompt = Attachments.prompt(line.text, thumbs),
-                        attaches = thumbs,
-                        caption = line.text,
-                    ),
-                )
-            }
-        } else {
-            saved.forEach { item ->
-                val attaches = item.attaches.toItems()
-                val caption = item.caption.ifBlank { item.text }
-                outbound.add(
-                    QueuedOutbound(
-                        id = item.id,
-                        prompt = Attachments.prompt(caption, attaches),
-                        attaches = attaches,
-                        caption = caption,
-                    ),
-                )
+        if (outbound.isEmpty()) {
+            val saved = container.drafts.loadQueue(agentId)
+            if (saved.isEmpty()) {
+                leftoverLocalLines(lines).forEach { line ->
+                    val thumbs = line.thumbs.mapIndexed { index, path ->
+                        Attachments.fromCache(path, "image-$index.jpg", "image/jpeg")
+                    }.filter { it.ok }
+                    outbound.add(
+                        QueuedOutbound(
+                            id = line.id,
+                            prompt = Attachments.prompt(line.text, thumbs),
+                            attaches = thumbs,
+                            caption = line.text,
+                        ),
+                    )
+                }
+            } else {
+                saved.forEach { item ->
+                    val attaches = item.attaches.toItems()
+                    val caption = item.caption.ifBlank { item.text }
+                    outbound.add(
+                        QueuedOutbound(
+                            id = item.id,
+                            prompt = Attachments.prompt(caption, attaches),
+                            attaches = attaches,
+                            caption = caption,
+                            at = item.at,
+                        ),
+                    )
+                }
             }
         }
-        if (outbound.isNotEmpty()) markUsersQueued()
+        syncQueuedFlags()
+    }
+
+    private fun syncQueuedFlags() {
+        synchronized(lineGate) {
+            val next = applyQueuedFlags(lines, outbound.filter { it.id != sendingId }.map { it.id }.toSet())
+            if (next !== lines) {
+                lines = next
+                persist()
+            }
+        }
+    }
+
+    private fun dropDeliveredQueue(runs: List<Run>, serverTexts: List<String>, idle: Boolean) {
+        if (outbound.isEmpty()) return
+        val stale = staleQueueIds(
+            outbound.map { QueueProbe(it.id, listOf(it.caption, it.prompt.text), it.at) },
+            runs,
+            serverTexts,
+            idle,
+        )
+        if (stale.isEmpty()) return
+        outbound.removeAll { it.id in stale }
+        persistQueue()
+        syncQueuedFlags()
     }
 
     private fun outboundPrompt(item: QueuedOutbound): Prompt {
@@ -563,14 +598,14 @@ class ThreadViewModel(
         container.drafts.saveQueue(
             agentId,
             outbound.map { item ->
-                QueuedItem(item.id, item.prompt.text, item.attaches.toDraft(), item.caption)
+                QueuedItem(item.id, item.prompt.text, item.attaches.toDraft(), item.caption, item.at)
             },
         )
     }
 
     private var probedPrompts = false
 
-    private suspend fun mergeServerRuns() {
+    private suspend fun mergeServerRuns(): List<Run> {
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
         noteApiModels(runs = runs)
         var filled = runs.map { item -> hydrateRun(item, force = false) }
@@ -595,11 +630,12 @@ class ThreadViewModel(
                 persist()
             }
         }
+        return filled
     }
 
-    private suspend fun mergeConversationHistory() {
-        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return
-        if (convo.messages.isEmpty()) return
+    private suspend fun mergeConversationHistory(): List<String> {
+        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return emptyList()
+        if (convo.messages.isEmpty()) return emptyList()
         synchronized(lineGate) {
             val merged = mergeConversationTranscript(lines, convo.messages)
             if (merged != lines) {
@@ -607,6 +643,7 @@ class ThreadViewModel(
                 persist()
             }
         }
+        return convo.messages.filter { it.transcriptKind() == "user" }.map { it.text.orEmpty() }
     }
 
     private suspend fun hydrateRun(item: Run, force: Boolean): Run {
@@ -886,10 +923,7 @@ class ThreadViewModel(
     }
 
     private fun markUsersQueued() {
-        lines = lines.map { line ->
-            if (line.kind == "user" && line.runId == null) line.copy(queued = true) else line
-        }
-        persist()
+        syncQueuedFlags()
     }
 
     private fun persist(immediate: Boolean = false) {
@@ -941,6 +975,7 @@ data class QueuedOutbound(
     val prompt: Prompt,
     val attaches: List<AttachItem> = emptyList(),
     val caption: String = "",
+    val at: Long = 0L,
 )
 
 class ThreadVmFactory(
@@ -1292,7 +1327,7 @@ fun ThreadScreen(
                                     val block = quoteBlock(text)
                                     draft = if (draft.isBlank()) "$block\n\n" else "${draft.trimEnd()}\n\n$block\n\n"
                                 },
-                                onEditQueued = if (row.line.queued) {
+                                onEditQueued = if (lineShowsQueued(row.line)) {
                                     {
                                         vm.editQueued(row.line.id)?.let { item ->
                                             draft = item.caption.ifBlank { item.prompt.text }
@@ -1302,7 +1337,7 @@ fun ThreadScreen(
                                 } else {
                                     null
                                 },
-                                onCancelQueued = if (row.line.queued) {
+                                onCancelQueued = if (lineShowsQueued(row.line)) {
                                     { vm.cancelQueued(row.line.id) }
                                 } else {
                                     null
@@ -1647,7 +1682,7 @@ private fun TranscriptBubble(
         RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
     }
     val label = when {
-        line.kind == "user" && line.queued -> "Queued"
+        lineShowsQueued(line) -> "Queued"
         line.kind == "assistant" -> senderLabel(modelText)
         else -> null
     }
