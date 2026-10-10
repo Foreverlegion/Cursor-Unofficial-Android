@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -164,6 +165,25 @@ internal fun SettingsScreenContent(
         }
     }
     var info by remember { mutableStateOf<String?>(null) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+    val appContext = LocalContext.current.applicationContext
+    if (confirmSignOut) {
+        SignOutDialog(
+            demo = container.store.demoMode,
+            onDismiss = { confirmSignOut = false },
+            onConfirm = {
+                confirmSignOut = false
+                RunWatchScheduler.stop(appContext)
+                if (container.store.demoMode) {
+                    container.store.demoMode = false
+                    if (container.store.hasKey()) onSessionChanged() else onSignedOut()
+                } else {
+                    container.store.clear()
+                    onSignedOut()
+                }
+            },
+        )
+    }
     val overview = remember(container) { OverviewModel(container.repo, container.catalog) }
     val overviewScope = rememberCoroutineScope()
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
@@ -652,17 +672,9 @@ internal fun SettingsScreenContent(
                             "Sign out",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    RunWatchScheduler.stop(context.applicationContext)
-                                    if (container.store.demoMode) {
-                                        container.store.demoMode = false
-                                        if (container.store.hasKey()) onSessionChanged() else onSignedOut()
-                                    } else {
-                                        container.store.clear()
-                                        onSignedOut()
-                                    }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 18.dp),
+                                .clickable { confirmSignOut = true }
+                                .padding(horizontal = 16.dp, vertical = 18.dp)
+                                .testTag("sign-out-row"),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyLarge,
                         )
