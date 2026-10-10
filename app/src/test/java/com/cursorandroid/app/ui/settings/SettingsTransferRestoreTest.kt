@@ -16,14 +16,11 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.lang.reflect.InvocationTargetException
-import java.lang.reflect.Method
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -96,38 +93,6 @@ class SettingsTransferRestoreTest {
         assertFalse(container.stagedRestore.pending())
     }
 
-    private fun invokeCommit(stageOnly: Boolean, loaded: SettingsSnapshot, passphrase: CharArray?): BackupOpen {
-        val method = transferCommit()
-        try {
-            return method.invoke(null, stageOnly, container, loaded, passphrase) as BackupOpen
-        } catch (e: InvocationTargetException) {
-            val overflow = generateSequence<Throwable>(e.cause) { it.cause }.any { it is StackOverflowError }
-            if (overflow) {
-                fail(
-                    "SettingsTransfer.commit recurses when stageOnly=$stageOnly " +
-                        "(SettingsTransfer.kt:58 calls itself instead of SettingsBackup.apply)",
-                )
-            }
-            throw e.cause ?: e
-        }
-    }
-
-    private fun transferCommit(): Method {
-        val owner = Class.forName("com.cursorandroid.app.ui.settings.SettingsTransferKt")
-        val found = owner.declaredMethods.filter { method ->
-            method.returnType.simpleName == "BackupOpen" &&
-                method.parameterCount == 4 &&
-                method.parameterTypes[0] == java.lang.Boolean.TYPE &&
-                method.parameterTypes[1] == AppContainer::class.java &&
-                method.parameterTypes[2] == SettingsSnapshot::class.java &&
-                method.parameterTypes[3] == CharArray::class.java
-        }
-        val method = found.firstOrNull { !it.name.startsWith("access$") } ?: found.firstOrNull()
-        if (method == null) {
-            val names = owner.declaredMethods.joinToString { "${it.name}(${it.parameterTypes.joinToString { t -> t.simpleName }})" }
-            fail("SettingsTransfer.commit not found on SettingsTransferKt. Methods: $names")
-        }
-        method!!.isAccessible = true
-        return method
-    }
+    private fun invokeCommit(stageOnly: Boolean, loaded: SettingsSnapshot, passphrase: CharArray?): BackupOpen =
+        SettingsBackup.restoreOrStage(container, loaded, passphrase, stage = stageOnly)
 }
