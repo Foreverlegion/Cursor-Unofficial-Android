@@ -160,7 +160,8 @@ class ConversationStore(context: Context) {
 
     fun importAll(items: Map<String, List<TranscriptLine>>) {
         items.forEach { (id, lines) ->
-            writeFile(id, ConversationSnap(lines = clip(lines)))
+            val inert = lines.map { it.copy(queued = false, thumbs = emptyList()) }
+            writeFile(id, ConversationSnap(lines = clip(inert)))
         }
     }
 

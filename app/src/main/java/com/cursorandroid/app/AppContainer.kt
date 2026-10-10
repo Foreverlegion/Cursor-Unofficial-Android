@@ -77,7 +77,8 @@ class AppContainer(context: Context) {
 
     private val authInterceptor = Interceptor { chain ->
         val key = store.apiKey
-        val request = if (store.demoMode || key.isNullOrBlank()) {
+        val url = chain.request().url
+        val request = if (store.demoMode || key.isNullOrBlank() || !url.isHttps || url.host != API_HOST) {
             chain.request()
         } else {
             chain.request().newBuilder()
@@ -125,7 +126,7 @@ class AppContainer(context: Context) {
         .build()
 
     private val liveApi: CursorApi = Retrofit.Builder()
-        .baseUrl("https://api.cursor.com/")
+        .baseUrl("https://$API_HOST/")
         .client(http)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
@@ -144,4 +145,8 @@ class AppContainer(context: Context) {
         json = json,
         machines = machines,
     )
+
+    private companion object {
+        const val API_HOST = "api.cursor.com"
+    }
 }
