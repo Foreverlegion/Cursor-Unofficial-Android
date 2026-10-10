@@ -33,7 +33,14 @@ class InboxSweepWorker(
                 if (run.isActive()) {
                     RunWatchScheduler.watch(applicationContext, agent.id, run.id, agent.name, run.status)
                 } else if (run.isTerminal() && isLiveStatus(previous)) {
-                    app.container.notifier.notifyIfNeeded(agent.id, agent.name, run.id, run.status, run.result)
+                    app.container.notifier.notifyIfNeeded(
+                        agent.id,
+                        agent.name,
+                        run.id,
+                        run.status,
+                        run.result,
+                        run.git?.branches?.firstOrNull()?.prUrl,
+                    )
                     RunWatchStore.remove(applicationContext, run.id)
                     ApprovalStreamHub.close(run.id)
                     ApprovalStreamHub.detach(applicationContext, run.id)

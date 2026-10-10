@@ -26,6 +26,7 @@ fun ChatPropertiesDialog(
     repoUrl: String?,
     prUrl: String?,
     tokens: Long?,
+    lastRun: String? = null,
     onOpenUrl: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -58,6 +59,7 @@ fun ChatPropertiesDialog(
                     "Tokens",
                     tokens?.let { NumberFormat.getIntegerInstance(Locale.US).format(it) },
                 )
+                PropertyLine("Last run", lastRun)
             }
         },
         confirmButton = {
@@ -94,4 +96,24 @@ private fun PropertyLine(
             },
         )
     }
+}
+
+internal fun formatDuration(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val sec = total % 60
+    return when {
+        h > 0 -> "${h}h ${m}m"
+        m > 0 -> "${m}m ${sec}s"
+        else -> "${sec}s"
+    }
+}
+
+internal fun lastRunLine(durationMs: Long?, tokens: Long?): String? {
+    val parts = listOfNotNull(
+        durationMs?.takeIf { it > 0 }?.let(::formatDuration),
+        tokens?.takeIf { it > 0 }?.let { NumberFormat.getIntegerInstance(Locale.US).format(it) + " tokens" },
+    )
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
