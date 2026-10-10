@@ -104,7 +104,13 @@ class ApiKeyStore(context: Context) {
     var batteryAsked: Boolean
         get() = notifyPrefs.getBoolean(BATTERY_ASKED, false)
         set(value) {
-            notifyPrefs.edit { putBoolean(BATTERY_ASKED, value) }
+            notifyPrefs.edit(commit = true) { putBoolean(BATTERY_ASKED, value) }
+        }
+
+    var batteryKnownExempt: Boolean
+        get() = notifyPrefs.getBoolean(BATTERY_KNOWN_EXEMPT, false)
+        set(value) {
+            notifyPrefs.edit(commit = true) { putBoolean(BATTERY_KNOWN_EXEMPT, value) }
         }
 
     var feedbackNoticeSeen: Boolean
@@ -249,6 +255,7 @@ class ApiKeyStore(context: Context) {
         private const val SHOW_INBOX_ENVS = "show_inbox_envs"
         private const val SHOW_INBOX_REMOTE = "show_inbox_remote"
         private const val BATTERY_ASKED = "battery_asked"
+        private const val BATTERY_KNOWN_EXEMPT = "battery_known_exempt"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
         private const val DEMO_MODE = "demo_mode"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()

@@ -482,7 +482,7 @@ private fun ChatsTab(
         )
         PrefSwitch(
             title = "Unrestricted battery",
-            detail = "Opens Android power management so notifications are not blocked.",
+            detail = "WorkManager polls for agent notifications. Doze can stop that unless battery use is unrestricted.",
             checked = unrestrictedBattery,
             onCheckedChange = onUnrestrictedBattery,
         )
