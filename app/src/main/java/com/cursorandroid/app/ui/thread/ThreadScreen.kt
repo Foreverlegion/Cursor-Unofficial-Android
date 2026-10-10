@@ -179,6 +179,14 @@ class ThreadViewModel(
         private set
     var pendingPrUrl by mutableStateOf<String?>(null)
         private set
+    var modelBook by mutableStateOf(container.runModels.load(agentId))
+        private set
+
+    private fun noteApiModels(detail: AgentDetail? = null, runs: List<Run> = emptyList()) {
+        val fromRuns = runs.mapNotNull { item -> item.model?.let { item.id to it } }.toMap()
+        if (fromRuns.isEmpty() && detail?.model == null) return
+        modelBook = container.runModels.recordApi(agentId, fromRuns, detail?.model)
+    }
 
     fun consumePendingPr() {
         pendingPrUrl = null
@@ -222,11 +230,13 @@ class ThreadViewModel(
                     persist(immediate = true)
                     val detail = container.repo.getAgent(agentId)
                     agent = detail
+                    noteApiModels(detail = detail)
                     mergeServerRuns()
                     mergeConversationHistory()
                     val runId = detail.latestRunId
                     if (runId != null) {
                         val latest = container.repo.getRun(agentId, runId)
+                        noteApiModels(runs = listOf(latest))
                         latest.git?.branches?.firstOrNull()?.let { git ->
                             container.catalog.saveGit(
                                 GitSnap(agentId, git.branch, git.prUrl, git.repoUrl),
@@ -450,18 +460,25 @@ class ThreadViewModel(
         persist()
         error = null
         try {
+            val sent = followModel.takeIf { it.isNotBlank() }?.let {
+                ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
+            }
             val created = container.repo.followUp(
                 agentId,
                 outboundPrompt(next),
                 mode = followMode.takeIf { it.isNotBlank() },
-                model = followModel.takeIf { it.isNotBlank() }?.let {
-                    ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
-                },
+                model = sent,
             )
             outbound.removeAll { it.id == next.id }
             persistQueue()
             Attachments.forget(next.attaches)
             run = created
+            modelBook = container.runModels.recordRun(
+                agentId,
+                created.id,
+                sent,
+                explicit = false,
+            )
             assistantBuf = StringBuilder()
             thinkingBuf = StringBuilder()
             lastEventId = null
@@ -554,6 +571,7 @@ class ThreadViewModel(
 
     private suspend fun mergeServerRuns() {
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
+        noteApiModels(runs = runs)
         var filled = runs.map { item -> hydrateRun(item, force = false) }
         var merged = mergeRunTranscript(lines, filled)
         val hasUser = merged.any { it.kind == "user" }
@@ -760,11 +778,13 @@ class ThreadViewModel(
     private suspend fun attachLatestRun() {
         val detail = runCatching { container.repo.getAgent(agentId) }.getOrNull() ?: return
         agent = detail
+        noteApiModels(detail = detail)
         val runId = detail.latestRunId ?: return
         val live = runId == streamedRunId && (streaming || streamJob?.isActive == true)
         if (live) return
         if (runId == run?.id && run?.isActive() != true && !streaming) return
         val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
+        noteApiModels(runs = listOf(latest))
         run = latest
         latest.git?.branches?.firstOrNull()?.let { git ->
             container.catalog.saveGit(
@@ -996,6 +1016,7 @@ fun ThreadScreen(
         envType = vm.agent?.env?.type,
         toolName = if (working) latestTool else null,
     )
+    val workingModel = modelLabel(vm.modelBook.resolve(vm.run?.id), models)
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
@@ -1230,7 +1251,7 @@ fun ThreadScreen(
                 .scaffoldBars(padding),
         ) {
             if (working) {
-                WorkingBar(activity)
+                WorkingBar(activity, workingModel)
             }
             if (vm.error != null) {
                 Text(
@@ -1258,8 +1279,13 @@ fun ThreadScreen(
                         }
                     }) { row ->
                         when (row) {
-                            is ChatRow.Message ->                             TranscriptBubble(
+                            is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
+                                modelText = if (row.line.kind == "assistant") {
+                                    modelLabel(vm.modelBook.resolve(lineRunId(row.line)), models)
+                                } else {
+                                    null
+                                },
                                 onCopy = { text -> copyMessage(context, text) },
                                 onQuote = { text ->
                                     val block = quoteBlock(text)
@@ -1303,7 +1329,7 @@ fun ThreadScreen(
                         }
                     } else if (showTyping) {
                         item(key = "typing") {
-                            TypingBubble(detail = waitText)
+                            TypingBubble(detail = waitText, model = workingModel)
                         }
                     }
                 }
@@ -1595,6 +1621,7 @@ internal fun groupChatRows(
 @Composable
 private fun TranscriptBubble(
     line: TranscriptLine,
+    modelText: String? = null,
     onCopy: (String) -> Unit = {},
     onQuote: (String) -> Unit = {},
     onEditQueued: (() -> Unit)? = null,
@@ -1617,7 +1644,11 @@ private fun TranscriptBubble(
     } else {
         RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
     }
-    val label = if (line.kind == "user" && line.queued) "Queued" else null
+    val label = when {
+        line.kind == "user" && line.queued -> "Queued"
+        line.kind == "assistant" -> senderLabel(modelText)
+        else -> null
+    }
     var menu by remember(line.id) { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val copyText = line.text.trim()
@@ -1631,6 +1662,8 @@ private fun TranscriptBubble(
                 label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -1872,7 +1905,7 @@ private fun ToolCallsBlock(
 }
 
 @Composable
-private fun WorkingBar(text: String) {
+private fun WorkingBar(text: String, model: String? = null) {
     Row(
         modifier = Modifier
             .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -1889,21 +1922,43 @@ private fun WorkingBar(text: String) {
                 .clip(CircleShape)
                 .background(PlayColors.Teal),
         )
-        Text(text, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text,
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!model.isNullOrBlank()) {
+                Text(
+                    model,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
+private fun lineRunId(line: TranscriptLine): String? =
+    line.runId ?: line.id.removePrefix("assistant-").takeIf { line.id.startsWith("assistant-") }
+
 @Composable
-private fun TypingBubble(detail: String? = null) {
+private fun TypingBubble(detail: String? = null, model: String? = null) {
     val transition = rememberInfiniteTransition(label = "typing")
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start,
     ) {
         Text(
-            "Agent",
+            senderLabel(model),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
         if (!detail.isNullOrBlank()) {

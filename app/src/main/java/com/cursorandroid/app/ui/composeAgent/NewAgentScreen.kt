@@ -1248,6 +1248,7 @@ fun NewAgentScreen(
                                     customSubagents = subs,
                                 )
                                 val created = container.repo.createAgent(body)
+                                container.runModels.recordRun(created.agent.id, created.run.id, body.model, explicit = true)
                                 if (openFinishedPr) {
                                     container.chats.setOpenFinishedPr(created.agent.id, true)
                                 }

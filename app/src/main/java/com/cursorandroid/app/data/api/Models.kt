@@ -70,6 +70,8 @@ data class AgentDetail(
     val updatedAt: String? = null,
     val latestRunId: String? = null,
     val archived: Boolean? = null,
+    @Serializable(with = FlexibleModelSerializer::class)
+    val model: ModelSelection? = null,
 )
 
 @Serializable
@@ -243,6 +245,8 @@ data class Run(
     val git: GitState? = null,
     @Serializable(with = FlexiblePromptSerializer::class)
     val prompt: Prompt? = null,
+    @Serializable(with = FlexibleModelSerializer::class)
+    val model: ModelSelection? = null,
 )
 
 @Serializable
@@ -994,6 +998,28 @@ internal object FlexiblePromptSerializer : KSerializer<Prompt> {
             el is JsonPrimitive && el.isString -> Prompt(el.content)
             el is JsonObject -> json.json.decodeFromJsonElement(Prompt.serializer(), el)
             else -> Prompt("")
+        }
+    }
+}
+
+internal object FlexibleModelSerializer : KSerializer<ModelSelection> {
+    override val descriptor = ModelSelection.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: ModelSelection) {
+        encoder.encodeSerializableValue(ModelSelection.serializer(), value)
+    }
+
+    override fun deserialize(decoder: Decoder): ModelSelection {
+        val json = decoder as? JsonDecoder ?: return ModelSelection.serializer().deserialize(decoder)
+        val el = json.decodeJsonElement()
+        return when {
+            el is JsonPrimitive && el.isString -> ModelSelection(el.content)
+            el is JsonObject -> runCatching {
+                json.json.decodeFromJsonElement(ModelSelection.serializer(), el)
+            }.getOrElse {
+                ModelSelection((el["id"] as? JsonPrimitive)?.content.orEmpty())
+            }
+            else -> ModelSelection("")
         }
     }
 }

@@ -17,6 +17,7 @@ import com.cursorandroid.app.data.repo.DemoSession
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.LocalChatStore
+import com.cursorandroid.app.data.repo.RunModelStore
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -33,6 +34,7 @@ class AppContainer(context: Context) {
     val drafts = DraftStore(context)
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
+    val runModels = RunModelStore(context)
     val notices = NoticeStore(context)
     val notifier = RunNotifier(context.applicationContext, store, notices, chats)
     val feedback = FeedbackStore(context)
@@ -92,6 +94,7 @@ class AppContainer(context: Context) {
         drafts.clear(agentId)
         drafts.clearQueue(agentId)
         artifactHistory.remove(agentId)
+        runModels.remove(agentId)
         notices.dismissAgent(agentId)
         catalog.removeGit(agentId)
     }
