@@ -68,6 +68,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -76,6 +77,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -153,6 +156,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -1056,12 +1063,15 @@ fun ThreadScreen(
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
-    val rows = remember(vm.lines, showTools, showThinking) {
-        groupChatRows(vm.lines, showTools, showThinking)
+    val shownLines by produceState(vm.lines, vm) {
+        snapshotFlow { vm.lines }.coalesced(STREAM_COALESCE_MS).collect { value = it }
+    }
+    val rows = remember(shownLines, showTools, showThinking) {
+        groupChatRows(shownLines, showTools, showThinking)
     }
     val currentRunId = vm.run?.id
-    val liveThink = remember(vm.lines, currentRunId, working) {
-        liveThinkingLine(vm.lines, currentRunId, working)
+    val liveThink = remember(shownLines, currentRunId, working) {
+        liveThinkingLine(shownLines, currentRunId, working)
     }
     val showLiveThink = showThinking && liveThink != null
     val showTyping = working && !showLiveThink
@@ -1164,6 +1174,14 @@ fun ThreadScreen(
             if (scrolling && !pinned) stickToBottom = false
             else if (!scrolling && pinned) stickToBottom = true
         }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.viewportEndOffset }
+            .drop(1)
+            .collect {
+                if (stickToBottom && !listState.isScrollInProgress) snapToBottom()
+            }
     }
 
     LaunchedEffect(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey, stickToBottom) {
@@ -1299,7 +1317,9 @@ fun ThreadScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .clipToBounds()
+                    .testTag("chat-list"),
             ) {
                 LazyColumn(
                     state = listState,
@@ -1308,12 +1328,7 @@ fun ThreadScreen(
                         .padding(horizontal = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp),
                 ) {
-                    items(rows, key = { row ->
-                        when (row) {
-                            is ChatRow.Message -> row.line.id
-                            is ChatRow.Tools -> "tools-${row.id}"
-                        }
-                    }) { row ->
+                    items(rows, key = ::chatRowKey, contentType = ::chatRowType) { row ->
                         when (row) {
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
@@ -1360,11 +1375,11 @@ fun ThreadScreen(
                         }
                     }
                     if (liveThink != null && showThinking) {
-                        item(key = "live-think") {
+                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
                             ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
                         }
                     } else if (showTyping) {
-                        item(key = "typing") {
+                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
                             TypingBubble(detail = waitText, model = workingModel)
                         }
                     }
@@ -1453,6 +1468,7 @@ fun ThreadScreen(
             )
             Row(
                 modifier = Modifier
+                    .testTag("chat-composer")
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(28.dp))
@@ -1581,9 +1597,32 @@ fun ThreadScreen(
     }
 }
 
+/** Streaming deltas arrive per token. The list takes at most one update per this window. */
+internal const val STREAM_COALESCE_MS = 120L
+
+internal const val LIVE_TAIL_KEY = "live-tail"
+
+/** Emits at once after a quiet period, then at most once per [windowMs], always ending on the latest value. */
+internal fun <T> Flow<T>.coalesced(windowMs: Long): Flow<T> = flow {
+    conflate().collect { value ->
+        emit(value)
+        delay(windowMs)
+    }
+}
+
 internal sealed class ChatRow {
     data class Message(val line: TranscriptLine) : ChatRow()
     data class Tools(val id: String, val tools: List<TranscriptLine>) : ChatRow()
+}
+
+internal fun chatRowKey(row: ChatRow): String = when (row) {
+    is ChatRow.Message -> "m-${row.line.id}"
+    is ChatRow.Tools -> "tools-${row.id}"
+}
+
+internal fun chatRowType(row: ChatRow): String = when (row) {
+    is ChatRow.Message -> "m-${row.line.kind}"
+    is ChatRow.Tools -> "tools"
 }
 
 internal fun threadScrollKey(
@@ -2104,10 +2143,21 @@ internal fun quoteBlock(text: String): String {
     }
 }
 
-private suspend fun LazyListState.scrollToBottom() {
+internal fun LazyListState.isTailOnScreen(): Boolean {
+    val last = layoutInfo.totalItemsCount - 1
+    return last >= 0 && layoutInfo.visibleItemsInfo.lastOrNull()?.index == last
+}
+
+/**
+ * Moves the last row's bottom to the viewport bottom in one step when the tail is on screen, which
+ * is the streaming case. Only when the tail is off screen does it jump to the row first.
+ */
+internal suspend fun LazyListState.scrollToBottom() {
     val last = layoutInfo.totalItemsCount - 1
     if (last < 0) return
-    scrollToItem(last)
+    if (!isTailOnScreen()) {
+        scrollToItem(last)
+    }
     val info = layoutInfo
     val lastItem = info.visibleItemsInfo.lastOrNull() ?: return
     val overflow = lastItem.offset + lastItem.size - info.viewportEndOffset
