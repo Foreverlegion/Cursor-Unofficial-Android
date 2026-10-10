@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import androidx.work.WorkManager
+import com.cursorandroid.app.data.repo.CachePruneWorker
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
@@ -21,6 +22,8 @@ class CursorAndroidApp : Application() {
             RunWatchScheduler.resume(this)
         }
         FeedbackReplyScheduler.sync(this)
+        CachePruneWorker.schedule(this)
+        Thread({ runCatching { container.cache.prune() } }, "cache-prune").apply { priority = Thread.MIN_PRIORITY }.start()
         // Older builds enqueued these. Cancel them so they stop pinging.
         val work = WorkManager.getInstance(this)
         work.cancelUniqueWork("install-pulse")

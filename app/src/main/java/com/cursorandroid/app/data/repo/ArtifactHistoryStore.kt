@@ -53,6 +53,9 @@ class ArtifactHistoryStore(context: Context) {
         prefs.edit { remove(key(agentId)) }
     }
 
+    fun agentIds(): Set<String> =
+        prefs.all.keys.filter { it.startsWith(PREFIX) }.mapTo(HashSet()) { it.removePrefix(PREFIX) }
+
     fun history(agentId: String): List<ArtifactItem> {
         val now = System.currentTimeMillis()
         val current = load(agentId)
