@@ -92,13 +92,15 @@ class RunNotifier(
 
     fun acknowledgeKnown(agents: List<AgentSummary>) {
         synchronized(seen) {
-            seen.edit(commit = true) {
-                agents.forEach { agent ->
-                    val runId = agent.latestRunId ?: return@forEach
-                    if (!isLiveStatus(agent.status)) {
-                        putBoolean(runId, true)
-                    }
-                }
+            val fresh = agents.mapNotNull { agent ->
+                agent.latestRunId?.takeIf { !isLiveStatus(agent.status) && !seen.getBoolean(it, false) }
+            }
+            val keep = agents.mapNotNullTo(HashSet()) { it.latestRunId }
+            val stale = SeenPrefs.staleKeys(seen.all.keys, keep) { it.startsWith("approval:") }
+            if (fresh.isEmpty() && stale.isEmpty()) return
+            seen.edit {
+                fresh.forEach { putBoolean(it, true) }
+                stale.forEach { remove(it) }
             }
         }
     }
