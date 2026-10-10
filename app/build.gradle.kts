@@ -95,6 +95,27 @@ android {
     }
 }
 
+tasks.register<Exec>("checkReleaseReflectiveCtors") {
+    group = "verification"
+    description = "Fail if R8 drops constructors Room, startup, or WorkManager call by reflection."
+    dependsOn("minifyReleaseWithR8")
+    workingDir = rootProject.projectDir
+    inputs.file(layout.buildDirectory.file("outputs/mapping/release/mapping.txt"))
+    commandLine(
+        "bash",
+        "scripts/check-r8-reflective-ctors.sh",
+        "app/build/outputs/mapping/release/mapping.txt",
+    )
+}
+
+gradle.projectsEvaluated {
+    listOf("assembleRelease", "bundleRelease").forEach { name ->
+        tasks.named(name).configure {
+            dependsOn(tasks.named("checkReleaseReflectiveCtors"))
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
