@@ -41,6 +41,15 @@ object ForgeClient {
         parseBranchNames(forge.provider, body)
     }
 
+    suspend fun listRepos(forge: ForgeConnection, query: String, page: Int): ForgeRepoPage =
+        withContext(Dispatchers.IO) {
+            val call = repoListCall(forge, query, page) ?: return@withContext ForgeRepoPage(emptyList(), false)
+            val (code, body) = execute(call)
+            if (code !in 200..299) return@withContext ForgeRepoPage(emptyList(), false)
+            val repos = parseForgeRepos(forge, body)
+            ForgeRepoPage(repos, repos.size >= repoPageSize(normalizedForge(forge).provider))
+        }
+
     suspend fun createRepo(
         forge: ForgeConnection,
         name: String,

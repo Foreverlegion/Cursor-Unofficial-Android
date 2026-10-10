@@ -50,7 +50,6 @@ import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.cloudCreateTarget
 import com.cursorandroid.app.data.api.gitHost
 import com.cursorandroid.app.data.api.gitPath
-import com.cursorandroid.app.data.api.listedProviders
 import com.cursorandroid.app.data.api.machineCreateTarget
 import com.cursorandroid.app.data.api.matchRepo
 import com.cursorandroid.app.data.api.prettyProvider
@@ -83,6 +82,13 @@ import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.VoiceButton
+import com.cursorandroid.app.data.repo.ForgeClient
+import com.cursorandroid.app.data.repo.filterRepos
+import com.cursorandroid.app.data.repo.forgeForLabel
+import com.cursorandroid.app.data.repo.forgeSupportsRepoList
+import com.cursorandroid.app.data.repo.mergeRepos
+import com.cursorandroid.app.data.repo.sourceLabels
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -103,6 +109,11 @@ fun NewAgentScreen(
     var envName by remember { mutableStateOf(initialEnvName.orEmpty()) }
     var repos by remember { mutableStateOf(container.catalog.repos()) }
     var provider by remember { mutableStateOf("") }
+    var forges by remember { mutableStateOf(container.store.forges()) }
+    var forgeRepos by remember { mutableStateOf<List<RepositoryItem>>(emptyList()) }
+    var forgePage by remember { mutableStateOf(1) }
+    var forgeMore by remember { mutableStateOf(false) }
+    var forgeLoading by remember { mutableStateOf(false) }
     var repoUrl by remember { mutableStateOf("") }
     var startingRef by remember { mutableStateOf("") }
     var branches by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -127,7 +138,6 @@ fun NewAgentScreen(
     var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var pools by remember { mutableStateOf(container.catalog.pools()) }
     var poolMenu by remember { mutableStateOf(false) }
-    var providerMenu by remember { mutableStateOf(false) }
     var repoMenu by remember { mutableStateOf(false) }
     var branchMenu by remember { mutableStateOf(false) }
     var repoQuery by remember { mutableStateOf("") }
@@ -159,17 +169,31 @@ fun NewAgentScreen(
     var draftReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val providers = remember(repos) { listedProviders(repos) }
-    val createForge = container.store.forgeForLabel(provider)
-    val providerRepos = remember(repos, provider) {
-        repos.filter { provider.isBlank() || it.providerLabel() == provider }
+    val allRepos = remember(repos, forgeRepos) { mergeRepos(repos, forgeRepos) }
+    val providers = remember(repos, forges) { sourceLabels(repos, forges) }
+    val createForge = remember(forges, provider) { forgeForLabel(forges, provider) }
+    val listsRepos = createForge != null && forgeSupportsRepoList(createForge)
+    val providerRepos = remember(allRepos, provider) {
+        allRepos.filter { provider.isBlank() || it.providerLabel() == provider }
     }
-    val selectedRepo = remember(repos, repoUrl) { matchRepo(repos, repoUrl) }
+    val selectedRepo = remember(allRepos, repoUrl) { matchRepo(allRepos, repoUrl) }
     fun adoptRepo(url: String) {
         repoUrl = url
-        val item = matchRepo(repos, url)
+        val item = matchRepo(allRepos, url)
         val label = item?.providerLabel() ?: prettyProvider(gitHost(url))
         if (label.isNotBlank()) provider = label
+    }
+    fun loadMoreForgeRepos() {
+        val forge = createForge ?: return
+        scope.launch {
+            forgeLoading = true
+            val next = forgePage + 1
+            val page = ForgeClient.listRepos(forge, repoQuery, next)
+            forgePage = next
+            forgeRepos = mergeRepos(forgeRepos, page.repos)
+            forgeMore = page.hasMore
+            forgeLoading = false
+        }
     }
     val cloudChoices = environmentChoices(
         savedEnvs,
@@ -370,8 +394,28 @@ fun NewAgentScreen(
         }
     }
 
+    LaunchedEffect(provider, forges, repoQuery) {
+        val forge = createForge
+        forgePage = 1
+        if (forge == null || !listsRepos) {
+            forgeMore = false
+            forgeLoading = false
+            return@LaunchedEffect
+        }
+        if (repoQuery.isNotBlank()) delay(350)
+        forgeLoading = true
+        val page = ForgeClient.listRepos(forge, repoQuery, 1)
+        forgeRepos = mergeRepos(forgeRepos, page.repos)
+        forgeMore = page.hasMore
+        forgeLoading = false
+    }
+
+    LaunchedEffect(resetTick, envType) {
+        forges = container.store.forges()
+    }
+
     LaunchedEffect(provider) {
-        if (container.store.forgeForLabel(provider) == null) {
+        if (createForge == null) {
             createRepo = false
             newRepoName = ""
         }
@@ -556,30 +600,22 @@ fun NewAgentScreen(
                             },
                         )
                     } else {
-                    ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
-                        OutlinedTextField(
-                            value = provider.ifBlank { if (loadingRepos) "Loading…" else "No source connected" },
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Source") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu) },
-                            modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
+                    SourcePicker(
+                        sources = providers,
+                        selected = provider,
+                        loading = loadingRepos,
+                        emptyLabel = "No source connected",
+                        onPick = { provider = it },
+                    )
+                    if (listsRepos) {
+                        ForgeRepoSearch(
+                            query = repoQuery,
+                            onQuery = { repoQuery = it },
+                            loading = forgeLoading,
+                            hasMore = forgeMore,
+                            onMore = { loadMoreForgeRepos() },
                         )
-                        ExposedDropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                            providers.forEach { name ->
-                                DropdownMenuItem(
-                                    text = { Text(name) },
-                                    onClick = {
-                                        provider = name
-                                        providerMenu = false
-                                    },
-                                )
-                            }
-                        }
-                    }
-                    if (providerRepos.size > 12) {
+                    } else if (providerRepos.size > 12) {
                         OutlinedTextField(
                             value = repoQuery,
                             onValueChange = { repoQuery = it },
@@ -588,14 +624,7 @@ fun NewAgentScreen(
                             singleLine = true,
                         )
                     }
-                    val visibleRepos = if (repoQuery.isBlank()) {
-                        providerRepos
-                    } else {
-                        providerRepos.filter {
-                            it.displayName().contains(repoQuery, ignoreCase = true) ||
-                                it.url.contains(repoQuery, ignoreCase = true)
-                        }
-                    }
+                    val visibleRepos = filterRepos(providerRepos, repoQuery)
                     ExposedDropdownMenuBox(expanded = repoMenu, onExpandedChange = { repoMenu = it }) {
                         OutlinedTextField(
                             value = when {
@@ -831,35 +860,21 @@ fun NewAgentScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    ExposedDropdownMenuBox(expanded = providerMenu, onExpandedChange = { providerMenu = it }) {
-                        OutlinedTextField(
-                            value = provider.ifBlank { if (loadingRepos) "Loading…" else "Any source" },
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Source") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu) },
-                            modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
+                    SourcePicker(
+                        sources = providers,
+                        selected = provider,
+                        loading = loadingRepos,
+                        emptyLabel = "Any source",
+                        onPick = { provider = it },
+                    )
+                    if (listsRepos) {
+                        ForgeRepoSearch(
+                            query = repoQuery,
+                            onQuery = { repoQuery = it },
+                            loading = forgeLoading,
+                            hasMore = forgeMore,
+                            onMore = { loadMoreForgeRepos() },
                         )
-                        ExposedDropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                            if (providers.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No connected sources yet") },
-                                    onClick = { providerMenu = false },
-                                    enabled = false,
-                                )
-                            }
-                            providers.forEach { name ->
-                                DropdownMenuItem(
-                                    text = { Text(name) },
-                                    onClick = {
-                                        provider = name
-                                        providerMenu = false
-                                    },
-                                )
-                            }
-                        }
                     }
                     OutlinedTextField(
                         value = repoUrl,
@@ -889,14 +904,15 @@ fun NewAgentScreen(
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(expanded = repoMenu, onDismissRequest = { repoMenu = false }) {
-                            if (providerRepos.isEmpty()) {
+                            val shownRepos = filterRepos(providerRepos, repoQuery)
+                            if (shownRepos.isEmpty()) {
                                 DropdownMenuItem(
                                     text = { Text("No repos for this source") },
                                     onClick = { repoMenu = false },
                                     enabled = false,
                                 )
                             }
-                            providerRepos.forEach { repo ->
+                            shownRepos.forEach { repo ->
                                 DropdownMenuItem(
                                     text = { Text(repo.displayName()) },
                                     onClick = {
@@ -984,8 +1000,24 @@ fun NewAgentScreen(
                     )
                     val selectedPool = pools.firstOrNull { it.poolName.equals(envName.trim(), ignoreCase = true) }
                     if (selectedPool?.acceptsManyRepos() == true) {
+                        SourcePicker(
+                            sources = providers,
+                            selected = provider,
+                            loading = loadingRepos,
+                            emptyLabel = "Any source",
+                            onPick = { provider = it },
+                        )
+                        if (listsRepos) {
+                            ForgeRepoSearch(
+                                query = repoQuery,
+                                onQuery = { repoQuery = it },
+                                loading = forgeLoading,
+                                hasMore = forgeMore,
+                                onMore = { loadMoreForgeRepos() },
+                            )
+                        }
                         ExtraReposField(
-                            repos = repos,
+                            repos = filterRepos(providerRepos, repoQuery),
                             selected = extraRepos,
                             primaryUrl = "",
                             onSelected = { extraRepos = it },

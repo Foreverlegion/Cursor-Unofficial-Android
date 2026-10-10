@@ -4,10 +4,13 @@ import android.app.Application
 import android.content.Context
 import androidx.core.content.edit
 import androidx.test.core.app.ApplicationProvider
+import com.cursorandroid.app.data.repo.ForgeConnection
+import com.cursorandroid.app.data.repo.ForgeKind
 import com.cursorandroid.app.data.repo.StoredMcpAuth
 import com.cursorandroid.app.data.repo.StoredMcpServer
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.decodeStoredMcps
+import com.cursorandroid.app.data.repo.sourceLabels
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -174,4 +177,21 @@ class SecretStorageTest {
         assertEquals(false, old.single().enabled)
         assertNull(old.single().auth)
     }
+
+    @Test
+    fun savedForgesSurviveReopenWithEachTokenAndFeedTheSourceList() {
+        val store = open()
+        store.saveForges(
+            listOf(
+                ForgeConnection(id = "gh", provider = ForgeKind.GITHUB.id, token = "gh-token"),
+                ForgeConnection(id = "gl", provider = ForgeKind.GITLAB.id, token = "gl-token"),
+            ),
+        )
+        val back = open()
+        assertEquals(listOf("gh-token", "gl-token"), back.forges().map { it.token })
+        assertEquals("gl-token", back.forgeForLabel("GitLab")?.token)
+        assertEquals(listOf("GitHub", "GitLab"), sourceLabels(emptyList(), back.forges()))
+        assertEquals(listOf("gh-token", "gl-token"), open().forges().map { it.token })
+    }
 }
+

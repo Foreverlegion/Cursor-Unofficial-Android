@@ -8,6 +8,8 @@ MCP: a follow-up no longer replaces the servers an agent was created with. The a
 
 Settings export leaves out the API key, forge tokens, and MCP header, env, and OAuth values unless you turn on Include secrets, which seals them with a passphrase you choose. Import asks for that passphrase. If the phone's secure storage cannot be opened, secrets stay in memory only and a warning shows. The old plain `mcp_name` and `mcp_url` copy is moved into the encrypted list and deleted. Saved settings are kept across the update.
 
+New agent: the Source list now includes every forge saved in Settings, Connections, Forges (GitHub, GitLab, Bitbucket, Azure DevOps, Origin, self-hosted and custom HTTPS hosts), for Cloud, Machine, and Pool. Picking GitLab lists your projects with the saved GitLab token (membership projects, searchable, load more) and sends the HTTPS clone URL as the repo. Saved forges and tokens are only read, never changed.
+
 ---
 
 # 1.0.26
