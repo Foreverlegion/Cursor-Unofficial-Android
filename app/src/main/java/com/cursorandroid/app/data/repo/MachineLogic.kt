@@ -19,6 +19,9 @@ data class MachineRecord(
     @SerialName("last_seen_ms") val lastSeenMs: Long = 0,
     @SerialName("first_seen_ms") val firstSeenMs: Long = 0,
     @SerialName("via_agent") val viaAgent: Boolean = false,
+    @SerialName("detail") val detail: String? = null,
+    @SerialName("repo_url") val repoUrl: String? = null,
+    @SerialName("workspace") val workspaceRootPath: String? = null,
 )
 
 object MachineMarkState {
@@ -105,6 +108,9 @@ fun observeMachines(
             lastSeenMs = nowMs,
             firstSeenMs = before?.firstSeenMs?.takeIf { it > 0 } ?: nowMs,
             viaAgent = false,
+            detail = c.detail,
+            repoUrl = c.repoUrl,
+            workspaceRootPath = c.workspaceRootPath,
         )
     }
     onlineNames.forEach { seen.remove("name:$it") }
@@ -119,6 +125,9 @@ fun observeMachines(
             lastSeenMs = stamp,
             firstSeenMs = before?.firstSeenMs?.takeIf { it > 0 } ?: stamp,
             viaAgent = before?.viaAgent ?: (stamp > 0),
+            detail = before?.detail,
+            repoUrl = before?.repoUrl,
+            workspaceRootPath = before?.workspaceRootPath,
         )
     }
     val kept = if (seen.size > MAX_SEEN) {
@@ -128,6 +137,54 @@ fun observeMachines(
     }
     return prefs.copy(seen = kept)
 }
+
+/**
+ * Adds machines the phone had listed before but that carry no record yet, for instance the list cached by an
+ * earlier build. Existing records and marks are never touched; the time stays unknown.
+ */
+fun seedMachines(prefs: MachinePrefs, cached: List<Computer>): MachinePrefs {
+    val seen = LinkedHashMap(prefs.seen)
+    var changed = false
+    cached.forEach { c ->
+        if (c.name.isBlank()) return@forEach
+        val key = c.machineKey()
+        if (key in seen || key in prefs.marks) return@forEach
+        seen[key] = MachineRecord(
+            name = c.name,
+            workerId = c.workerId,
+            detail = c.detail?.takeIf { it != SEEN_ON_AGENT && it != SEEN_EARLIER },
+            repoUrl = c.repoUrl,
+            workspaceRootPath = c.workspaceRootPath,
+        )
+        changed = true
+    }
+    return if (changed) prefs.copy(seen = seen) else prefs
+}
+
+/**
+ * Remembered machines missing from [listed], as offline entries. A record whose name is already listed (the same
+ * machine under a new worker id) is folded into that entry instead of being listed twice.
+ */
+fun rememberedMachines(listed: List<Computer>, prefs: MachinePrefs): List<Computer> {
+    val have = listed.map { it.machineKey() }.toSet()
+    val names = listed.map { it.name.trim().lowercase() }.toSet()
+    return prefs.seen.entries
+        .filter { (key, record) -> key !in have && record.name.trim().lowercase() !in names }
+        .sortedByDescending { it.value.lastSeenMs }
+        .map { (_, r) ->
+            Computer(
+                name = r.name,
+                online = false,
+                detail = r.detail ?: SEEN_EARLIER,
+                workerId = r.workerId,
+                repoUrl = r.repoUrl,
+                workspaceRootPath = r.workspaceRootPath,
+            )
+        }
+}
+
+const val SEEN_ON_AGENT = "Seen on a previous agent"
+const val SEEN_EARLIER = "Seen earlier"
 
 private fun lastAgentUse(name: String, agents: List<AgentSummary>): Long? {
     val wanted = name.trim().lowercase()

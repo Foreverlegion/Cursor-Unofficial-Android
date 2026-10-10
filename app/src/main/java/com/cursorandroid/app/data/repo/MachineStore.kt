@@ -26,6 +26,13 @@ class MachineStore(
         update { observeMachines(it, computers, agents, clock()) }
     }
 
+    fun seed(cached: List<Computer>) {
+        if (cached.isEmpty()) return
+        update { seedMachines(it, cached) }
+    }
+
+    fun remembered(listed: List<Computer>): List<Computer> = rememberedMachines(listed, prefs())
+
     fun hide(key: String, name: String) = update { it.withMark(key, name, MachineMarkState.HIDDEN, clock()) }
 
     fun forget(key: String, name: String) = update { it.withMark(key, name, MachineMarkState.FORGOTTEN, clock()) }

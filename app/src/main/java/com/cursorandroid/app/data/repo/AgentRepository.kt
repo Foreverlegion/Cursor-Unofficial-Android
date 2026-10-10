@@ -17,6 +17,7 @@ import com.cursorandroid.app.data.api.EnvironmentBuild
 import com.cursorandroid.app.data.api.EnvironmentBuildList
 import com.cursorandroid.app.data.api.MAX_ENV_REPOS
 import com.cursorandroid.app.data.api.environmentOwner
+import com.cursorandroid.app.data.api.Worker
 import com.cursorandroid.app.data.api.WorkerPool
 import com.cursorandroid.app.data.api.WorkersSummaryResponse
 import com.cursorandroid.app.data.api.CreateAgentResponse
@@ -504,13 +505,21 @@ class AgentRepository(
         return sse.stream(agentId, runId, apiKey(), lastEventId)
     }
 
+    private suspend fun listWorkerPages(scope: String): List<Worker> {
+        val out = ArrayList<Worker>()
+        var token: String? = null
+        repeat(WORKER_PAGES) {
+            val page = wrap { api.listWorkers(status = "all", scope = scope, limit = WORKER_PAGE_SIZE, pageToken = token) }
+            out += page.workers
+            token = page.nextPageToken?.takeIf { it.isNotBlank() && it != token }
+            if (token == null) return out
+        }
+        return out
+    }
+
     suspend fun listComputers(knownAgents: List<AgentSummary> = emptyList()): List<Computer> {
-        val online = runCatching {
-            wrap { api.listWorkers(status = "all", scope = "personal").workers }
-        }.getOrElse {
-            runCatching {
-                wrap { api.listWorkers(status = "all", scope = "all").workers }
-            }.getOrDefault(emptyList())
+        val online = runCatching { listWorkerPages("personal") }.getOrElse {
+            runCatching { listWorkerPages("all") }.getOrDefault(emptyList())
         }
         val fromWorkers = online
             .map { worker ->
@@ -533,12 +542,16 @@ class AgentRepository(
                 if (!isRemoteEnvType(env.type)) return@mapNotNull null
                 val name = env.name?.trim().orEmpty()
                 if (name.isEmpty() || name.lowercase() in seen) null
-                else Computer(name = name, online = false, detail = "Seen on a previous agent")
+                else Computer(name = name, online = false, detail = SEEN_ON_AGENT)
             }
             .distinctBy { it.name.lowercase() }
-        val all = fromWorkers + fromAgents
-        if (!store.demoMode) runCatching { machines?.observe(all, agents) }
-        return all
+        val live = fromWorkers + fromAgents
+        val book = machines?.takeIf { !store.demoMode } ?: return live
+        return runCatching {
+            book.seed(catalog.computers())
+            book.observe(live, agents)
+            live + book.remembered(live)
+        }.getOrDefault(live)
     }
 
     suspend fun listPools(): List<WorkerPool> {
@@ -724,6 +737,8 @@ class AgentRepository(
         private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
+        private const val WORKER_PAGE_SIZE = 50
+        private const val WORKER_PAGES = 10
         private const val USAGE_BUDGET_MS = 25_000L
         private const val USAGE_CALL_MS = 10_000L
         private const val ROW_BUDGET_MS = 20_000L

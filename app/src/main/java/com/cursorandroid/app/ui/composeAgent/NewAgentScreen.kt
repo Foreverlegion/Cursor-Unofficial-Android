@@ -370,7 +370,7 @@ fun NewAgentScreen(
     LaunchedEffect(Unit) {
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
         scope.launch {
-            computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
+            computers = runCatching { container.repo.listComputers(container.catalog.agents()) }.getOrDefault(computers)
             machinePrefs = container.machines.prefs()
             pools = runCatching { container.repo.listPools() }.getOrDefault(pools)
             if (envType == "machine") {
