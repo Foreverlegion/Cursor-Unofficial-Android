@@ -117,6 +117,7 @@ import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
 import com.cursorandroid.app.data.repo.RunSettled
 import com.cursorandroid.app.data.repo.mergeConversationTranscript
+import com.cursorandroid.app.data.repo.runsOldestFirst
 import com.cursorandroid.app.data.repo.settledAgentStatus
 import com.cursorandroid.app.data.repo.mergeRunTranscript
 import com.cursorandroid.app.data.repo.mergeTranscript
@@ -226,6 +227,7 @@ class ThreadViewModel(
     private val refreshLock = Mutex()
     private val settleLock = Mutex()
     private val settledRuns = HashSet<String>()
+    private var runOrder: List<String> = emptyList()
     private var settledKey: String? = null
     private var afterNonAssistant = false
     private val lineGate = Any()
@@ -675,6 +677,7 @@ class ThreadViewModel(
     private suspend fun mergeServerRuns(): List<Run> {
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
         noteApiModels(runs = runs)
+        if (runs.isNotEmpty()) runOrder = runsOldestFirst(runs).map { it.id }
         var filled = runs.map { item -> hydrateRun(item, force = false) }
         filled.filter { it.isTerminal() }.forEach { settledRuns += it.id }
         var merged = mergeRunTranscript(lines, filled)
@@ -710,7 +713,8 @@ class ThreadViewModel(
         val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return null
         if (convo.messages.isEmpty()) return null
         synchronized(lineGate) {
-            val merged = mergeConversationTranscript(lines, convo.messages, settledRuns.toSet())
+            val liveRun = (runOrder + listOfNotNull(run?.id)).distinct().lastOrNull()
+            val merged = mergeConversationTranscript(lines, convo.messages, settledRuns.toSet(), runOrder, liveRun)
             if (merged != lines) {
                 lines = merged
                 persist()

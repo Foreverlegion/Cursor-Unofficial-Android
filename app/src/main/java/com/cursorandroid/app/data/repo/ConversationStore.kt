@@ -433,16 +433,16 @@ internal fun visibleUserText(text: String): String {
     return out
 }
 
+internal fun runsOldestFirst(runs: List<Run>): List<Run> {
+    return if (runs.all { !it.createdAt.isNullOrBlank() }) runs.sortedBy { it.createdAt } else runs.asReversed()
+}
+
 internal fun mergeRunTranscript(
     lines: List<TranscriptLine>,
     runs: List<Run>,
 ): List<TranscriptLine> {
     if (runs.isEmpty()) return coalesceTranscript(lines)
-    val ordered = if (runs.all { !it.createdAt.isNullOrBlank() }) {
-        runs.sortedBy { it.createdAt }
-    } else {
-        runs.asReversed()
-    }
+    val ordered = runsOldestFirst(runs)
     val extra = ArrayList<TranscriptLine>(ordered.size * 2)
     for (run in ordered) {
         val user = visibleUserText(run.prompt?.text.orEmpty())
@@ -461,6 +461,8 @@ internal fun mergeConversationTranscript(
     local: List<TranscriptLine>,
     messages: List<ConversationMessage>,
     settledRuns: Set<String> = emptySet(),
+    runOrder: List<String> = emptyList(),
+    liveRunId: String? = null,
 ): List<TranscriptLine> {
     if (messages.isEmpty()) return coalesceTranscript(local)
     val used = BooleanArray(local.size)
@@ -501,22 +503,89 @@ internal fun mergeConversationTranscript(
         )
     }
 
+    val order = RunOrder(runOrder, liveRunId)
+    val prefix = ArrayList<TranscriptLine>()
     local.forEachIndexed { i, line ->
         if (used[i]) return@forEachIndexed
+        val old = order.isOld(line)
         when (line.kind) {
-            "user" -> out += line
+            "user" -> if (old) placeOlder(out, prefix, line, order) else out += line
             "assistant" -> {
                 val text = line.text.trim()
-                val settled = line.runId in settledRuns
+                val settled = line.runId in settledRuns || order.runOf(line) in settledRuns
                 val unseen = out.none { it.kind == "assistant" && it.text.trim() == text }
                 if (text.isNotEmpty() && unseen && !(settled && coveredByServer(text, out))) {
-                    insertAtTurnEnd(out, line)
+                    if (old) placeOlder(out, prefix, line, order) else insertAtTurnEnd(out, line)
                 }
             }
-            else -> insertAfterRun(out, line)
+            else -> if (old) placeOlder(out, prefix, line, order) else insertAfterRun(out, line)
         }
     }
+    out.addAll(0, prefix.sortedBy { order.rank(order.runOf(it)) ?: -1 })
     return coalesceTranscript(out)
+}
+
+/** Run order from the run list. Only the live run may sit at the tail of the transcript. */
+internal class RunOrder(runOrder: List<String>, private val liveRunId: String?) {
+    private val ranks = runOrder.withIndex().associate { it.value to it.index }
+    private val enabled = runOrder.isNotEmpty() || liveRunId != null
+    private val newest: String? = liveRunId ?: runOrder.lastOrNull()
+
+    fun rank(run: String?): Int? = run?.let { ranks[it] }
+
+    fun runOf(line: TranscriptLine): String? {
+        line.runId?.takeIf { it.isNotBlank() }?.let { return it }
+        return runIdFromId(line)?.takeIf { it in ranks || it == liveRunId }
+    }
+
+    fun isOld(line: TranscriptLine): Boolean {
+        if (!enabled) return false
+        val run = runOf(line) ?: return false
+        return run != newest
+    }
+
+    fun effective(lines: List<TranscriptLine>): List<String?> {
+        var turn: String? = null
+        return lines.map { line ->
+            val own = runOf(line)
+            if (line.kind == "user") {
+                turn = own
+                own
+            } else {
+                own ?: turn
+            }
+        }
+    }
+}
+
+/**
+ * A line from an older run that the server window does not list. It goes with its own turn, else
+ * before the first turn of a newer run, else at the top, but never at the tail.
+ */
+private fun placeOlder(
+    out: MutableList<TranscriptLine>,
+    prefix: MutableList<TranscriptLine>,
+    line: TranscriptLine,
+    order: RunOrder,
+) {
+    val run = order.runOf(line)
+    val effective = order.effective(out)
+    if (line.kind != "user") {
+        val last = effective.indexOfLast { it == run }
+        if (last >= 0) {
+            out.add(last + 1, line)
+            return
+        }
+    }
+    val mine = order.rank(run)
+    if (mine != null) {
+        val next = effective.indexOfFirst { e -> order.rank(e)?.let { it > mine } == true }
+        if (next >= 0) {
+            out.add(next, line)
+            return
+        }
+    }
+    prefix += line
 }
 
 private val WHITESPACE = Regex("\\s+")
