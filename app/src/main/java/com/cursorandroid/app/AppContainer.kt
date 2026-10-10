@@ -2,6 +2,7 @@ package com.cursorandroid.app
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import com.cursorandroid.app.data.api.ApiShape
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
@@ -89,6 +90,7 @@ class AppContainer(context: Context) {
         .addInterceptor(authInterceptor)
         .apply {
             if (debug) {
+                addInterceptor(ApiShape.interceptor(json))
                 addInterceptor(
                     HttpLoggingInterceptor().apply {
                         level = HttpLoggingInterceptor.Level.BASIC
@@ -127,7 +129,7 @@ class AppContainer(context: Context) {
 
     val repo = AgentRepository(
         api = api,
-        sse = SseStreamer(http, json),
+        sse = SseStreamer(http, json, probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null),
         store = store,
         catalog = catalog,
         publicHttp = publicHttp,
