@@ -75,7 +75,7 @@ import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
 
-private enum class SettingsPage(val title: String, val summary: String) {
+internal enum class SettingsPage(val title: String, val summary: String) {
     Home("Settings", ""),
     Appearance("Appearance", "Theme color"),
     AgentList("Agent list", "Grouping, cards, and filters"),
@@ -108,7 +108,6 @@ private const val KEY_INFO =
 private const val USAGE_INFO =
     "Cloud Agents token usage only. Desktop and team totals live on the Cursor dashboard."
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     container: AppContainer,
@@ -120,7 +119,32 @@ fun SettingsScreen(
     openAccountTick: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    var page by remember { mutableStateOf(SettingsPage.Home) }
+    SettingsScreenContent(
+        container = container,
+        showBack = showBack,
+        onBack = onBack,
+        onSignedOut = onSignedOut,
+        onSessionChanged = onSessionChanged,
+        onAppearanceChanged = onAppearanceChanged,
+        openAccountTick = openAccountTick,
+        modifier = modifier,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+internal fun SettingsScreenContent(
+    container: AppContainer,
+    showBack: Boolean,
+    onBack: () -> Unit,
+    onSignedOut: () -> Unit,
+    onSessionChanged: () -> Unit = {},
+    onAppearanceChanged: () -> Unit = {},
+    openAccountTick: Int = 0,
+    modifier: Modifier = Modifier,
+    initialPage: SettingsPage = SettingsPage.Home,
+) {
+    var page by remember { mutableStateOf(initialPage) }
     var under by remember { mutableStateOf(SettingsPage.Home) }
     fun closePage() {
         if (page == SettingsPage.Home) {

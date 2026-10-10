@@ -86,7 +86,6 @@ fun RepoDefaultsPage(
         }
     }
 
-    // Hosted inside SettingsScreen's scrolling column; a second verticalScroll here crashes.
     Column(modifier) {
         Text(
             "Used when you start a new agent on that repo. You can still change them for one chat. The account default model is used when a repo has no model.",

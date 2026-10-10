@@ -51,7 +51,6 @@ fun ForgesPage(
         status = ""
     }
 
-    // Hosted inside SettingsScreen's scrolling column; a second verticalScroll here crashes.
     Column(modifier) {
         Text(
             "Tokens stay encrypted on this phone. Branch lists and new repos use the matching forge.",
