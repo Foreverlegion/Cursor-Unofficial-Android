@@ -66,3 +66,22 @@ object ApiShape {
         response
     }
 }
+
+/** Debug builds only: the cancel request path and its HTTP status. No headers, no body. */
+object CancelLog {
+    private const val TAG = "CancelRun"
+
+    fun interceptor() = Interceptor { chain ->
+        val request = chain.request()
+        val tracked = request.method == "POST" && request.url.encodedPath.endsWith("/cancel")
+        if (!tracked) return@Interceptor chain.proceed(request)
+        try {
+            val response = chain.proceed(request)
+            Log.d(TAG, "POST ${request.url.encodedPath} -> ${response.code}")
+            response
+        } catch (e: java.io.IOException) {
+            Log.d(TAG, "POST ${request.url.encodedPath} -> ${e::class.java.simpleName}")
+            throw e
+        }
+    }
+}

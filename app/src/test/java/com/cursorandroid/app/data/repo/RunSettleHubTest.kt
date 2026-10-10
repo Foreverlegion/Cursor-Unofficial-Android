@@ -134,4 +134,17 @@ class RunSettleHubTest {
             runIndicator(settledAgentStatus("ACTIVE", "r1", ended), ended.status),
         )
     }
+
+    @Test
+    fun localActivityFlipsOnlyNonLiveCardsToRunning() {
+        val hub = RunSettleHub()
+        hub.setLocalActive("a", true)
+        hub.setLocalActive("b", true)
+        val list = listOf(agent("a", "FINISHED", "r1"), agent("b", "ACTIVE", "r2"), agent("c", "FINISHED", "r3"))
+        val out = markLocalActive(list, hub.localActive.value)
+        assertEquals(listOf("ACTIVE", "ACTIVE", "FINISHED"), out.map { it.status })
+        hub.setLocalActive("a", false)
+        assertEquals(listOf("FINISHED", "ACTIVE", "FINISHED"), markLocalActive(list, hub.localActive.value).map { it.status })
+        assertEquals(list, markLocalActive(list, emptySet()))
+    }
 }

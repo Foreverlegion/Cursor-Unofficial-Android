@@ -43,6 +43,20 @@ class RunSettleHub(private val persist: (RunSettled) -> Unit = {}) {
         return true
     }
 
+    private val local = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Agents with a send, stream or live run known to an open thread; their cards show Running. */
+    val localActive: StateFlow<Set<String>> = local.asStateFlow()
+
+    fun setLocalActive(agentId: String, active: Boolean) {
+        if (agentId.isBlank()) return
+        synchronized(this) {
+            val has = agentId in local.value
+            if (active && !has) local.value = local.value + agentId
+            if (!active && has) local.value = local.value - agentId
+        }
+    }
+
     fun clear(agentId: String) {
         synchronized(this) {
             if (agentId in state.value) state.value = state.value - agentId
@@ -107,4 +121,18 @@ fun settledAgentStatus(agentStatus: String?, latestRunId: String?, run: Run?): S
     if (!isEndedRun(ended)) return agentStatus
     if (latestRunId != null && latestRunId != run.id) return agentStatus
     return ended
+}
+
+fun markLocalActive(agents: List<AgentSummary>, active: Set<String>): List<AgentSummary> {
+    if (active.isEmpty()) return agents
+    var changed = false
+    val out = agents.map { agent ->
+        if (agent.id in active && !isLiveStatus(agent.status) && !agent.status.equals("ARCHIVED", true)) {
+            changed = true
+            agent.copy(status = "ACTIVE")
+        } else {
+            agent
+        }
+    }
+    return if (changed) out else agents
 }

@@ -3,6 +3,7 @@ package com.cursorandroid.app
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import com.cursorandroid.app.data.api.ApiShape
+import com.cursorandroid.app.data.api.CancelLog
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
@@ -91,6 +92,7 @@ class AppContainer(context: Context) {
         .apply {
             if (debug) {
                 addInterceptor(ApiShape.interceptor(json))
+                addInterceptor(CancelLog.interceptor())
                 addInterceptor(
                     HttpLoggingInterceptor().apply {
                         level = HttpLoggingInterceptor.Level.BASIC

@@ -59,6 +59,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -125,6 +128,8 @@ import com.cursorandroid.app.data.api.isTerminal
 import com.cursorandroid.app.data.notify.ApprovalCopy
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
+import com.cursorandroid.app.data.repo.RunStopper
+import com.cursorandroid.app.data.repo.StopOutcome
 import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelParam
@@ -170,6 +175,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
+private const val STOPPING = "Stopping..."
+private const val STOP_LOOKUP_LIMIT = 5
+
+data class SnackEvent(val seq: Int, val text: String, val indefinite: Boolean = false)
+
+internal fun stopMessage(outcome: StopOutcome): String = when (outcome) {
+    StopOutcome.Stopped -> "Stopped"
+    StopOutcome.AlreadyFinished -> "Run already finished"
+    is StopOutcome.Failed -> "Couldn't stop: ${outcome.reason}"
+}
+
 class ThreadViewModel(
     private val container: AppContainer,
     val agentId: String,
@@ -184,6 +200,10 @@ class ThreadViewModel(
         private set
     var busy by mutableStateOf(false)
         private set
+    var snack by mutableStateOf<SnackEvent?>(null)
+        private set
+    private var snackSeq = 0
+    private var stopping = false
     var streaming by mutableStateOf(false)
         private set
     var receiving by mutableStateOf(false)
@@ -513,18 +533,28 @@ class ThreadViewModel(
         behind = if (stale != null && stale.remoteSha != meta.ignoredRemoteSha) stale else null
     }
 
+    private val stopper = RunStopper(
+        cancel = { id, runId -> container.repo.cancel(id, runId) },
+        listRuns = { id -> container.repo.listRuns(id, STOP_LOOKUP_LIMIT) },
+    )
+
     fun cancel() {
-        val runId = run?.id ?: return
+        if (stopping) return
+        stopping = true
         viewModelScope.launch {
             try {
-                container.repo.cancel(agentId, runId)
+                say(STOPPING, indefinite = true)
+                val outcome = stopper.stop(agentId, run?.id, agent?.latestRunId)
+                say(stopMessage(outcome))
                 refresh()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = displayError(e)
+            } finally {
+                stopping = false
             }
         }
+    }
+
+    private fun say(text: String, indefinite: Boolean = false) {
+        snack = SnackEvent(++snackSeq, text, indefinite)
     }
 
     private suspend fun flushOutbound() {
@@ -1115,20 +1145,25 @@ fun ThreadScreen(
     }
     val scope = rememberCoroutineScope()
     val agentStatus = settledAgentStatus(vm.agent?.status, vm.agent?.latestRunId, vm.run)
-    val working = showWorkBar(
+    val runState = threadRunState(
         lines = vm.lines,
-        receiving = vm.receiving,
+        agentStatus = agentStatus,
+        runStatus = vm.run?.status,
         busy = vm.busy,
-        agentStatus = agentStatus,
-        runStatus = vm.run?.status,
-    )
-    val canKill = isLiveStatus(agentStatus) || vm.run?.isActive() == true
-    val title = localTitle ?: vm.agent?.name ?: "Agent"
-    val indicator = runIndicator(
-        agentStatus = agentStatus,
-        runStatus = vm.run?.status,
+        streaming = vm.streaming,
+        receiving = vm.receiving,
         approvalPending = vm.approvalPending,
     )
+    val working = runState.active
+    val canKill = runState.active
+    LaunchedEffect(runState.active, agentId) {
+        container.runSettle.setLocalActive(agentId, runState.active)
+    }
+    DisposableEffect(agentId) {
+        onDispose { container.runSettle.setLocalActive(agentId, false) }
+    }
+    val title = localTitle ?: vm.agent?.name ?: "Agent"
+    val indicator = runState.indicator
     val repoLabel = shortRepo(vm.run?.git?.branches?.firstOrNull()?.repoUrl)
         ?: shortRepo(container.catalog.gitSnaps()[agentId]?.repoUrl)
         ?: shortRepo(vm.agent?.repos?.firstOrNull()?.url)
@@ -1142,7 +1177,6 @@ fun ThreadScreen(
         envType = vm.agent?.env?.type,
         toolName = if (working) latestTool else null,
     )
-    val workingModel = modelLabel(vm.modelBook.resolve(vm.run?.id), models)
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
@@ -1152,6 +1186,8 @@ fun ThreadScreen(
     val rows = remember(shownLines, showTools, showThinking) {
         groupChatRows(shownLines, showTools, showThinking)
     }
+    val modelHints = remember(shownLines) { runModelHints(shownLines) }
+    val workingModel = runModelLabel(vm.modelBook, vm.run?.id, modelHints, models)
     val currentRunId = vm.run?.id
     val liveThink = remember(shownLines, currentRunId, working) {
         liveThinkingLine(shownLines, currentRunId, working)
@@ -1265,9 +1301,19 @@ fun ThreadScreen(
         }
     }
 
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(vm.snack) {
+        val event = vm.snack ?: return@LaunchedEffect
+        snackbar.showSnackbar(
+            event.text,
+            duration = if (event.indefinite) SnackbarDuration.Indefinite else SnackbarDuration.Short,
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -1380,7 +1426,7 @@ fun ThreadScreen(
                 .scaffoldBars(padding),
         ) {
             if (working) {
-                WorkingBar(activity, workingModel)
+                WorkingBar(activity, workingModel, onStop = if (canKill) ({ vm.cancel() }) else null)
             }
             if (vm.error != null) {
                 Text(
@@ -1428,7 +1474,7 @@ fun ThreadScreen(
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
                                 modelText = if (row.line.kind == "assistant") {
-                                    modelLabel(vm.modelBook.resolve(lineRunId(row.line)), models)
+                                    runModelLabel(vm.modelBook, lineRunId(row.line), modelHints, models)
                                 } else {
                                     null
                                 },
@@ -2074,7 +2120,7 @@ private fun ToolCallsBlock(
 }
 
 @Composable
-private fun WorkingBar(text: String, model: String? = null) {
+internal fun WorkingBar(text: String, model: String? = null, onStop: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -2108,6 +2154,9 @@ private fun WorkingBar(text: String, model: String? = null) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        if (onStop != null) {
+            TextButton(onClick = onStop, modifier = Modifier.testTag("stop-run")) { Text("Stop") }
         }
     }
 }

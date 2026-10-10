@@ -84,6 +84,7 @@ import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.repo.RepoGroupPrefs
+import com.cursorandroid.app.data.repo.markLocalActive
 import com.cursorandroid.app.data.repo.settleAgents
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
@@ -225,6 +226,7 @@ fun InboxScreen(
     }
 
     val settledRuns by container.runSettle.settled.collectAsStateWithLifecycle()
+    val localActive by container.runSettle.localActive.collectAsStateWithLifecycle()
     LaunchedEffect(settledRuns) {
         val next = settleAgents(items, settledRuns)
         if (next !== items) {
@@ -399,7 +401,7 @@ fun InboxScreen(
                 onRefresh = { reload(showSpinner = true) },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                val listed = items.visibleInbox(showArchived, hiddenIds, showHidden).forInboxTab(tab, tabs)
+                val listed = markLocalActive(items, localActive).visibleInbox(showArchived, hiddenIds, showHidden).forInboxTab(tab, tabs)
                 run {
                     AgentList(
                         items = listed,
