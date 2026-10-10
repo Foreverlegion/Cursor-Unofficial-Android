@@ -82,7 +82,6 @@ import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
-import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
@@ -1012,128 +1011,6 @@ private fun SectionLabel(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
     )
-}
-
-@Composable
-private fun EnvList(
-    envs: List<ActiveEnv>,
-    refreshing: Boolean,
-    onOpen: (ActiveEnv) -> Unit,
-    onCompose: (ActiveEnv) -> Unit,
-) {
-    when {
-        envs.isEmpty() && !refreshing -> {
-            Text(
-                "No active environments. Start an agent on cloud or a pool.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
-        else -> {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp),
-            ) {
-                items(envs, key = { "${it.type}:${it.name}" }) { env ->
-                    EnvRow(env = env, onOpen = { onOpen(env) }, onCompose = { onCompose(env) })
-                    HorizontalDivider()
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EnvRow(
-    env: ActiveEnv,
-    onOpen: () -> Unit,
-    onCompose: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(env.name, style = MaterialTheme.typography.titleSmall)
-            Text(
-                buildString {
-                    append(env.typeLabel())
-                    append(" · ")
-                    if (env.working > 0) {
-                        append(env.working)
-                        append(" working · ")
-                    }
-                    append(env.chats)
-                    append(if (env.chats == 1) " chat" else " chats")
-                    env.latestStatus?.let {
-                        append(" · ")
-                        append(it)
-                    }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (env.working > 0) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        TextButton(onClick = onCompose) { Text("New") }
-    }
-}
-
-@Composable
-private fun RemotePane(
-    computers: List<Computer>,
-    envs: List<ActiveEnv>,
-    refreshing: Boolean,
-    onOpenEnv: (ActiveEnv) -> Unit,
-    onComposeEnv: (ActiveEnv) -> Unit,
-    onSelectComputer: (Computer) -> Unit,
-) {
-    val envNames = envs.map { it.name.lowercase() }.toHashSet()
-    val extraOnline = computers.filter { it.online && it.name.lowercase() !in envNames }
-    val extraOffline = computers.filter { !it.online && it.name.lowercase() !in envNames }
-    when {
-        computers.isEmpty() && envs.isEmpty() && !refreshing -> {
-            Text(
-                "No remotes online. Open Cursor on a PC, stay signed in, and enable Remote Control.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
-        else -> {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp),
-            ) {
-                if (extraOnline.isNotEmpty()) {
-                    item(key = "online") { SectionLabel("Online") }
-                    items(extraOnline, key = { "on:${it.workerId ?: it.name}" }) { computer ->
-                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
-                        HorizontalDivider()
-                    }
-                }
-                if (envs.isNotEmpty()) {
-                    item(key = "chats") { SectionLabel("Chats") }
-                    items(envs, key = { "env:${it.type}:${it.name}" }) { env ->
-                        EnvRow(env = env, onOpen = { onOpenEnv(env) }, onCompose = { onComposeEnv(env) })
-                        HorizontalDivider()
-                    }
-                }
-                if (extraOffline.isNotEmpty()) {
-                    item(key = "offline") { SectionLabel("Offline") }
-                    items(extraOffline, key = { "off:${it.workerId ?: it.name}" }) { computer ->
-                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
-                        HorizontalDivider()
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable

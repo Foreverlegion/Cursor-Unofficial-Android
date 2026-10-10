@@ -605,31 +605,6 @@ fun AgentSummary.isWorking(): Boolean = isLiveStatus(status)
 
 fun AgentDetail.isWorking(): Boolean = isLiveStatus(status)
 
-data class ActiveEnv(
-    val type: String,
-    val name: String,
-    val working: Int,
-    val chats: Int,
-    val latestId: String?,
-    val latestStatus: String?,
-) {
-    fun composeName(): String? {
-        if (type == "cloud" && name.equals("Cloud", ignoreCase = true)) return null
-        return name
-    }
-
-    fun typeLabel(): String = when (type) {
-        "cloud" -> "Cloud"
-        "machine" -> "Machine"
-        "local" -> "Local"
-        "remote" -> "Remote"
-        "pool" -> "Pool"
-        else -> type.replaceFirstChar { it.uppercase() }
-    }
-
-    fun composeType(): String = if (isRemoteEnvType(type)) "machine" else type
-}
-
 fun isRemoteEnvType(type: String?): Boolean {
     return when (type?.trim()?.lowercase()) {
         "machine", "local", "remote" -> true
@@ -830,42 +805,6 @@ fun ModelItem.setParam(current: List<ModelParam>, id: String, value: String): Li
 fun ModelItem.namedVariants(): List<ModelVariant> {
     return variants.orEmpty().filter { !it.displayName.isNullOrBlank() }
 }
-
-fun List<AgentSummary>.activeEnvs(): List<ActiveEnv> {
-    return groupBy { agent ->
-        val type = agent.env?.type?.trim()?.lowercase().orEmpty().ifBlank { "cloud" }
-        val name = agent.env?.name?.trim().orEmpty().ifBlank {
-            when (type) {
-                "cloud" -> "Cloud"
-                "machine" -> "Machine"
-                "local" -> "Local"
-                "remote" -> "Remote"
-                "pool" -> "Pool"
-                else -> type
-            }
-        }
-        type to name
-    }.map { (key, group) ->
-        val (type, name) = key
-        val latest = group.maxByOrNull { it.sortKey() }
-        ActiveEnv(
-            type = type,
-            name = name,
-            working = group.count { it.isWorking() },
-            chats = group.size,
-            latestId = latest?.id,
-            latestStatus = latest?.status,
-        )
-    }.sortedWith(
-        compareByDescending<ActiveEnv> { it.working }
-            .thenByDescending { it.chats }
-            .thenBy { it.name.lowercase() },
-    )
-}
-
-fun List<AgentSummary>.hostedEnvs(): List<ActiveEnv> = activeEnvs().filter { !isRemoteEnvType(it.type) }
-
-fun List<AgentSummary>.remoteEnvs(): List<ActiveEnv> = activeEnvs().filter { isRemoteEnvType(it.type) }
 
 @Serializable
 data class ArtifactItem(

@@ -64,7 +64,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -115,7 +114,6 @@ import com.cursorandroid.app.data.repo.mergeTranscript
 import com.cursorandroid.app.data.api.isTerminal
 import com.cursorandroid.app.data.notify.ApprovalCopy
 import com.cursorandroid.app.data.notify.RunWatchScheduler
-import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelParam
@@ -1105,11 +1103,6 @@ fun ThreadScreen(
         muted = container.chats.isMuted(agentId)
         favorite = container.chats.isFavorite(agentId)
         vm.refresh()
-    }
-
-    DisposableEffect(agentId) {
-        VisibleAgent.set(agentId)
-        onDispose { VisibleAgent.set(null) }
     }
 
     if (showBack) BackHandler(onBack = onBack)

@@ -5,7 +5,6 @@ coreKtx = "1.16.0"
 lifecycle = "2.9.2"
 activityCompose = "1.10.1"
 composeBom = "2025.07.00"
-navigation = "2.9.3"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
 serialization = "1.8.1"
@@ -27,7 +26,6 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
-androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 androidx-window = { group = "androidx.window", name = "window", version.ref = "window" }
 androidx-compose-material3-adaptive = { group = "androidx.compose.material3.adaptive", name = "adaptive", version.ref = "adaptive" }
 androidx-compose-material3-adaptive-layout = { group = "androidx.compose.material3.adaptive", name = "adaptive-layout", version.ref = "adaptive" }

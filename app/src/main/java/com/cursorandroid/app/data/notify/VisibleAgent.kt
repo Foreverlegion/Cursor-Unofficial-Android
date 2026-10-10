@@ -1,15 +1,10 @@
 package com.cursorandroid.app.data.notify
 
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 
+/** Shade notifications are suppressed while any app activity is started; the in-app notice tray covers them. */
 object VisibleAgent {
-    private val id = AtomicReference<String?>(null)
     private val started = AtomicInteger(0)
-
-    fun set(agentId: String?) {
-        id.set(agentId)
-    }
 
     fun activityStarted() {
         started.incrementAndGet()
@@ -19,12 +14,9 @@ object VisibleAgent {
         started.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
     }
 
-    fun shouldSuppress(agentId: String? = null): Boolean {
-        return started.get() > 0
-    }
+    fun shouldSuppress(): Boolean = started.get() > 0
 
     internal fun resetForTest() {
-        id.set(null)
         started.set(0)
     }
 }

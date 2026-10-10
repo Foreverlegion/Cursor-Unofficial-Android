@@ -157,25 +157,6 @@ class AgentRepository(
         return foldAgentPages(pages, MAX_PAGES)
     }
 
-    suspend fun listInboxAgents(): AgentListResponse {
-        val all = listAllAgents(includeArchived = true)
-        val active = listAllAgents(includeArchived = false)
-        val marked = markCloudArchived(all.entries(), active.entries())
-            .sortedByDescending { it.sortKey() }
-        return AgentListResponse(items = marked, nextCursor = all.nextCursor)
-    }
-
-    suspend fun walkInboxPages(onPage: suspend (AgentListResponse) -> Unit) {
-        var cursor: String? = null
-        repeat(MAX_PAGES) {
-            val page = listAgentsPage(includeArchived = true, cursor = cursor)
-            onPage(page)
-            val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
-            if (next == null || page.entries().isEmpty()) return
-            cursor = next
-        }
-    }
-
     suspend fun hydrateStatuses(agents: List<AgentSummary>, limit: Int = 15): List<AgentSummary> =
         hydrateStatuses(agents, agents.take(limit).mapTo(HashSet()) { it.id })
 

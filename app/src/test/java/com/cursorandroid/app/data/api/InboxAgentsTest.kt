@@ -157,11 +157,9 @@ class InboxAgentsTest {
         val local = agent("local", env = Env(type = "local", name = "Laptop"))
         val all = listOf(cloud, pool, machine, local)
 
-        assertEquals(listOf("Cloud", "default"), all.hostedEnvs().map { it.name })
-        assertEquals(listOf("Laptop", "Office-PC"), all.remoteEnvs().map { it.name }.sorted())
         assertTrue(isRemoteEnvType("local"))
         assertTrue(isRemoteEnvType("machine"))
-        assertEquals("machine", all.remoteEnvs().first().composeType())
+        assertTrue(all.filter { isRemoteEnvType(it.env?.type) }.map { it.id } == listOf("pc", "local"))
     }
 
     @Test

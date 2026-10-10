@@ -15,14 +15,12 @@ class VisibleAgentTest {
 
     @Test
     fun shadePostsWhenAppIsBackgrounded() {
-        VisibleAgent.set("chat-1")
         assertFalse(VisibleAgent.shouldSuppress())
     }
 
     @Test
     fun shadeIsSuppressedOnAnyScreenWhileAppIsOpen() {
         VisibleAgent.activityStarted()
-        VisibleAgent.set("other-chat")
         assertTrue(VisibleAgent.shouldSuppress())
     }
 
