@@ -5,6 +5,7 @@ import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentListResponse
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.ApiException
+import com.cursorandroid.app.data.api.McpServer
 import com.cursorandroid.app.data.api.TokenUsage
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CloudEnvironment
@@ -468,7 +469,10 @@ class AgentRepository(
         prompt: Prompt,
         mode: String? = null,
         model: ModelSelection? = null,
+        mcpServers: List<McpServer>? = null,
     ): Run {
+        // Create Run replaces the servers the agent was created with, so they are left out unless this chat's
+        // selection was changed on purpose; the agent then keeps the set it started with.
         return wrap {
             api.createRun(
                 agentId,
@@ -476,7 +480,7 @@ class AgentRepository(
                     prompt = ClientOrigin.stamp(prompt),
                     mode = mode,
                     model = model,
-                    mcpServers = store.mcpServers(),
+                    mcpServers = mcpServers,
                 ),
             ).run
         }
