@@ -28,6 +28,7 @@ object SettingsBackup {
             githubToken = container.store.githubToken,
             forges = container.store.forges(),
             repoDefaults = container.store.repoDefaults(),
+            repoGroupPrefs = container.chats.repoGroupPrefs,
             inboxWorkingOnly = container.chats.inboxWorkingOnly,
             inboxShowArchived = container.chats.inboxShowArchived,
             inboxShowHidden = container.chats.inboxShowHidden,
@@ -81,6 +82,9 @@ object SettingsBackup {
         if (snap.repoDefaults.isNotEmpty()) {
             container.store.saveRepoDefaults(snap.repoDefaults)
         }
+        if (!snap.repoGroupPrefs.isEmpty) {
+            container.chats.repoGroupPrefs = snap.repoGroupPrefs
+        }
         container.chats.inboxWorkingOnly = snap.inboxWorkingOnly
         container.chats.inboxShowArchived = snap.inboxShowArchived
         container.chats.inboxShowHidden = snap.inboxShowHidden
@@ -125,6 +129,7 @@ data class SettingsSnapshot(
     val githubToken: String? = null,
     val forges: List<ForgeConnection> = emptyList(),
     val repoDefaults: List<RepoDefault> = emptyList(),
+    val repoGroupPrefs: RepoGroupPrefs = RepoGroupPrefs(),
     val inboxWorkingOnly: Boolean = false,
     val inboxShowArchived: Boolean = false,
     val inboxShowHidden: Boolean = false,

@@ -83,6 +83,7 @@ import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.repo.RepoGroupPrefs
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.isArchived
@@ -138,6 +139,7 @@ fun InboxScreen(
     var compactCards by remember { mutableStateOf(container.chats.compactCards) }
     var hideFinishedDays by remember { mutableIntStateOf(container.chats.hideFinishedDays) }
     var collapsedRepos by remember { mutableStateOf(container.chats.collapsedRepos) }
+    var groupPrefs by remember { mutableStateOf(container.chats.repoGroupPrefs) }
     var cloudFilter by remember { mutableStateOf(CloudFilter.All) }
     var revealFinished by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -230,6 +232,7 @@ fun InboxScreen(
         compactCards = container.chats.compactCards
         hideFinishedDays = container.chats.hideFinishedDays
         collapsedRepos = container.chats.collapsedRepos
+        groupPrefs = container.chats.repoGroupPrefs
         revealFinished = false
     }
     LaunchedEffect(Unit) {
@@ -486,6 +489,11 @@ fun InboxScreen(
                         onCloudFilter = { cloudFilter = it },
                         revealFinished = revealFinished,
                         onRevealFinished = { revealFinished = !revealFinished },
+                        groupPrefs = groupPrefs,
+                        onGroupPrefs = { next ->
+                            groupPrefs = next
+                            container.chats.repoGroupPrefs = next
+                        },
                         collapsedRepos = collapsedRepos,
                         onToggleRepo = { key ->
                             collapsedRepos = if (key in collapsedRepos) collapsedRepos - key else collapsedRepos + key
@@ -639,6 +647,8 @@ private fun AgentList(
     onCloudFilter: (CloudFilter) -> Unit,
     revealFinished: Boolean,
     onRevealFinished: () -> Unit,
+    groupPrefs: RepoGroupPrefs,
+    onGroupPrefs: (RepoGroupPrefs) -> Unit,
     collapsedRepos: Set<String>,
     onToggleRepo: (String) -> Unit,
     onTogglePin: (String) -> Unit,
@@ -697,6 +707,7 @@ private fun AgentList(
             revealFinished = revealFinished,
             groupByRepo = groupByRepo,
             nowMillis = System.currentTimeMillis(),
+            groupPrefs = groupPrefs,
         )
     } else {
         null
@@ -883,6 +894,20 @@ private fun AgentList(
                 if (arranged != null) {
                     cloudAgentBlocks(
                         arrangement = arranged,
+                        groupActions = RepoGroupActions(
+                            manualOrder = groupPrefs.order.isNotEmpty(),
+                            onRename = { key, name ->
+                                onGroupPrefs(groupPrefs.withStyle(key) { it.copy(name = name) })
+                            },
+                            onFavorite = { key ->
+                                onGroupPrefs(groupPrefs.withStyle(key) { it.copy(favorite = !it.favorite) })
+                            },
+                            onColor = { key, color ->
+                                onGroupPrefs(groupPrefs.withStyle(key) { it.copy(color = color) })
+                            },
+                            onOrder = { keys -> onGroupPrefs(groupPrefs.withOrder(keys)) },
+                            onResetOrder = { onGroupPrefs(groupPrefs.resetOrder()) },
+                        ),
                         groupByRepo = groupByRepo,
                         collapsed = collapsedRepos,
                         onToggleGroup = onToggleRepo,
