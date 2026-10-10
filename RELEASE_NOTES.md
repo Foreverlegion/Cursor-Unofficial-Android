@@ -2,6 +2,8 @@
 
 Owner tools in Settings match the public GitHub login Foreverlegion. The in-app Ban button is shown only for that login. The privacy policy contact is that GitHub profile and this project's issues.
 
+Chats started in the app show the model on each agent message. Cursor's API does not report which model a run used, so chats started on another device show plain "Agent". To get a label there, start the prompt with a first line like `Model: Opus 5.5`. The line stays in the message. Ids such as `claude-opus-5-5` show as Opus 5.5, and other text is shown as written.
+
 ---
 
 # 1.0.26

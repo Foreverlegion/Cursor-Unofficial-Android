@@ -18,14 +18,21 @@ data class RunModelBook(
     val latest: ModelSelection? = null,
     val agentApi: ModelSelection? = null,
 ) {
-    fun resolve(runId: String?): ModelSelection? {
+    /** Model the API reported or the app sent for this exact run. */
+    fun forRun(runId: String?): ModelSelection? =
+        runId?.let { runs[it] }?.takeIf { it.id.isNotBlank() }
+
+    /** Agent-level guess used when the run itself has no known model. */
+    fun fallback(runId: String?): ModelSelection? {
         val recorded = runId?.let { runs[it] }
+        val agent = agentApi?.takeIf { it.id.isNotBlank() }
         return when {
-            recorded != null && recorded.id.isNotBlank() -> recorded
-            recorded != null -> agentApi?.takeIf { it.id.isNotBlank() }
-            else -> agentApi?.takeIf { it.id.isNotBlank() } ?: latest?.takeIf { it.id.isNotBlank() }
+            recorded != null -> agent
+            else -> agent ?: latest?.takeIf { it.id.isNotBlank() }
         }
     }
+
+    fun resolve(runId: String?): ModelSelection? = forRun(runId) ?: fallback(runId)
 
     fun withRun(runId: String, model: ModelSelection?, explicit: Boolean): RunModelBook {
         val known = model?.takeIf { it.id.isNotBlank() }

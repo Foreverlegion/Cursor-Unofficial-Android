@@ -2,6 +2,8 @@ package com.cursorandroid.app.ui.thread
 
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelSelection
+import com.cursorandroid.app.data.repo.RunModelBook
+import com.cursorandroid.app.data.repo.TranscriptLine
 
 private val EFFORT_PARAMS = setOf("effort", "reasoning", "reasoning_effort", "reasoningeffort", "thinking")
 
@@ -34,3 +36,47 @@ internal fun modelLabel(selection: ModelSelection?, catalog: List<ModelItem>): S
 }
 
 internal fun senderLabel(model: String?): String = if (model.isNullOrBlank()) "Agent" else "Agent · $model"
+
+private val HINT_LINE = Regex("^\\s*model\\s*:\\s*(\\S.*?)\\s*$", RegexOption.IGNORE_CASE)
+private val CLAUDE_ID = Regex("^claude-(opus|sonnet|haiku)-(\\d+)-(\\d+)$", RegexOption.IGNORE_CASE)
+private const val MAX_HINT = 120
+
+/** `Model: <name>` on the first line of a prompt. Known ids get a friendly name, anything else is kept as written. */
+internal fun promptModelHint(text: String?): String? {
+    val first = text?.lineSequence()?.firstOrNull() ?: return null
+    val name = HINT_LINE.matchEntire(first)?.groupValues?.get(1)?.take(MAX_HINT) ?: return null
+    return friendlyHintName(name)
+}
+
+internal fun friendlyHintName(name: String): String {
+    val claude = CLAUDE_ID.matchEntire(name.trim()) ?: return name
+    val (family, major, minor) = claude.destructured
+    return "${family.lowercase().replaceFirstChar { it.uppercase() }} $major.$minor"
+}
+
+/** The hint from each run's first user message, keyed by run id. */
+internal fun runModelHints(lines: List<TranscriptLine>): Map<String, String> {
+    val out = HashMap<String, String>()
+    val seen = HashSet<String>()
+    for (line in lines) {
+        if (line.kind != "user") continue
+        val run = line.runId?.takeIf { it.isNotBlank() }
+            ?: line.id.takeIf { it.startsWith("user-") && !it.startsWith("user-local-") }?.removePrefix("user-")
+            ?: continue
+        if (!seen.add(run)) continue
+        promptModelHint(line.text)?.let { out[run] = it }
+    }
+    return out
+}
+
+/** API field, then the model recorded at send time, then the prompt hint, then the agent's model. */
+internal fun runModelLabel(
+    book: RunModelBook,
+    runId: String?,
+    hints: Map<String, String>,
+    catalog: List<ModelItem>,
+): String? {
+    book.forRun(runId)?.let { return modelLabel(it, catalog) }
+    runId?.let { hints[it] }?.let { return it }
+    return modelLabel(book.fallback(runId), catalog)
+}
