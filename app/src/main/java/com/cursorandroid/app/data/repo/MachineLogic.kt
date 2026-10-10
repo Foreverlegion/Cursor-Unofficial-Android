@@ -183,6 +183,14 @@ fun rememberedMachines(listed: List<Computer>, prefs: MachinePrefs): List<Comput
         }
 }
 
+/**
+ * One machine listing. [known] is false when the workers call failed: entries that were not listed then carry
+ * [Computer.statusUnknown], and [failure] says why in a few words.
+ */
+data class MachineListing(val computers: List<Computer>, val known: Boolean, val failure: String? = null)
+
+const val STATUS_UNKNOWN_LINE = "Status unknown, retrying"
+
 const val SEEN_ON_AGENT = "Seen on a previous agent"
 const val SEEN_EARLIER = "Seen earlier"
 
@@ -224,6 +232,7 @@ data class MachineRow(
     val lastSeenMs: Long?,
     val viaAgent: Boolean,
     val visibility: MachineVisibility,
+    val statusUnknown: Boolean = false,
 )
 
 /** Every machine seen: the current listing plus remembered ones that are no longer listed. */
@@ -243,6 +252,7 @@ fun machineRows(current: List<Computer>, prefs: MachinePrefs, nowMs: Long): List
             lastSeenMs = seenAt,
             viaAgent = !c.online && (record?.viaAgent == true),
             visibility = machineVisibility(key, c.online, seenAt, prefs, nowMs),
+            statusUnknown = c.statusUnknown && !c.online,
         )
     }
     prefs.seen.forEach { (key, record) ->
@@ -309,6 +319,10 @@ fun relativeSeen(ms: Long, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneI
 }
 
 fun MachineRow.statusLine(nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+    if (statusUnknown) {
+        val seen = lastSeenMs
+        return STATUS_UNKNOWN_LINE + if (seen != null && seen > 0) " · last seen ${relativeSeen(seen, nowMs, zone)}" else ""
+    }
     if (online) {
         return "Online · " + (if (inUse) "busy" else "idle") + (detail?.let { " · $it" } ?: "")
     }

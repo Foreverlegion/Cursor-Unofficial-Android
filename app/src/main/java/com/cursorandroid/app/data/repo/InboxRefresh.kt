@@ -38,6 +38,7 @@ object InboxPollPolicy {
     const val MAX_BACKOFF_MS = 60_000L
     const val MIN_GAP_MS = 1_500L
     const val MACHINES_EVERY_MS = 60_000L
+    const val MACHINES_RETRY_MS = 20_000L
     const val RUN_CHECK_LIMIT = 6
 
     fun busy(agents: List<AgentSummary>, localActive: Set<String>): Boolean =
@@ -53,8 +54,9 @@ object InboxPollPolicy {
     fun pauseBefore(reason: RefreshReason, sinceLastPollMs: Long): Long =
         if (reason == RefreshReason.Tick) 0 else (MIN_GAP_MS - sinceLastPollMs).coerceAtLeast(0)
 
-    fun machinesDue(reason: RefreshReason, lastAtMs: Long, nowMs: Long): Boolean =
-        reason != RefreshReason.Tick || nowMs - lastAtMs >= MACHINES_EVERY_MS
+    /** Anything but a plain tick (open, resume, pull to refresh) asks again. After a failed listing a tick retries sooner. */
+    fun machinesDue(reason: RefreshReason, lastAtMs: Long, nowMs: Long, lastFailed: Boolean = false): Boolean =
+        reason != RefreshReason.Tick || nowMs - lastAtMs >= (if (lastFailed) MACHINES_RETRY_MS else MACHINES_EVERY_MS)
 }
 
 /**

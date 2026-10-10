@@ -451,6 +451,8 @@ data class Computer(
     val workerId: String? = null,
     val repoUrl: String? = null,
     val workspaceRootPath: String? = null,
+    /** The workers call failed, so whether this machine is online is not known. Never stored. */
+    val statusUnknown: Boolean = false,
 ) {
     fun boundRepo(): String? = repoUrl?.trim()?.takeIf { it.isNotEmpty() }
 }

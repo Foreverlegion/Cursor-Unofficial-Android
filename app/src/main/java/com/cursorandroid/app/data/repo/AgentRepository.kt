@@ -315,10 +315,10 @@ class AgentRepository(
     }
 
     suspend fun refreshComputers(agents: List<AgentSummary>): List<Computer> {
-        val listed = runCatching { listComputers(agents) }.getOrNull() ?: return catalog.computers()
-        if (listed.isEmpty()) return catalog.computers()
-        catalog.saveComputers(listed)
-        return listed
+        val listing = listMachines(agents)
+        if (!listing.known || listing.computers.isEmpty()) return catalog.computers()
+        catalog.saveComputers(listing.computers)
+        return listing.computers
     }
 
     suspend fun refreshPools(): List<WorkerPool> {
@@ -530,23 +530,43 @@ class AgentRepository(
         return sse.stream(agentId, runId, apiKey(), lastEventId)
     }
 
-    private suspend fun listWorkerPages(scope: String): List<Worker> {
+    private class WorkerPages(val workers: List<Worker>, val complete: Boolean, val failure: Throwable?)
+
+    /** Pages gathered so far survive a later failure; [WorkerPages.complete] says whether the whole list was read. */
+    private suspend fun listWorkerPages(scope: String): WorkerPages {
         val out = ArrayList<Worker>()
         var token: String? = null
         repeat(WORKER_PAGES) {
-            val page = wrap { api.listWorkers(status = "all", scope = scope, limit = WORKER_PAGE_SIZE, pageToken = token) }
+            val page = try {
+                wrap { api.listWorkers(status = "all", scope = scope, limit = WORKER_PAGE_SIZE, pageToken = token) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return WorkerPages(out, complete = false, failure = e)
+            }
             out += page.workers
             token = page.nextPageToken?.takeIf { it.isNotBlank() && it != token }
-            if (token == null) return out
+            if (token == null) return WorkerPages(out, complete = true, failure = null)
         }
-        return out
+        return WorkerPages(out, complete = true, failure = null)
     }
 
-    suspend fun listComputers(knownAgents: List<AgentSummary> = emptyList()): List<Computer> {
-        val online = runCatching { listWorkerPages("personal") }.getOrElse {
-            runCatching { listWorkerPages("all") }.getOrDefault(emptyList())
+    suspend fun listComputers(knownAgents: List<AgentSummary> = emptyList()): List<Computer> =
+        listMachines(knownAgents).computers
+
+    /**
+     * Online state comes only from a fresh workers call. When that call fails (rate limit, expired sign-in, network),
+     * machines that were not listed are returned as [Computer.statusUnknown] instead of offline, and nothing is
+     * learned from the listing.
+     */
+    suspend fun listMachines(knownAgents: List<AgentSummary> = emptyList()): MachineListing {
+        var pages = listWorkerPages("personal")
+        if (pages.workers.isEmpty() && pages.failure != null) {
+            val all = listWorkerPages("all")
+            if (all.workers.isNotEmpty() || all.failure == null) pages = all
         }
-        val fromWorkers = online
+        val known = pages.complete
+        val fromWorkers = pages.workers
             .map { worker ->
                 Computer(
                     name = worker.displayName(),
@@ -571,12 +591,24 @@ class AgentRepository(
             }
             .distinctBy { it.name.lowercase() }
         val live = fromWorkers + fromAgents
-        val book = machines?.takeIf { !store.demoMode } ?: return live
-        return runCatching {
-            book.seed(catalog.computers())
-            book.observe(live, agents)
-            live + book.remembered(live)
-        }.getOrDefault(live)
+        val book = machines?.takeIf { !store.demoMode }
+        val all = if (book == null) {
+            live
+        } else {
+            runCatching {
+                book.seed(catalog.computers().filter { !it.statusUnknown })
+                if (known) book.observe(live, agents)
+                live + book.remembered(live)
+            }.getOrDefault(live)
+        }
+        val computers = if (known) all else all.map { if (it.online) it else it.copy(statusUnknown = true) }
+        return MachineListing(computers, known, if (known) null else pages.failure?.let(::machineFailureReason))
+    }
+
+    private fun machineFailureReason(e: Throwable): String = when {
+        e is ApiException && e.isInvalidKey -> "sign-in expired"
+        e is ApiException && e.isRateLimited -> "rate limited"
+        else -> "no response"
     }
 
     suspend fun listPools(): List<WorkerPool> {
