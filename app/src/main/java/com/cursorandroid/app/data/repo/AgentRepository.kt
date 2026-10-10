@@ -34,6 +34,7 @@ import com.cursorandroid.app.data.api.StreamEvent
 import com.cursorandroid.app.data.api.foldAgentPages
 import com.cursorandroid.app.data.api.gitHost
 import com.cursorandroid.app.data.api.gitPath
+import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isRemoteEnvType
 import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.sortKey
@@ -175,8 +176,11 @@ class AgentRepository(
         }
     }
 
-    suspend fun hydrateStatuses(agents: List<AgentSummary>, limit: Int = 15): List<AgentSummary> {
-        val targets = agents.take(limit)
+    suspend fun hydrateStatuses(agents: List<AgentSummary>, limit: Int = 15): List<AgentSummary> =
+        hydrateStatuses(agents, agents.take(limit).mapTo(HashSet()) { it.id })
+
+    suspend fun hydrateStatuses(agents: List<AgentSummary>, ids: Set<String>): List<AgentSummary> {
+        val targets = agents.filter { it.id in ids }
         if (targets.isEmpty()) return agents
         val fresh = coroutineScope {
             targets.map { agent ->
@@ -310,7 +314,10 @@ class AgentRepository(
     }
 
     suspend fun refreshGitSnaps(agents: List<AgentSummary>) {
-        val targets = agents.take(15)
+        val known = catalog.gitSnaps()
+        val targets = agents.take(15).filter { agent ->
+            isLiveStatus(agent.status) || known[agent.id]?.prUrl.isNullOrBlank()
+        }
         coroutineScope {
             targets.map { agent ->
                 async {

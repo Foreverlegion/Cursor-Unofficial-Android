@@ -55,6 +55,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -229,23 +230,36 @@ fun InboxScreen(
     LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
     }
+    val currentTab by rememberUpdatedState(tab)
     LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
         if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
+        var fullAt = System.currentTimeMillis()
+        var computersAt = fullAt
         while (true) {
-            delay(5_000)
+            delay(InboxPoll.delayMs(InboxPoll.busy(items, live)))
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
             if (reloadJob?.isActive == true && refreshing) continue
             try {
+                val now = System.currentTimeMillis()
+                val full = InboxPoll.due(fullAt, now, InboxPoll.FULL_HYDRATE_MS)
+                if (full) fullAt = now
                 val page = container.repo.listAgentsPage(includeArchived = true)
-                val incoming = container.repo.hydrateStatuses(page.entries())
+                val listed = page.entries()
+                val ids = InboxPoll.hydrateIds(items, listed, live, full)
+                val incoming = container.repo.hydrateStatuses(listed, ids)
                 val agents = mergeInboxAgents(items, incoming)
                 applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
                 metas = container.chats.snapshot()
-                val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
-                if (next != null) {
-                    computers = next
-                    container.catalog.saveComputers(next)
+                if (currentTab == InboxTab.Remote || InboxPoll.due(computersAt, now, InboxPoll.COMPUTERS_MS)) {
+                    computersAt = now
+                    val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
+                    if (next != null) {
+                        computers = next
+                        container.catalog.saveComputers(next)
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
             }
         }
