@@ -3,10 +3,12 @@ package com.cursorandroid.app.data.repo
 import android.content.Context
 import androidx.core.content.edit
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.MeResponse
+import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.api.WorkerPool
 import kotlinx.serialization.encodeToString
@@ -30,7 +32,22 @@ class CatalogCache(
     fun repos(): List<RepositoryItem> = readList("repos")
     fun pools(): List<WorkerPool> = readList("pools")
     fun cloudEnvs(): List<String> = readList("cloud_envs")
-    fun savedEnvironments(): List<CloudEnvironment> = readList("saved_environments")
+    /** Environments created or opened here, plus GET /v1/environments. */
+    fun savedEnvironments(): List<CloudEnvironment> {
+        val local = readList<CloudEnvironment>("saved_environments")
+        val listed = listedEnvironments()
+        if (listed.isEmpty()) return local
+        val ids = listed.mapTo(HashSet()) { it.id }
+        return (listed + local.filter { it.id.isBlank() || it.id !in ids })
+            .distinctBy { it.id.ifBlank { "name:" + it.name.lowercase() } }
+            .sortedBy { it.name.lowercase() }
+    }
+
+    fun models(): List<ModelItem> = readList("models")
+    fun saveModels(items: List<ModelItem>) = write("models", items)
+
+    fun listedEnvironments(): List<CloudEnvironment> = readList("listed_environments")
+    fun saveListedEnvironments(items: List<CloudEnvironment>) = write("listed_environments", items)
 
     fun saveAgents(items: List<AgentSummary>) = write("agents", items)
     fun saveComputers(items: List<Computer>) = write("computers", items)
@@ -46,7 +63,7 @@ class CatalogCache(
 
     fun rememberEnvironment(env: CloudEnvironment) {
         if (env.id.isBlank() && env.name.isBlank()) return
-        val current = savedEnvironments()
+        val current = readList<CloudEnvironment>("saved_environments")
         val next = if (env.id.isBlank()) {
             current.filterNot { it.name.equals(env.name, ignoreCase = true) } + env
         } else {
@@ -58,7 +75,8 @@ class CatalogCache(
 
     fun forgetEnvironment(id: String) {
         if (id.isBlank()) return
-        write("saved_environments", savedEnvironments().filterNot { it.id == id })
+        write("saved_environments", readList<CloudEnvironment>("saved_environments").filterNot { it.id == id })
+        write("listed_environments", listedEnvironments().filterNot { it.id == id })
     }
 
     fun gitSnaps(): Map<String, GitSnap> {
@@ -110,6 +128,83 @@ class CatalogCache(
         }
     }
 
+    /** True when [key] was written within [maxAgeMs]. Keys are the list names passed to write(). */
+    fun fresh(key: String, maxAgeMs: Long): Boolean {
+        val at = active().getLong("${key}_at", 0L)
+        return CacheAge.fresh(at, System.currentTimeMillis(), maxAgeMs)
+    }
+
+    /** Usage and the latest run id it was read at. A finished run's usage does not change. */
+    fun usage(agentId: String): Pair<String, AgentUsageResponse>? {
+        val raw = active().getString("usage_$agentId", null) ?: return null
+        return runCatching { json.decodeFromString<CachedUsage>(raw) }.getOrNull()?.let { it.runId to it.usage }
+    }
+
+    fun saveUsage(agentId: String, runId: String, usage: AgentUsageResponse) {
+        active().edit { putString("usage_$agentId", json.encodeToString(CachedUsage(runId, usage))) }
+    }
+
+    /** Latest run id whose runs, conversation and artifacts were fully loaded after it finished. */
+    fun settledRun(agentId: String): String? = active().getString("settled_$agentId", null)
+
+    fun saveSettledRun(agentId: String, runId: String?) {
+        active().edit {
+            if (runId.isNullOrBlank()) remove("settled_$agentId") else putString("settled_$agentId", runId)
+        }
+    }
+
+    fun forgetAgent(agentId: String) {
+        active().edit {
+            remove("usage_$agentId")
+            remove("settled_$agentId")
+        }
+        removeGit(agentId)
+    }
+
+    fun forgeLogin(fingerprint: String): String? {
+        if (!fresh("forge_login_$fingerprint", FORGE_LOGIN_TTL)) return null
+        return active().getString("forge_login_$fingerprint", null)
+    }
+
+    fun saveForgeLogin(fingerprint: String, login: String) {
+        active().edit {
+            putString("forge_login_$fingerprint", login)
+            putLong("forge_login_${fingerprint}_at", System.currentTimeMillis())
+        }
+    }
+
+    /** Drops per-agent rows for agents not in [keepAgents] and all but the newest branch lists. */
+    fun pruneRows(keepAgents: Set<String>, maxBranchLists: Int) {
+        for (prefs in listOf(real, demoPrefs)) {
+            val all = prefs.all
+            val agentRows = all.keys.filter { k ->
+                (k.startsWith("usage_") && k.removePrefix("usage_") !in keepAgents) ||
+                    (k.startsWith("settled_") && k.removePrefix("settled_") !in keepAgents)
+            }
+            val branchAt = all.keys.filter { it.startsWith("br_") && it.endsWith("_at") }
+                .sortedByDescending { (all[it] as? Long) ?: 0L }
+            val oldBranches = branchAt.drop(maxBranchLists).flatMap { listOf(it, it.removeSuffix("_at")) }
+            val git = gitSnapsIn(prefs)
+            val goneGit = git.keys.filter { it !in keepAgents }
+            if (agentRows.isEmpty() && oldBranches.isEmpty() && goneGit.isEmpty()) continue
+            prefs.edit {
+                (agentRows + oldBranches).forEach { remove(it) }
+                if (goneGit.isNotEmpty()) putString("git", json.encodeToString(git - goneGit.toSet()))
+            }
+        }
+    }
+
+    private fun gitSnapsIn(prefs: android.content.SharedPreferences): Map<String, GitSnap> {
+        val raw = prefs.getString("git", null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, GitSnap>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    /** Drops every cached catalog value. Nothing here is secret; tokens live in the encrypted store. */
+    fun clearAll() {
+        real.edit { clear() }
+        demoPrefs.edit { clear() }
+    }
+
     fun reposFresh(maxAgeMs: Long = REPOS_TTL): Boolean {
         val at = active().getLong("repos_at", 0L)
         return at > 0L && System.currentTimeMillis() - at < maxAgeMs && repos().isNotEmpty()
@@ -151,5 +246,16 @@ class CatalogCache(
         private const val PREFS_DEMO = "catalog_cache_demo"
         const val REPOS_TTL = 30L * 60L * 1000L
         const val BRANCH_TTL = 15L * 60L * 1000L
+        const val MODELS_TTL = 6L * 60L * 60L * 1000L
+        const val POOLS_TTL = 30L * 60L * 1000L
+        const val ENVIRONMENTS_TTL = 30L * 60L * 1000L
+        const val FORGE_LOGIN_TTL = 24L * 60L * 60L * 1000L
     }
+}
+
+@kotlinx.serialization.Serializable
+private data class CachedUsage(val runId: String, val usage: AgentUsageResponse)
+
+internal object CacheAge {
+    fun fresh(at: Long, now: Long, maxAgeMs: Long): Boolean = at > 0L && now >= at && now - at < maxAgeMs
 }

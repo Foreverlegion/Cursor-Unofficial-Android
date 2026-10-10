@@ -29,6 +29,7 @@ interface CursorApi {
         @Query("limit") limit: Int = 100,
         @Query("cursor") cursor: String? = null,
         @Query("includeArchived") includeArchived: Boolean = true,
+        @Query("prUrl") prUrl: String? = null,
     ): AgentListResponse
 
     @GET("v1/agents/{id}")
@@ -42,6 +43,12 @@ interface CursorApi {
 
     @POST("v1/environments")
     suspend fun createEnvironment(@Body body: CreateEnvironmentRequest): CloudEnvironment
+
+    @GET("v1/environments")
+    suspend fun listEnvironments(
+        @Query("limit") limit: Int = 100,
+        @Query("cursor") cursor: String? = null,
+    ): EnvironmentListResponse
 
     @GET("v1/environments/{id}")
     suspend fun getEnvironment(@Path("id") id: String): CloudEnvironment

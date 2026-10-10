@@ -92,18 +92,27 @@ class RunNotifier(
 
     fun acknowledgeKnown(agents: List<AgentSummary>) {
         synchronized(seen) {
-            seen.edit(commit = true) {
-                agents.forEach { agent ->
-                    val runId = agent.latestRunId ?: return@forEach
-                    if (!isLiveStatus(agent.status)) {
-                        putBoolean(runId, true)
-                    }
-                }
+            val fresh = agents.mapNotNull { agent ->
+                agent.latestRunId?.takeIf { !isLiveStatus(agent.status) && !seen.getBoolean(it, false) }
+            }
+            val keep = agents.mapNotNullTo(HashSet()) { it.latestRunId }
+            val stale = SeenPrefs.staleKeys(seen.all.keys, keep) { it.startsWith("approval:") }
+            if (fresh.isEmpty() && stale.isEmpty()) return
+            seen.edit {
+                fresh.forEach { putBoolean(it, true) }
+                stale.forEach { remove(it) }
             }
         }
     }
 
-    fun notifyIfNeeded(agentId: String, agentName: String?, runId: String, status: String?, result: String?) {
+    fun notifyIfNeeded(
+        agentId: String,
+        agentName: String?,
+        runId: String,
+        status: String?,
+        result: String?,
+        prUrl: String? = null,
+    ) {
         runSettle?.publish(agentId, runId, status, result)
         refresh?.request(RefreshReason.Notification)
         val title = chatTitle(agentId, agentName)
@@ -126,7 +135,7 @@ class RunNotifier(
             }
         }
         val notifyId = shadeId(runId)
-        val notification = NotificationCompat.Builder(context, CHANNEL)
+        val builder = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_agent)
             .setContentTitle(title)
             .setContentText(body)
@@ -135,7 +144,8 @@ class RunNotifier(
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(openChat(context, agentId, runId, notifyId))
             .setDeleteIntent(dismissShade(context, runId, notifyId))
-            .build()
+        openUrl(context, prUrl, notifyId xor PR_ACTION_SALT)?.let { builder.addAction(0, "Open PR", it) }
+        val notification = builder.build()
         NotifyShade.post(context, notifyId, notification)
     }
 
@@ -219,6 +229,17 @@ class RunNotifier(
             intent.putExtra(EXTRA_NOTICE_ID, noticeId)
             intent.data = Uri.parse("cursor-notice:$noticeId")
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            return PendingIntent.getActivity(context, requestCode, intent, flags)
+        }
+
+        private const val PR_ACTION_SALT = 0x5052
+
+        private fun openUrl(context: Context, raw: String?, requestCode: Int): PendingIntent? {
+            if (!com.cursorandroid.app.data.repo.SafeLinks.isHttps(raw)) return null
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(raw!!.trim()))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             return PendingIntent.getActivity(context, requestCode, intent, flags)
         }

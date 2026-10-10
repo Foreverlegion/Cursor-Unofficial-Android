@@ -23,6 +23,8 @@ data class TranscriptLine(
     val thumbs: List<String> = emptyList(),
 )
 
+private class Versioned(val version: Long, val snap: ConversationSnap)
+
 @Serializable
 data class ConversationSnap(
     val lines: List<TranscriptLine> = emptyList(),
@@ -41,7 +43,11 @@ class ConversationStore(context: Context) {
     }
     private val io = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
-    private val pending = HashMap<String, ConversationSnap>()
+    private val pending = HashMap<String, Versioned>()
+    private var version = 0L
+
+    // Highest version written per agent; guards against a queued older batch landing after a newer write.
+    private val written = HashMap<String, Long>()
     private val live = HashMap<String, String>()
     private val diskLock = Any()
     private val flush = Runnable { flushPending() }
@@ -56,6 +62,7 @@ class ConversationStore(context: Context) {
     fun loadSnap(agentId: String): ConversationSnap {
         val file = fileFor(agentId)
         if (file.isFile) {
+            file.setLastModified(System.currentTimeMillis())
             val snap = readFile(file)
             if (snap != null) return snap
         }
@@ -79,11 +86,12 @@ class ConversationStore(context: Context) {
             runStatus = runStatus,
         )
         rememberLive(agentId, runStatus)
-        synchronized(pending) { pending[agentId] = snap }
+        val item = synchronized(pending) { Versioned(++version, snap).also { pending[agentId] = it } }
         handler.removeCallbacks(flush)
         if (immediate) {
-            val toWrite = synchronized(pending) { pending.remove(agentId) } ?: snap
-            writeFile(agentId, toWrite)
+            val toWrite = synchronized(pending) { pending.remove(agentId) } ?: item
+            writeFile(agentId, toWrite.snap, toWrite.version)
+            synchronized(pending) { if (pending.isNotEmpty()) handler.postDelayed(flush, FLUSH_MS) }
         } else {
             handler.postDelayed(flush, FLUSH_MS)
         }
@@ -97,24 +105,35 @@ class ConversationStore(context: Context) {
                 pending.clear()
                 copy
             } else {
-                val snap = pending.remove(agentId) ?: return
-                mapOf(agentId to snap)
+                val item = pending.remove(agentId) ?: return
+                mapOf(agentId to item)
             }
         }
-        batch.forEach { (id, snap) -> writeFile(id, snap) }
+        batch.forEach { (id, item) -> writeFile(id, item.snap, item.version) }
     }
 
     fun settle(agentId: String, runId: String, status: String) {
         rememberLive(agentId, status)
-        val pendingSnap = synchronized(pending) { pending[agentId] }
-        val snap = pendingSnap ?: loadSnap(agentId)
+        val pendingItem = synchronized(pending) { pending[agentId] }
+        val snap = pendingItem?.snap ?: loadSnap(agentId)
         if (snap.runId != runId || snap.runStatus.equals(status, ignoreCase = true)) return
         val next = snap.copy(runStatus = status)
-        if (pendingSnap != null) {
-            synchronized(pending) { pending[agentId] = next }
+        if (pendingItem != null) {
+            synchronized(pending) { pending[agentId] = Versioned(++version, next) }
         } else {
             writeFile(agentId, next)
         }
+    }
+
+    /** Stored transcripts as (agentId, bytes, lastOpenedOrWritten). */
+    fun stored(): List<Triple<String, Long, Long>> {
+        return dir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.map { file ->
+            Triple(file.name.removeSuffix(".json"), file.length(), file.lastModified())
+        }.orEmpty()
+    }
+
+    fun clearAll() {
+        stored().forEach { (id, _, _) -> if (liveStatus(id) == null) remove(id) }
     }
 
     fun liveStatuses(): Map<String, String> = synchronized(live) { live.toMap() }
@@ -141,17 +160,24 @@ class ConversationStore(context: Context) {
 
     fun importAll(items: Map<String, List<TranscriptLine>>) {
         items.forEach { (id, lines) ->
-            writeFile(id, ConversationSnap(lines = clip(lines)))
+            val inert = lines.map { it.copy(queued = false, thumbs = emptyList()) }
+            writeFile(id, ConversationSnap(lines = clip(inert)))
         }
     }
 
     fun remove(agentId: String) {
-        synchronized(pending) { pending.remove(agentId) }
+        val at = synchronized(pending) {
+            pending.remove(agentId)
+            ++version
+        }
         synchronized(live) {
             live.remove(agentId)
             livePrefs.edit { putString(LIVE, json.encodeToString(live.toMap())) }
         }
-        fileFor(agentId).delete()
+        synchronized(diskLock) {
+            written[agentId] = at
+            fileFor(agentId).delete()
+        }
         prefs.edit { remove(key(agentId)) }
     }
 
@@ -163,21 +189,23 @@ class ConversationStore(context: Context) {
         }
         if (batch.isEmpty()) return
         io.execute {
-            batch.forEach { (id, snap) -> writeFile(id, snap) }
+            batch.forEach { (id, item) -> writeFile(id, item.snap, item.version) }
         }
     }
 
-    private fun writeFile(agentId: String, snap: ConversationSnap) {
+    private fun writeFile(agentId: String, snap: ConversationSnap, at: Long = synchronized(pending) { ++version }) {
         val file = fileFor(agentId)
         val tmp = File(file.parentFile, "${file.name}.tmp")
         synchronized(diskLock) {
+            if (at < (written[agentId] ?: 0L)) return
+            written[agentId] = at
             runCatching {
                 tmp.writeText(json.encodeToString(snap))
                 if (!tmp.renameTo(file)) {
                     tmp.copyTo(file, overwrite = true)
                     tmp.delete()
                 }
-                prefs.edit { remove(key(agentId)) }
+                if (prefs.contains(key(agentId))) prefs.edit { remove(key(agentId)) }
             }
         }
     }
@@ -214,12 +242,12 @@ class ConversationStore(context: Context) {
 
     private fun rememberLive(agentId: String, runStatus: String?) {
         synchronized(live) {
-            if (isLiveStatus(runStatus)) {
-                live[agentId] = runStatus!!
+            val changed = if (isLiveStatus(runStatus)) {
+                live.put(agentId, runStatus!!) != runStatus
             } else {
-                live.remove(agentId)
+                live.remove(agentId) != null
             }
-            livePrefs.edit { putString(LIVE, json.encodeToString(live.toMap())) }
+            if (changed) livePrefs.edit { putString(LIVE, json.encodeToString(live.toMap())) }
         }
     }
 

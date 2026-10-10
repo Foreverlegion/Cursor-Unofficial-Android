@@ -28,30 +28,33 @@ object RunWatchScheduler {
         val app = context.applicationContext
         val recorded = status?.uppercase()?.takeIf { it.isNotBlank() } ?: "RUNNING"
         if (!isLiveStatus(recorded)) return
-        app.getSharedPreferences("run_status_seen", Context.MODE_PRIVATE)
-            .edit()
-            .putString(runId, recorded)
-            .apply()
-        val already = RunWatchStore.all(app).any { it.runId == runId }
-        RunWatchStore.add(app, WatchItem(agentId, runId, agentName))
+        val seen = app.getSharedPreferences(SEEN_PREFS, Context.MODE_PRIVATE)
+        if (seen.getString(runId, null) != recorded) seen.edit().putString(runId, recorded).apply()
         ApprovalStreamHub.attach(app, agentId, runId, agentName)
-        if (!already) {
-            enqueuePoll(app, agentId, runId, agentName)
-            if (announce) {
-                (app as? CursorAndroidApp)?.container?.inboxRefresh?.request(RefreshReason.RunStarted)
-            }
+        if (RunWatchStore.all(app).any { it.runId == runId }) return
+        RunWatchStore.add(app, WatchItem(agentId, runId, agentName))
+        enqueuePoll(app, agentId, runId, agentName)
+        if (announce) {
+            (app as? CursorAndroidApp)?.container?.inboxRefresh?.request(RefreshReason.RunStarted)
         }
         ensureSweep(app)
     }
 
     fun rememberStatuses(context: Context, agents: List<AgentSummary>) {
-        val prefs = context.applicationContext.getSharedPreferences("run_status_seen", Context.MODE_PRIVATE)
+        val app = context.applicationContext
+        val prefs = app.getSharedPreferences(SEEN_PREFS, Context.MODE_PRIVATE)
+        val changed = agents.mapNotNull { agent ->
+            val runId = agent.latestRunId ?: return@mapNotNull null
+            val status = agent.status?.uppercase() ?: return@mapNotNull null
+            if (prefs.getString(runId, null) == status) null else runId to status
+        }
+        val watched = RunWatchStore.all(app).mapTo(HashSet()) { it.runId }
+        val keep = agents.mapNotNullTo(HashSet()) { it.latestRunId } + watched
+        val stale = SeenPrefs.staleKeys(prefs.all.keys, keep)
+        if (changed.isEmpty() && stale.isEmpty()) return
         prefs.edit().apply {
-            agents.forEach { agent ->
-                val runId = agent.latestRunId ?: return@forEach
-                val status = agent.status?.uppercase() ?: return@forEach
-                putString(runId, status)
-            }
+            changed.forEach { (runId, status) -> putString(runId, status) }
+            stale.forEach { remove(it) }
         }.apply()
     }
 
@@ -80,8 +83,8 @@ object RunWatchScheduler {
     }
 
     /** Called from inside the running worker: queues the next poll behind it instead of cancelling it. */
-    fun chainNextPoll(context: Context, agentId: String, runId: String, agentName: String?) {
-        enqueue(context, agentId, runId, agentName, ExistingWorkPolicy.APPEND_OR_REPLACE)
+    fun chainNextPoll(context: Context, agentId: String, runId: String, agentName: String?, failures: Int = 0) {
+        enqueue(context, agentId, runId, agentName, ExistingWorkPolicy.APPEND_OR_REPLACE, failures)
     }
 
     private fun enqueue(
@@ -90,18 +93,20 @@ object RunWatchScheduler {
         runId: String,
         agentName: String?,
         policy: ExistingWorkPolicy,
+        failures: Int = 0,
     ) {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val request = OneTimeWorkRequestBuilder<RunWatchWorker>()
             .setConstraints(constraints)
-            .setInitialDelay(20, TimeUnit.SECONDS)
+            .setInitialDelay(RunWatchWorker.backoffSeconds(failures), TimeUnit.SECONDS)
             .setInputData(
                 workDataOf(
                     RunWatchWorker.KEY_AGENT_ID to agentId,
                     RunWatchWorker.KEY_RUN_ID to runId,
                     RunWatchWorker.KEY_AGENT_NAME to agentName,
+                    RunWatchWorker.KEY_FAILURES to failures,
                 ),
             )
             .build()
@@ -134,4 +139,6 @@ object RunWatchScheduler {
             request,
         )
     }
+
+    const val SEEN_PREFS = "run_status_seen"
 }

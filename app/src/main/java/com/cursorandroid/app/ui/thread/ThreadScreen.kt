@@ -255,8 +255,14 @@ class ThreadViewModel(
     private var afterNonAssistant = false
     private val lineGate = Any()
 
+    @Volatile
+    private var refreshedAt = 0L
+
+    @Volatile
+    var foreground = true
+
     init {
-        viewModelScope.launch { refresh() }
+        refresh(force = true)
         startWatch()
         viewModelScope.launch {
             container.runSettle.settled.collect { map -> map[agentId]?.let { onSettled(it) } }
@@ -312,7 +318,10 @@ class ThreadViewModel(
         flushOutbound()
     }
 
-    fun refresh() {
+    fun refresh(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - refreshedAt in 0 until REFRESH_MIN_GAP_MS) return
+        refreshedAt = now
         viewModelScope.launch {
             refreshLock.withLock {
                 try {
@@ -328,14 +337,19 @@ class ThreadViewModel(
                     val detail = container.repo.getAgent(agentId)
                     agent = detail
                     noteApiModels(detail = detail)
-                    val serverRuns = mergeServerRuns()
-                    val serverTexts = mergeConversationHistory()
-                    dropDeliveredQueue(
-                        serverRuns,
-                        serverTexts,
-                        idle = !detail.isWorking() && run?.isActive() != true && !busy,
-                    )
                     val runId = detail.latestRunId
+                    // Runs, conversation and artifacts of a finished latest run do not change; served from disk.
+                    val settled = runId != null && !detail.isWorking() &&
+                        container.catalog.settledRun(agentId) == runId && lines.isNotEmpty() && outbound.isEmpty()
+                    if (!settled) {
+                        val serverRuns = mergeServerRuns()
+                        val serverTexts = mergeConversationHistory()
+                        dropDeliveredQueue(
+                            serverRuns,
+                            serverTexts,
+                            idle = !detail.isWorking() && run?.isActive() != true && !busy,
+                        )
+                    }
                     if (runId != null) {
                         val latest = container.repo.getRun(agentId, runId)
                         noteApiModels(runs = listOf(latest))
@@ -345,12 +359,16 @@ class ThreadViewModel(
                             )
                             container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
                         }
-                        usage = container.repo.usage(agentId)
+                        usage = container.repo.settledUsage(agentId, runId, latest.isTerminal())
                         adoptRun(latest)
-                    } else if (run?.isActive() == true) {
-                        attachRun(run!!.id)
+                        if (!settled) {
+                            ingestArtifacts(runCatching { container.repo.artifacts(agentId) }.getOrDefault(emptyList()))
+                        }
+                        container.catalog.saveSettledRun(agentId, runId.takeIf { latest.isTerminal() && !detail.isWorking() })
+                    } else {
+                        if (run?.isActive() == true) attachRun(run!!.id)
+                        ingestArtifacts(runCatching { container.repo.artifacts(agentId) }.getOrDefault(emptyList()))
                     }
-                    ingestArtifacts(runCatching { container.repo.artifacts(agentId) }.getOrDefault(emptyList()))
                     if (!detail.isWorking() && run?.isActive() != true) {
                         checkBehind(detail)
                     }
@@ -504,6 +522,10 @@ class ThreadViewModel(
     }
 
     private suspend fun checkBehind(detail: AgentDetail) {
+        val now = System.currentTimeMillis()
+        val last = behindCheckedAt[agentId] ?: 0L
+        if (now - last in 0 until BEHIND_MIN_GAP_MS) return
+        behindCheckedAt[agentId] = now
         val meta = container.chats.meta(agentId)
         val snap = container.catalog.gitSnaps()[agentId]
         val git = run?.git?.branches?.firstOrNull()
@@ -549,7 +571,7 @@ class ThreadViewModel(
                 say(STOPPING, indefinite = true)
                 val outcome = stopper.stop(agentId, run?.id, agent?.latestRunId)
                 say(stopMessage(outcome))
-                refresh()
+                refresh(force = true)
             } finally {
                 stopping = false
             }
@@ -905,13 +927,29 @@ class ThreadViewModel(
                         }
                         is StreamEvent.Result -> {
                             clearApprovals()
-                            run = run?.copy(status = event.status, result = event.text)
+                            run = run?.copy(
+                                status = event.status,
+                                result = event.text,
+                                durationMs = event.durationMs ?: run?.durationMs,
+                                git = event.git ?: run?.git,
+                            )
+                            event.git?.branches?.firstOrNull()?.let { git ->
+                                container.catalog.saveGit(GitSnap(agentId, git.branch, git.prUrl, git.repoUrl))
+                                container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
+                            }
                             if (!event.text.isNullOrBlank()) {
                                 upsert("assistant-$runId", "assistant", event.text, runId)
                             }
                             streaming = false
                             receiving = false
-                            container.notifier.notifyIfNeeded(agentId, agent?.name, runId, event.status, event.text)
+                            container.notifier.notifyIfNeeded(
+                                agentId,
+                                agent?.name,
+                                runId,
+                                event.status,
+                                event.text,
+                                event.git?.branches?.firstOrNull()?.prUrl,
+                            )
                             run?.let { ended -> viewModelScope.launch { settleRun(ended) } }
                             refreshArtifacts()
                             flushOutbound()
@@ -949,11 +987,14 @@ class ThreadViewModel(
         watchJob?.cancel()
         watchJob = viewModelScope.launch {
             while (isActive) {
-                delay(2_000)
-                if (!busy) attachLatestRun()
+                delay(WATCH_MS)
+                if (!foreground || busy) continue
+                attachLatestRun()
             }
         }
     }
+
+    private fun streamLive(): Boolean = streaming && streamJob?.isActive == true
 
     private suspend fun attachLatestRun() {
         val detail = runCatching { container.repo.getAgent(agentId) }.getOrNull() ?: return
@@ -989,7 +1030,14 @@ class ThreadViewModel(
         }
         if (latest.isTerminal()) {
             settleRun(latest)
-            container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
+            container.notifier.notifyIfNeeded(
+                agentId,
+                agent?.name,
+                latest.id,
+                latest.status,
+                latest.result,
+                latest.git?.branches?.firstOrNull()?.prUrl,
+            )
         }
     }
 
@@ -1001,6 +1049,7 @@ class ThreadViewModel(
                 val step = tick++
                 delay(runPollDelayMs(receiving, step))
                 if (pullConversationOnTick(receiving, step)) mergeConversationHistory()
+                if (!foreground && streamLive()) continue
                 val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
                 run = latest
                 if (!latest.isActive()) {
@@ -1115,6 +1164,15 @@ class ThreadViewModel(
         watchJob?.cancel()
         super.onCleared()
     }
+
+    private companion object {
+        const val WATCH_MS = 2_000L
+        const val REFRESH_MIN_GAP_MS = 15_000L
+
+        // Behind-base check uses unauthenticated GitHub/GitLab calls (60/hour/IP on GitHub).
+        const val BEHIND_MIN_GAP_MS = 10L * 60L * 1000L
+        val behindCheckedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    }
 }
 
 data class QueuedOutbound(
@@ -1159,7 +1217,7 @@ fun ThreadScreen(
     var chatPropertiesOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
-    var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
+    var models by remember { mutableStateOf(container.repo.cachedModels()) }
     var draftReady by remember { mutableStateOf(false) }
     var modelMenu by remember { mutableStateOf(false) }
     val listState = remember(agentId) { LazyListState() }
@@ -1262,6 +1320,14 @@ fun ThreadScreen(
         vm.persistNow()
     }
 
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        vm.foreground = true
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        vm.foreground = false
+    }
+
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         showTools = container.store.showToolCalls
         showThinking = container.store.showThinking
@@ -1285,7 +1351,7 @@ fun ThreadScreen(
         vm.followModel = saved.modelId
         vm.followParams = saved.modelParams
         attaches = saved.toItems()
-        models = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        models = runCatching { container.repo.models() }.getOrDefault(models)
         if (vm.followParams.isEmpty() && vm.followModel.isNotBlank()) {
             vm.followParams = models.firstOrNull { it.id == vm.followModel }?.defaultParams().orEmpty()
         }
@@ -1738,6 +1804,10 @@ fun ThreadScreen(
             repoUrl = git?.repoUrl ?: cached?.repoUrl,
             prUrl = git?.prUrl ?: cached?.prUrl,
             tokens = vm.usage?.totalUsage?.totalTokens,
+            lastRun = lastRunLine(
+                vm.run?.durationMs,
+                vm.usage?.runs?.firstOrNull { it.id == vm.run?.id }?.usage?.totalTokens,
+            ),
             onOpenUrl = { url ->
                 SafeLinks.open(context, url)
             },
@@ -1939,7 +2009,7 @@ private fun TranscriptBubble(
                     if (line.thumbs.isNotEmpty()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             line.thumbs.forEach { path ->
-                                val bmp = remember(path) { BitmapFactory.decodeFile(path) }
+                                val bmp = remember(path) { if (Attachments.owns(path)) BitmapFactory.decodeFile(path) else null }
                                 if (bmp != null) {
                                     Image(
                                         bitmap = bmp.asImageBitmap(),

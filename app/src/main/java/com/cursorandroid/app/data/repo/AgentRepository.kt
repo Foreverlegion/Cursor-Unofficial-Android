@@ -4,6 +4,7 @@ import com.cursorandroid.app.data.api.AgentConversation
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentListResponse
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.McpServer
 import com.cursorandroid.app.data.api.TokenUsage
@@ -43,6 +44,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -50,6 +54,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -227,6 +233,10 @@ class AgentRepository(
 
     suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
 
+    /** Agent that opened [prUrl], via GET /v1/agents?prUrl=. */
+    suspend fun agentForPr(prUrl: String): AgentSummary? =
+        wrap { api.listAgents(limit = 5, includeArchived = true, prUrl = prUrl) }.entries().firstOrNull()
+
     suspend fun getRun(agentId: String, runId: String): Run = wrap { api.getRun(agentId, runId) }
 
     suspend fun conversation(agentId: String): AgentConversation = wrap { api.getConversation(agentId) }
@@ -257,6 +267,14 @@ class AgentRepository(
     suspend fun artifactUrl(agentId: String, path: String) = wrap { api.downloadArtifact(agentId, path).url }
 
     suspend fun usage(agentId: String) = runCatching { wrap { api.agentUsage(agentId) } }.getOrNull()
+
+    /** Usage for a finished latest run is final, so it is served from disk once read. */
+    suspend fun settledUsage(agentId: String, runId: String, terminal: Boolean): AgentUsageResponse? {
+        if (terminal) catalog.usage(agentId)?.let { (at, cached) -> if (at == runId) return cached }
+        val fresh = usage(agentId) ?: return catalog.usage(agentId)?.second
+        if (terminal) catalog.saveUsage(agentId, runId, fresh)
+        return fresh
+    }
 
     suspend fun recentUsage(
         days: Int = USAGE_WINDOW_DAYS,
@@ -355,38 +373,123 @@ class AgentRepository(
         }
     }
 
-    suspend fun models(): List<ModelItem> = wrap { api.models().items }
+    private val bg = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val revalidating = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    suspend fun repositories(force: Boolean = false): List<RepositoryItem> {
-        if (!force && catalog.reposFresh()) return catalog.repos()
-        val found = coroutineScope {
-            val first = listOf(null, "github", "gitlab", "bitbucket", "azure", "origin").map { provider ->
-                async {
-                    runCatching {
-                        if (provider == null) wrap { api.repositories().items }
-                        else wrap { api.repositories(provider = provider).items }
-                    }.getOrDefault(emptyList())
-                }
-            }.flatMap { it.await() }
-            val seen = first.mapNotNull { it.provider?.trim()?.lowercase()?.takeIf { id -> id.isNotEmpty() } }.toHashSet()
-            val extraIds = seen.filterNot { it in KNOWN_REPO_PROVIDERS }
-            if (extraIds.isEmpty()) {
-                first
-            } else {
-                val more = extraIds.map { provider ->
-                    async {
-                        runCatching { wrap { api.repositories(provider = provider).items } }
-                            .getOrDefault(emptyList())
-                    }
-                }.flatMap { it.await() }
-                first + more
+    /**
+     * Stale-while-revalidate over [CatalogCache]: cached rows are returned at once;
+     * past [ttlMs] one background refresh per key updates the cache for next read.
+     * With nothing cached the call waits on the network.
+     */
+    private suspend fun <T> cachedList(
+        key: String,
+        ttlMs: Long,
+        force: Boolean,
+        read: () -> List<T>,
+        save: (List<T>) -> Unit,
+        fetch: suspend () -> List<T>,
+    ): List<T> {
+        val have = read()
+        if (!force && have.isNotEmpty()) {
+            if (!catalog.fresh(key, ttlMs)) revalidate(key) { fetch().takeIf { it.isNotEmpty() }?.let(save) }
+            return have
+        }
+        val got = try {
+            fetch()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (have.isNotEmpty()) return have
+            throw e
+        }
+        if (got.isNotEmpty()) save(got)
+        return got.ifEmpty { have }
+    }
+
+    private fun revalidate(key: String, block: suspend () -> Unit) {
+        if (!revalidating.add(key)) return
+        bg.launch {
+            try {
+                runCatching { block() }
+            } finally {
+                revalidating.remove(key)
             }
         }
-        val merged = found
-            .distinctBy { it.url.trim().lowercase().removeSuffix(".git") }
-            .sortedBy { it.displayName().lowercase() }
-        if (merged.isNotEmpty()) catalog.saveRepos(merged)
-        return merged.ifEmpty { catalog.repos() }
+    }
+
+    fun cachedModels(): List<ModelItem> = catalog.models()
+
+    fun cachedGithubLogin(): String? = store.githubToken?.let { catalog.forgeLogin(tokenFingerprint(it)) }
+
+    /** GitHub login for the saved token; cached a day under a one-way token fingerprint. */
+    suspend fun githubLogin(): String? {
+        val token = store.githubToken?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val print = tokenFingerprint(token)
+        catalog.forgeLogin(print)?.let { return it }
+        val login = withContext(Dispatchers.IO) { runCatching { GithubRepos.authenticatedLogin(token) }.getOrNull() }
+        if (!login.isNullOrBlank()) catalog.saveForgeLogin(print, login)
+        return login
+    }
+
+    private fun tokenFingerprint(token: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(token.trim().toByteArray())
+        return digest.take(8).joinToString("") { "%02x".format(it) }
+    }
+
+    suspend fun models(force: Boolean = false): List<ModelItem> =
+        cachedList("models", CatalogCache.MODELS_TTL, force, catalog::models, catalog::saveModels) {
+            wrap { api.models().items }
+        }
+
+    fun cachedEnvironments(): List<CloudEnvironment> = catalog.listedEnvironments()
+
+    /** GET /v1/environments, all pages. Team environments can lag on access checks, so a page may be short. */
+    suspend fun environments(force: Boolean = false): List<CloudEnvironment> =
+        cachedList(
+            "listed_environments",
+            CatalogCache.ENVIRONMENTS_TTL,
+            force,
+            catalog::listedEnvironments,
+            catalog::saveListedEnvironments,
+        ) {
+            val out = ArrayList<CloudEnvironment>()
+            var cursor: String? = null
+            var pages = 0
+            do {
+                val page = wrap { api.listEnvironments(limit = 100, cursor = cursor) }
+                out += page.items
+                cursor = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+                pages += 1
+            } while (cursor != null && pages < ENV_PAGES)
+            out.distinctBy { it.id }.sortedBy { it.name.lowercase() }
+        }
+
+    private val repoGate = Mutex()
+
+    @Volatile
+    private var reposAttemptAt = 0L
+
+    // GET /v1/repositories: 1 / user / minute, 30 / user / hour. GitHub only.
+    suspend fun repositories(force: Boolean = false): List<RepositoryItem> {
+        if (!force && catalog.reposFresh()) return catalog.repos()
+        val cached = catalog.repos()
+        if (!force && cached.isNotEmpty()) {
+            revalidate("repos") { repositoriesLocked(force = false) }
+            return cached
+        }
+        return repositoriesLocked(force)
+    }
+
+    private suspend fun repositoriesLocked(force: Boolean): List<RepositoryItem> {
+        return repoGate.withLock {
+            if (!force && catalog.reposFresh()) return@withLock catalog.repos()
+            if (!RepoRateGate.mayCall(reposAttemptAt, System.currentTimeMillis())) return@withLock catalog.repos()
+            reposAttemptAt = System.currentTimeMillis()
+            val found = runCatching { wrap { api.repositories().items } }.getOrDefault(emptyList())
+            val merged = mergeListedRepos(found, catalog.repos())
+            if (found.isNotEmpty()) catalog.saveRepos(merged)
+            merged
+        }
     }
 
     suspend fun createGithubRepo(
@@ -446,6 +549,15 @@ class AgentRepository(
         if (catalog.branchesFresh(repoUrl)) {
             return catalog.branches(repoUrl)
         }
+        val cached = catalog.branches(repoUrl)
+        if (cached.isNotEmpty()) {
+            revalidate("branches:$repoUrl") { fetchBranches(repoUrl, defaultBranch) }
+            return cached
+        }
+        return fetchBranches(repoUrl, defaultBranch)
+    }
+
+    private suspend fun fetchBranches(repoUrl: String, defaultBranch: String?): List<String> {
         val fromApi = runCatching { wrap { api.repositoryBranches(repoUrl).names() } }.getOrDefault(emptyList())
         val fromForge = store.forgeForRepo(repoUrl)?.let { forge ->
             runCatching { ForgeClient.listBranches(forge, repoUrl) }.getOrDefault(emptyList())
@@ -558,16 +670,17 @@ class AgentRepository(
         }.getOrDefault(live)
     }
 
-    suspend fun listPools(): List<WorkerPool> {
+    suspend fun listPools(force: Boolean = false): List<WorkerPool> =
+        cachedList("pools", CatalogCache.POOLS_TTL, force, catalog::pools, { catalog.savePools(it) }) { fetchPools() }
+
+    private suspend fun fetchPools(): List<WorkerPool> {
         val listed = runCatching {
             wrap { api.listPools(scope = "all", includeStale = false) }.pools
         }.getOrElse {
             runCatching { wrap { api.listPools(includeStale = false) }.pools }.getOrDefault(emptyList())
         }
-        val named = listed.filter { it.poolName.isNotBlank() }
+        return listed.filter { it.poolName.isNotBlank() }
             .distinctBy { "${it.scope}:${it.poolName.lowercase()}" }
-        if (named.isNotEmpty()) catalog.savePools(named)
-        return named
     }
 
     suspend fun workersSummary(): WorkersSummaryResponse? {
@@ -634,7 +747,7 @@ class AgentRepository(
         )
     }
 
-    private fun commitsBehind(repoUrl: String, base: String, head: String): Int? {
+    private suspend fun commitsBehind(repoUrl: String, base: String, head: String): Int? {
         val host = gitHost(repoUrl)
         val path = gitPath(repoUrl)
         if (path.isBlank()) return null
@@ -658,7 +771,11 @@ class AgentRepository(
         return commits?.size
     }
 
-    private fun publicJson(url: String): kotlinx.serialization.json.JsonElement? {
+    private suspend fun publicJson(url: String): kotlinx.serialization.json.JsonElement? = withContext(Dispatchers.IO) {
+        publicJsonBlocking(url)
+    }
+
+    private fun publicJsonBlocking(url: String): kotlinx.serialization.json.JsonElement? {
         if (store.demoMode) return null
         if (!SafeLinks.isHttps(url)) return null
         val request = Request.Builder()
@@ -686,7 +803,11 @@ class AgentRepository(
 
     private fun JsonObject.obj(key: String): JsonObject? = get(key) as? JsonObject
 
-    private fun publicBranches(repoUrl: String): List<String> {
+    private suspend fun publicBranches(repoUrl: String): List<String> = withContext(Dispatchers.IO) {
+        publicBranchesBlocking(repoUrl)
+    }
+
+    private fun publicBranchesBlocking(repoUrl: String): List<String> {
         val host = gitHost(repoUrl)
         val path = gitPath(repoUrl)
         if (path.isBlank()) return emptyList()
@@ -738,7 +859,7 @@ class AgentRepository(
 
     companion object {
         private val DEFAULT_BRANCHES = listOf("main", "master", "develop")
-        private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
+        private const val ENV_PAGES = 10
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
         private const val WORKER_PAGE_SIZE = 50
@@ -747,4 +868,20 @@ class AgentRepository(
         private const val USAGE_CALL_MS = 10_000L
         private const val ROW_BUDGET_MS = 20_000L
     }
+}
+
+internal object RepoRateGate {
+    const val MIN_GAP_MS = 65_000L
+
+    fun mayCall(lastAt: Long, now: Long, minGapMs: Long = MIN_GAP_MS): Boolean =
+        lastAt == 0L || now < lastAt || now - lastAt >= minGapMs
+}
+
+/** The API lists GitHub repos only; cached repos from other hosts (forges, created repos) are kept. */
+internal fun mergeListedRepos(found: List<RepositoryItem>, cached: List<RepositoryItem>): List<RepositoryItem> {
+    if (found.isEmpty()) return cached
+    val others = cached.filterNot { it.host().equals("github.com", ignoreCase = true) }
+    return (found + others)
+        .distinctBy { com.cursorandroid.app.data.api.repoKey(it.url) }
+        .sortedBy { it.displayName().lowercase() }
 }

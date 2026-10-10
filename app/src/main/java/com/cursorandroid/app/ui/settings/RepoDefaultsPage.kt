@@ -47,7 +47,7 @@ fun RepoDefaultsPage(
     var picking by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var known by remember { mutableStateOf<List<String>>(emptyList()) }
-    var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
+    var models by remember { mutableStateOf(container.repo.cachedModels()) }
     var envs by remember { mutableStateOf<List<CloudEnvironment>>(emptyList()) }
     var branches by remember { mutableStateOf<List<String>>(emptyList()) }
     var branchQuery by remember { mutableStateOf("") }
@@ -62,10 +62,11 @@ fun RepoDefaultsPage(
 
     LaunchedEffect(Unit) {
         envs = container.catalog.savedEnvironments()
+        if (runCatching { container.repo.environments() }.isSuccess) envs = container.catalog.savedEnvironments()
         val listed = runCatching { container.repo.repositories() }.getOrDefault(container.catalog.repos())
         val snaps = container.catalog.gitSnaps().values.mapNotNull { it.repoUrl }
         known = knownRepoUrls(listed.map { it.url }, snaps, emptyList())
-        models = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        models = runCatching { container.repo.models() }.getOrDefault(models)
     }
     LaunchedEffect(draft?.repoUrl) {
         val url = draft?.repoUrl.orEmpty()
