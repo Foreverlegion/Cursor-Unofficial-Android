@@ -24,6 +24,9 @@ class InboxSweepWorker(
                 val run = runCatching { app.container.repo.getRun(agent.id, runId) }.getOrNull() ?: continue
                 val status = run.status?.uppercase()
                 val previous = seen.getString(runId, null)?.uppercase()
+                if (run.isTerminal()) {
+                    app.container.runSettle.publish(agent.id, run.id, run.status, run.result)
+                }
                 if (run.isActive()) {
                     RunWatchScheduler.watch(applicationContext, agent.id, run.id, agent.name, run.status)
                 } else if (run.isTerminal() && isLiveStatus(previous)) {

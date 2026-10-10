@@ -15,12 +15,14 @@ import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import com.cursorandroid.app.data.repo.LocalChatStore
+import com.cursorandroid.app.data.repo.RunSettleHub
 
 class RunNotifier(
     private val context: Context,
     private val store: ApiKeyStore,
     private val notices: NoticeStore,
     private val chats: LocalChatStore,
+    private val runSettle: RunSettleHub? = null,
 ) {
     private val seen = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -98,6 +100,7 @@ class RunNotifier(
     }
 
     fun notifyIfNeeded(agentId: String, agentName: String?, runId: String, status: String?, result: String?) {
+        runSettle?.publish(agentId, runId, status, result)
         val title = chatTitle(agentId, agentName)
         val fresh = notices.record(agentId, title, runId, status, result)
         if (!store.notifyOnComplete) return

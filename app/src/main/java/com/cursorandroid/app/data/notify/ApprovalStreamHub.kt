@@ -43,6 +43,7 @@ object ApprovalStreamHub {
                             }
                             is StreamEvent.Result -> {
                                 if (isTerminalStatus(event.status)) {
+                                    app.container.runSettle.publish(agentId, runId, event.status, event.text)
                                     close(runId)
                                     detach(app, runId)
                                 }

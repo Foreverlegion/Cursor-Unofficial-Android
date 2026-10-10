@@ -84,6 +84,7 @@ import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.data.api.ActiveEnv
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.repo.RepoGroupPrefs
+import com.cursorandroid.app.data.repo.settleAgents
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.isArchived
@@ -156,7 +157,8 @@ fun InboxScreen(
     val context = LocalContext.current
     var reloadJob by remember { mutableStateOf<Job?>(null) }
 
-    fun applyAgents(agents: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
+    fun applyAgents(incoming: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
+        val agents = settleAgents(incoming, container.runSettle.settled.value)
         items = agents
         nextCursor = cursor
         container.catalog.saveAgents(agents)
@@ -222,6 +224,17 @@ fun InboxScreen(
         }
     }
 
+    val settledRuns by container.runSettle.settled.collectAsStateWithLifecycle()
+    LaunchedEffect(settledRuns) {
+        val next = settleAgents(items, settledRuns)
+        if (next !== items) {
+            items = next
+            container.catalog.saveAgents(next)
+            live = container.conversations.liveStatuses()
+            container.notices.reconcile(next, live, container.chatTitles())
+        }
+    }
+
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifeState by lifecycle.currentStateAsState()
     LaunchedEffect(settingsEpoch) {
@@ -249,6 +262,9 @@ fun InboxScreen(
                 val incoming = container.repo.hydrateStatuses(page.entries())
                 val agents = mergeInboxAgents(items, incoming)
                 applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
+                container.runSettle.sweep(items) { agentId, runId ->
+                    runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
+                }
                 metas = container.chats.snapshot()
                 runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
                 git = loadGit()

@@ -110,10 +110,14 @@ import com.cursorandroid.app.data.api.gitPath
 import com.cursorandroid.app.data.api.isActive
 import com.cursorandroid.app.data.api.isCloudEnvType
 import com.cursorandroid.app.data.api.isLiveStatus
+import com.cursorandroid.app.data.api.AgentConversation
+import com.cursorandroid.app.data.api.ConversationMessage
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
+import com.cursorandroid.app.data.repo.RunSettled
 import com.cursorandroid.app.data.repo.mergeConversationTranscript
+import com.cursorandroid.app.data.repo.settledAgentStatus
 import com.cursorandroid.app.data.repo.mergeRunTranscript
 import com.cursorandroid.app.data.repo.mergeTranscript
 import com.cursorandroid.app.data.api.isTerminal
@@ -220,11 +224,67 @@ class ThreadViewModel(
     private var sendingId: String? = null
     private var appContext: android.content.Context? = null
     private val refreshLock = Mutex()
+    private val settleLock = Mutex()
+    private val settledRuns = HashSet<String>()
+    private var settledKey: String? = null
+    private var afterNonAssistant = false
     private val lineGate = Any()
 
     init {
         viewModelScope.launch { refresh() }
         startWatch()
+        viewModelScope.launch {
+            container.runSettle.settled.collect { map -> map[agentId]?.let { onSettled(it) } }
+        }
+    }
+
+    private suspend fun onSettled(ended: RunSettled) {
+        val current = run
+        if (current != null && current.id != ended.runId) return
+        val fetched = runCatching { container.repo.getRun(agentId, ended.runId) }.getOrNull()
+        val latest = fetched ?: (current ?: Run(id = ended.runId)).copy(
+            status = ended.status,
+            result = ended.result ?: current?.result,
+        )
+        if (latest.isActive()) return
+        settleRun(latest)
+    }
+
+    private suspend fun settleRun(ended: Run) {
+        settleLock.withLock {
+            val key = "${ended.id}:${ended.status}"
+            if (settledKey == key) return
+            val current = run
+            if (current != null && current.id != ended.id && current.isActive()) return
+            if (streamedRunId == ended.id) streamJob?.cancel()
+            clearApprovals()
+            streaming = false
+            receiving = false
+            run = ended
+            settledRuns += ended.id
+            if (!ended.result.isNullOrBlank()) {
+                upsert("assistant-${ended.id}", "assistant", ended.result, ended.id)
+            }
+            persist(immediate = true)
+            runCatching { container.repo.getAgent(agentId) }.getOrNull()?.let { detail ->
+                agent = detail
+                noteApiModels(detail = detail)
+            }
+            var covered = false
+            for (attempt in 0 until SETTLE_FETCHES) {
+                if (attempt > 0) delay(SETTLE_RETRY_MS)
+                val convo = mergeConversation()
+                if (convo != null && conversationCovers(convo.messages, ended.result)) {
+                    covered = true
+                    break
+                }
+            }
+            if (!covered) mergeConversation()
+            refreshArtifacts()
+            settledKey = key
+            persist(immediate = true)
+        }
+        flushOutbound()
     }
 
     fun refresh() {
@@ -490,6 +550,7 @@ class ThreadViewModel(
             persistQueue()
             Attachments.forget(next.attaches)
             run = created
+            container.runSettle.clear(agentId)
             modelBook = container.runModels.recordRun(
                 agentId,
                 created.id,
@@ -615,6 +676,7 @@ class ThreadViewModel(
         val runs = runCatching { container.repo.listRuns(agentId) }.getOrDefault(emptyList())
         noteApiModels(runs = runs)
         var filled = runs.map { item -> hydrateRun(item, force = false) }
+        filled.filter { it.isTerminal() }.forEach { settledRuns += it.id }
         var merged = mergeRunTranscript(lines, filled)
         val hasUser = merged.any { it.kind == "user" }
         val hasPrompt = filled.any { !it.prompt?.text.isNullOrBlank() }
@@ -640,16 +702,21 @@ class ThreadViewModel(
     }
 
     private suspend fun mergeConversationHistory(): List<String> {
-        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return emptyList()
-        if (convo.messages.isEmpty()) return emptyList()
+        val convo = mergeConversation() ?: return emptyList()
+        return convo.messages.filter { it.transcriptKind() == "user" }.map { it.text.orEmpty() }
+    }
+
+    private suspend fun mergeConversation(): AgentConversation? {
+        val convo = runCatching { container.repo.conversation(agentId) }.getOrNull() ?: return null
+        if (convo.messages.isEmpty()) return null
         synchronized(lineGate) {
-            val merged = mergeConversationTranscript(lines, convo.messages)
+            val merged = mergeConversationTranscript(lines, convo.messages, settledRuns.toSet())
             if (merged != lines) {
                 lines = merged
                 persist()
             }
         }
-        return convo.messages.filter { it.transcriptKind() == "user" }.map { it.text.orEmpty() }
+        return convo
     }
 
     private suspend fun hydrateRun(item: Run, force: Boolean): Run {
@@ -702,6 +769,7 @@ class ThreadViewModel(
         if (!latest.result.isNullOrBlank()) {
             upsert("assistant-${latest.id}", "assistant", latest.result, latest.id)
         }
+        if (latest.isTerminal()) viewModelScope.launch { settleRun(latest) }
         flushOutbound()
     }
 
@@ -716,6 +784,7 @@ class ThreadViewModel(
         if (replay || streamedRunId != runId) {
             assistantBuf = StringBuilder()
             thinkingBuf = StringBuilder()
+            afterNonAssistant = false
             lastEventId = null
             streamedRunId = runId
         }
@@ -739,16 +808,19 @@ class ThreadViewModel(
                     when (event) {
                         is StreamEvent.Assistant -> {
                             receiving = true
-                            assistantBuf.append(event.text)
+                            appendAssistantSegment(assistantBuf, event.text, afterNonAssistant)
+                            afterNonAssistant = false
                             upsert("assistant-$runId", "assistant", assistantBuf.toString(), runId)
                         }
                         is StreamEvent.Thinking -> {
                             receiving = true
+                            afterNonAssistant = true
                             thinkingBuf.append(event.text)
                             upsert("think-$runId", "thinking", thinkingBuf.toString(), runId)
                         }
                         is StreamEvent.ToolCall -> {
                             receiving = true
+                            afterNonAssistant = true
                             noteToolApproval(event.callId, event.status)
                             upsert(
                                 event.callId ?: "tool-$runId-${event.name}",
@@ -778,6 +850,7 @@ class ThreadViewModel(
                             streaming = false
                             receiving = false
                             container.notifier.notifyIfNeeded(agentId, agent?.name, runId, event.status, event.text)
+                            run?.let { ended -> viewModelScope.launch { settleRun(ended) } }
                             refreshArtifacts()
                             flushOutbound()
                         }
@@ -800,6 +873,7 @@ class ThreadViewModel(
                                 if (!latest.result.isNullOrBlank()) {
                                     upsert("assistant-$runId", "assistant", latest.result, runId)
                                 }
+                                if (!latest.isActive()) viewModelScope.launch { settleRun(latest) }
                             }
                             refreshArtifacts()
                             flushOutbound()
@@ -825,7 +899,14 @@ class ThreadViewModel(
         noteApiModels(detail = detail)
         val runId = detail.latestRunId ?: return
         val live = runId == streamedRunId && (streaming || streamJob?.isActive == true)
-        if (live) return
+        if (live) {
+            if (isLiveStatus(detail.status) || run?.isActive() != true) return
+            val ended = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
+            if (ended.isActive()) return
+            settleRun(ended)
+            container.notifier.notifyIfNeeded(agentId, agent?.name, ended.id, ended.status, ended.result)
+            return
+        }
         if (runId == run?.id && run?.isActive() != true && !streaming) return
         val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
         noteApiModels(runs = listOf(latest))
@@ -845,6 +926,7 @@ class ThreadViewModel(
             refreshArtifacts()
         }
         if (latest.isTerminal()) {
+            settleRun(latest)
             container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
         }
     }
@@ -860,12 +942,7 @@ class ThreadViewModel(
                 val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
                 run = latest
                 if (!latest.isActive()) {
-                    clearApprovals()
-                    streaming = false
-                    receiving = false
-                    if (!latest.result.isNullOrBlank()) {
-                        upsert("assistant-$runId", "assistant", latest.result, runId)
-                    }
+                    settleRun(latest)
                     container.notifier.notifyIfNeeded(
                         agentId,
                         agent?.name,
@@ -873,8 +950,6 @@ class ThreadViewModel(
                         latest.status,
                         latest.result,
                     )
-                    refreshArtifacts()
-                    flushOutbound()
                     break
                 }
             }
@@ -892,6 +967,7 @@ class ThreadViewModel(
                 startStream(runId, replay = lastEventId == null)
                 return
             }
+            viewModelScope.launch { settleRun(latest) }
         }
         streaming = false
         receiving = false
@@ -1034,17 +1110,18 @@ fun ThreadScreen(
         }
     }
     val scope = rememberCoroutineScope()
+    val agentStatus = settledAgentStatus(vm.agent?.status, vm.agent?.latestRunId, vm.run)
     val working = showWorkBar(
         lines = vm.lines,
         receiving = vm.receiving,
         busy = vm.busy,
-        agentStatus = vm.agent?.status,
+        agentStatus = agentStatus,
         runStatus = vm.run?.status,
     )
-    val canKill = isLiveStatus(vm.agent?.status) || vm.run?.isActive() == true
+    val canKill = isLiveStatus(agentStatus) || vm.run?.isActive() == true
     val title = localTitle ?: vm.agent?.name ?: "Agent"
     val indicator = runIndicator(
-        agentStatus = vm.agent?.status,
+        agentStatus = agentStatus,
         runStatus = vm.run?.status,
         approvalPending = vm.approvalPending,
     )
@@ -1056,7 +1133,7 @@ fun ThreadScreen(
     val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
     val activity = workActivityLine(
         receiving = vm.receiving,
-        agentStatus = vm.agent?.status,
+        agentStatus = agentStatus,
         runStatus = vm.run?.status,
         envType = vm.agent?.env?.type,
         toolName = if (working) latestTool else null,
@@ -1080,7 +1157,7 @@ fun ThreadScreen(
     val waitText = if (showTyping) {
         waitCopy(
             receiving = vm.receiving,
-            agentStatus = vm.agent?.status,
+            agentStatus = agentStatus,
             runStatus = vm.run?.status,
             envType = vm.agent?.env?.type,
         )
@@ -1570,7 +1647,7 @@ fun ThreadScreen(
             .ifBlank { null }
         ChatPropertiesDialog(
             title = title,
-            status = vm.agent?.status ?: vm.run?.status,
+            status = agentStatus ?: vm.run?.status,
             env = env,
             branch = git?.branch ?: cached?.branch,
             repoUrl = git?.repoUrl ?: cached?.repoUrl,
@@ -1596,6 +1673,23 @@ fun ThreadScreen(
 internal const val STREAM_COALESCE_MS = 120L
 
 internal const val LIVE_TAIL_KEY = "live-tail"
+
+private const val SETTLE_FETCHES = 3
+private const val SETTLE_RETRY_MS = 1_500L
+
+internal fun appendAssistantSegment(buf: StringBuilder, text: String, afterOther: Boolean) {
+    if (afterOther && buf.isNotEmpty() && text.isNotEmpty() && !buf.endsWith("\n")) buf.append("\n\n")
+    buf.append(text)
+}
+
+internal fun conversationCovers(messages: List<ConversationMessage>, result: String?): Boolean {
+    val needle = result?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+    if (needle.isEmpty()) return messages.isNotEmpty()
+    return messages.any { msg ->
+        msg.transcriptKind() == "assistant" &&
+            msg.text.orEmpty().replace(Regex("\\s+"), " ").contains(needle)
+    }
+}
 
 /** Emits at once after a quiet period, then at most once per [windowMs], always ending on the latest value. */
 internal fun <T> Flow<T>.coalesced(windowMs: Long): Flow<T> = flow {

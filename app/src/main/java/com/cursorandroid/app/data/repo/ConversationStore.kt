@@ -104,6 +104,19 @@ class ConversationStore(context: Context) {
         batch.forEach { (id, snap) -> writeFile(id, snap) }
     }
 
+    fun settle(agentId: String, runId: String, status: String) {
+        rememberLive(agentId, status)
+        val pendingSnap = synchronized(pending) { pending[agentId] }
+        val snap = pendingSnap ?: loadSnap(agentId)
+        if (snap.runId != runId || snap.runStatus.equals(status, ignoreCase = true)) return
+        val next = snap.copy(runStatus = status)
+        if (pendingSnap != null) {
+            synchronized(pending) { pending[agentId] = next }
+        } else {
+            writeFile(agentId, next)
+        }
+    }
+
     fun liveStatuses(): Map<String, String> = synchronized(live) { live.toMap() }
 
     fun liveStatus(agentId: String): String? = synchronized(live) { live[agentId] }
@@ -447,6 +460,7 @@ internal fun mergeRunTranscript(
 internal fun mergeConversationTranscript(
     local: List<TranscriptLine>,
     messages: List<ConversationMessage>,
+    settledRuns: Set<String> = emptySet(),
 ): List<TranscriptLine> {
     if (messages.isEmpty()) return coalesceTranscript(local)
     val used = BooleanArray(local.size)
@@ -493,14 +507,46 @@ internal fun mergeConversationTranscript(
             "user" -> out += line
             "assistant" -> {
                 val text = line.text.trim()
-                if (text.isNotEmpty() && out.none { it.kind == "assistant" && it.text.trim() == text }) {
-                    insertAfterRun(out, line)
+                val settled = line.runId in settledRuns
+                val unseen = out.none { it.kind == "assistant" && it.text.trim() == text }
+                if (text.isNotEmpty() && unseen && !(settled && coveredByServer(text, out))) {
+                    insertAtTurnEnd(out, line)
                 }
             }
             else -> insertAfterRun(out, line)
         }
     }
     return coalesceTranscript(out)
+}
+
+private val WHITESPACE = Regex("\\s+")
+
+private fun squash(text: String): String = text.replace(WHITESPACE, " ").trim()
+
+/**
+ * A streamed bubble glues every assistant segment of a run into one line. Once the run is over
+ * and the server already lists those segments as messages, the glued copy is a stale duplicate.
+ */
+internal fun coveredByServer(text: String, out: List<TranscriptLine>): Boolean {
+    val whole = squash(text)
+    if (whole.isEmpty()) return true
+    val parts = out.filter { it.kind == "assistant" }.map { squash(it.text) }.filter { it.isNotEmpty() }
+    if (parts.any { it.contains(whole) }) return true
+    var rest = whole
+    for (part in parts.sortedByDescending { it.length }) rest = rest.replace(part, " ")
+    return rest.isBlank()
+}
+
+/** A streamed tail is the newest text of its turn: after every server message up to the next user turn. */
+private fun insertAtTurnEnd(out: MutableList<TranscriptLine>, line: TranscriptLine) {
+    val run = line.runId?.takeIf { it.isNotBlank() }
+    val user = if (run == null) -1 else out.indexOfFirst { it.kind == "user" && (it.runId == run || it.id == "user-$run") }
+    if (user < 0) {
+        out += line
+        return
+    }
+    val next = (user + 1 until out.size).firstOrNull { out[it].kind == "user" } ?: out.size
+    out.add(next, line)
 }
 
 private fun insertAfterRun(out: MutableList<TranscriptLine>, line: TranscriptLine) {
