@@ -96,6 +96,7 @@ object SettingsBackup {
         }
         if (snap.forges.isNotEmpty()) {
             container.store.saveForges(mergeForgeSecrets(container.store.forges(), snap.forges))
+            container.forgeSync.requestDue(FORGE_SYNC_START_MS)
         }
         if (snap.repoDefaults.isNotEmpty()) {
             container.store.saveRepoDefaults(snap.repoDefaults)

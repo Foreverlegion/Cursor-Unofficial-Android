@@ -3,20 +3,10 @@ package com.cursorandroid.app.data.repo
 import com.cursorandroid.app.data.api.RepositoryItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 object ForgeClient {
-    private val jsonMedia = "application/json".toMediaType()
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .build()
+    @Volatile
+    var transport: ForgeTransport = OkHttpForgeTransport
 
     suspend fun test(forge: ForgeConnection): String = withContext(Dispatchers.IO) {
         val item = normalizedForge(forge)
@@ -41,15 +31,6 @@ object ForgeClient {
         parseBranchNames(forge.provider, body)
     }
 
-    suspend fun listRepos(forge: ForgeConnection, query: String, page: Int): ForgeRepoPage =
-        withContext(Dispatchers.IO) {
-            val call = repoListCall(forge, query, page) ?: return@withContext ForgeRepoPage(emptyList(), false)
-            val (code, body) = execute(call)
-            if (code !in 200..299) return@withContext ForgeRepoPage(emptyList(), false)
-            val repos = parseForgeRepos(forge, body)
-            ForgeRepoPage(repos, repos.size >= repoPageSize(normalizedForge(forge).provider))
-        }
-
     suspend fun createRepo(
         forge: ForgeConnection,
         name: String,
@@ -70,16 +51,7 @@ object ForgeClient {
     }
 
     private fun execute(call: ForgeCall): Pair<Int, String> {
-        val builder = Request.Builder().url(call.url)
-        call.headers.forEach { (key, value) -> builder.header(key, value) }
-        val request = when (call.method) {
-            "POST" -> builder.post((call.body ?: "{}").toRequestBody(jsonMedia)).build()
-            else -> builder.get().build()
-        }
-        return runCatching {
-            http.newCall(request).execute().use { response ->
-                response.code to response.body?.string().orEmpty()
-            }
-        }.getOrDefault(0 to "")
+        val response = transport.execute(call)
+        return response.code to response.body
     }
 }
