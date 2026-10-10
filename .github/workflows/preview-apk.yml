@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "Backend/**"
+      - "opus/**"
 
 jobs:
   apk:

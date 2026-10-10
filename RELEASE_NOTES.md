@@ -1,3 +1,23 @@
+# 1.1.0-opus
+
+Test build. Installs over the 1.0.27 preview.
+
+Lists, models, repos, branches, environments, pools, machines, forge login and finished chats load from disk first and refresh in the background. Running agents and notifications stay live.
+
+Settings > Backup shows cache size, a cache limit (25 to 200 MB, default 50) and Clear cache. Old finished chats are pruned on start and once a day.
+
+Fewer API calls: the agent list polls faster only while something runs, repositories are fetched at most once a minute, finished chats are not re-read, and background watchers back off on errors and stop on 401/403/404.
+
+Sharing a PR link opens the agent that made it. Finish notifications with a PR have an Open PR action. Long-press the launcher icon for New agent.
+
+Chat details show the last run duration. Remote environments come from GET /v1/environments.
+
+Settings > Connections > Forges and Repo defaults no longer crash.
+
+Security: the API key is only sent to api.cursor.com. Shared files must come from another app. Artifact downloads cannot leave Downloads. Imported backups cannot point at app files or resend queued messages.
+
+---
+
 # 1.0.27
 
 Owner tools in Settings match the public GitHub login Foreverlegion. The in-app Ban button is shown only for that login. The privacy policy contact is that GitHub profile and this project's issues.

@@ -40,7 +40,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 127
-        versionName = "1.0.27"
+        versionName = "1.1.0-opus"
         buildConfigField(
             "String",
             "APP_ISSUES_TOKEN",
