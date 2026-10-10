@@ -16,6 +16,11 @@ class ApiException(
         get() = code == 429 ||
             errorCode?.contains("rate_limit", ignoreCase = true) == true ||
             message.contains("exceeded the rate limit", ignoreCase = true)
+    /** The Cursor API refused the key itself (revoked, rotated or wrong), so every further call would fail the same way. */
+    val isInvalidKey: Boolean
+        get() = code == 401 ||
+            errorCode == SESSION_EXPIRED ||
+            message.contains("Invalid User API Key", ignoreCase = true)
     val isBusy: Boolean
         get() = errorCode == "agent_busy" || (code == 409 && message.contains("busy", ignoreCase = true))
     val isNotCancellable: Boolean
@@ -29,6 +34,7 @@ class ApiException(
 
     fun displayMessage(): String {
         return when {
+            isInvalidKey -> EXPIRED_MESSAGE
             isBusy -> "Agent is still working. Message queued."
             isNotCancellable -> "Run already finished."
             isStreamGone -> "Run stream ended. Refreshing."
@@ -39,6 +45,11 @@ class ApiException(
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
+
+        const val SESSION_EXPIRED = "session_expired"
+        const val EXPIRED_MESSAGE = "Your Cursor sign-in expired. Sign in again."
+
+        fun sessionExpired(): ApiException = ApiException(401, EXPIRED_MESSAGE, errorCode = SESSION_EXPIRED)
 
         /** Seconds or an HTTP date, as sent in a Retry-After header. Null when absent or unusable. */
         fun parseRetryAfter(value: String?, nowMs: Long = System.currentTimeMillis()): Long? {

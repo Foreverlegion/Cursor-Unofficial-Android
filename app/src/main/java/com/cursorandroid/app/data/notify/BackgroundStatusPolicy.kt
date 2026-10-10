@@ -32,6 +32,9 @@ object RunWatchBackoff {
 
     fun gone(e: Throwable): Boolean = e is ApiException && e.code == 404
 
+    /** The saved key was refused: every further poll would fail the same way, so the watch ends. */
+    fun signedOut(e: Throwable): Boolean = e is ApiException && e.isInvalidKey
+
     fun delayMs(failures: Int, error: Throwable?): Long {
         if (failures <= 0 && error == null) return NORMAL_MS
         val grown = (NORMAL_MS shl failures.coerceIn(0, 4)).coerceAtMost(MAX_MS)

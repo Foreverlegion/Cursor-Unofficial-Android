@@ -19,14 +19,14 @@ class InboxSweepWorker(
         if (app.container.store.demoMode || !app.container.store.hasKey()) return Result.success()
         val seen = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return try {
-            if (app.container.repo.statusGate.isPaused) return Result.success()
+            if (app.container.repo.statusGate.isPaused || app.container.session.expired()) return Result.success()
             val agents = sweepTargets(app.container.repo.listAgents(), seenStatus = { runId -> seen.getString(runId, null) })
             for (agent in agents) {
                 val runId = agent.latestRunId ?: continue
                 val run = try {
                     app.container.repo.getRun(agent.id, runId)
                 } catch (e: ApiException) {
-                    if (e.isRateLimited) return Result.success()
+                    if (e.isRateLimited || e.isInvalidKey) return Result.success()
                     continue
                 } catch (_: Exception) {
                     continue
@@ -56,7 +56,7 @@ class InboxSweepWorker(
             }
             Result.success()
         } catch (e: ApiException) {
-            if (e.isRateLimited) Result.success() else Result.retry()
+            if (e.isRateLimited || e.isInvalidKey) Result.success() else Result.retry()
         } catch (_: Exception) {
             Result.retry()
         }

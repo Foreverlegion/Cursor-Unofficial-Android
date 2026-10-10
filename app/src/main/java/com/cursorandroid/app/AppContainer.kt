@@ -8,11 +8,13 @@ import com.cursorandroid.app.data.api.CancelLog
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.auth.SessionGuard
 import com.cursorandroid.app.data.auth.CursorBrowserLogin
 import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
+import com.cursorandroid.app.data.repo.StagedRestore
 import com.cursorandroid.app.data.repo.StatusCallMeter
 import com.cursorandroid.app.data.repo.StatusGate
 import com.cursorandroid.app.data.repo.CatalogCache
@@ -63,6 +65,8 @@ class AppContainer(context: Context) {
     }
     val notifier = RunNotifier(context.applicationContext, store, notices, chats, runSettle, inboxRefresh)
     val feedback = FeedbackStore(context)
+    val stagedRestore = StagedRestore(File(context.applicationContext.filesDir, "staged-restore.json"))
+    val session = SessionGuard { store.apiKey }
     val forgeSync = ForgeSyncer(
         store = ForgeSyncStore(File(context.applicationContext.filesDir, "forge-sync")),
         forges = { store.forges() },
@@ -154,13 +158,19 @@ class AppContainer(context: Context) {
 
     val repo = AgentRepository(
         api = api,
-        sse = SseStreamer(http, json, probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null),
+        sse = SseStreamer(
+            http,
+            json,
+            probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null,
+            onUnauthorized = { key -> session.markExpired(key) },
+        ),
         store = store,
         catalog = catalog,
         publicHttp = publicHttp,
         json = json,
         machines = machines,
         statusGate = statusGate,
+        session = session,
     )
 
     /** Debug builds only: how many status calls went out in the last minute, for the About page. */

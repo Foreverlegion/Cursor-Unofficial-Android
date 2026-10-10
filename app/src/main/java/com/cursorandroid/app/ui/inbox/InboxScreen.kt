@@ -317,6 +317,7 @@ fun InboxScreen(
                 pause = { delay(it) },
                 poll = poll@{ reason, tick ->
                     if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
+                    if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
                     val page = container.repo.listAgentsPage(includeArchived = true)
                     val fresh = page.entries()

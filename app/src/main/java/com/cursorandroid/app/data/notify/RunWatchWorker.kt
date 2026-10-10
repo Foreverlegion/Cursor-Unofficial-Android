@@ -25,6 +25,12 @@ class RunWatchWorker(
         val agentId = inputData.getString(KEY_AGENT_ID) ?: return Result.failure()
         val runId = inputData.getString(KEY_RUN_ID) ?: return Result.failure()
         val agentName = inputData.getString(KEY_AGENT_NAME)
+        if (app.container.session.expired()) {
+            RunWatchStore.remove(applicationContext, runId)
+            ApprovalStreamHub.close(runId)
+            ApprovalStreamHub.detach(applicationContext, runId)
+            return Result.success()
+        }
         val failures = inputData.getInt(KEY_FAILURES, 0)
         if (VisibleAgent.isOpenInForeground(agentId) || VisibleAgent.inboxCoversRuns()) {
             RunWatchScheduler.chainNextPoll(applicationContext, agentId, runId, agentName)
@@ -54,7 +60,7 @@ class RunWatchWorker(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (RunWatchBackoff.gone(e)) {
+            if (RunWatchBackoff.gone(e) || RunWatchBackoff.signedOut(e)) {
                 RunWatchStore.remove(applicationContext, runId)
                 ApprovalStreamHub.close(runId)
                 ApprovalStreamHub.detach(applicationContext, runId)

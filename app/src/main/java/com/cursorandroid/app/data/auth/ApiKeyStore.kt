@@ -220,6 +220,11 @@ class ApiKeyStore internal constructor(
 
     fun hasSession(): Boolean = demoMode || hasKey()
 
+    /** Drops only the Cursor sign-in key. Forge tokens and everything else stay. */
+    fun clearSessionKey() {
+        writeSecret(KEY, null)
+    }
+
     fun clear() {
         writeSecret(KEY, null)
         removeLegacyGithub()

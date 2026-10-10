@@ -29,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -217,15 +218,28 @@ private fun CursorAppContent(
     val topBars = WindowInsets.statusBars.union(
         WindowInsets.displayCutout.only(WindowInsetsSides.Top),
     )
+    val rejectedKey by container.session.rejectedKey.collectAsStateWithLifecycle()
+    val sessionExpired = !demo && rejectedKey != null && rejectedKey == container.store.apiKey?.trim()
     Column(Modifier.fillMaxSize()) {
         if (demo) {
             DemoBanner(Modifier.windowInsetsPadding(topBars))
+        }
+        if (sessionExpired) {
+            SessionExpiredBanner(
+                onSignInAgain = {
+                    RunWatchScheduler.stop(context.applicationContext)
+                    container.store.clearSessionKey()
+                    container.session.reset()
+                    signedIn = false
+                },
+                modifier = Modifier.windowInsetsPadding(topBars),
+            )
         }
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .then(if (demo) Modifier.consumeWindowInsets(topBars) else Modifier),
+                .then(if (demo || sessionExpired) Modifier.consumeWindowInsets(topBars) else Modifier),
         ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (twoPane) {

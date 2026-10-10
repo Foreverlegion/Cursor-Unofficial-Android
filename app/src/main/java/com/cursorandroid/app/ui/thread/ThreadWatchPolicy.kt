@@ -12,6 +12,7 @@ data class WatchState(
     val busy: Boolean,
     val failures: Int = 0,
     val pausedForMs: Long = 0,
+    val sessionExpired: Boolean = false,
 )
 
 /**
@@ -24,7 +25,7 @@ object ThreadWatchPolicy {
 
     /** Milliseconds until the next status call, or null when none should be made. */
     fun nextDelayMs(state: WatchState): Long? {
-        if (!state.foreground || state.finished || state.streamLive || state.busy) return null
+        if (state.sessionExpired || !state.foreground || state.finished || state.streamLive || state.busy) return null
         val backoff = if (state.failures <= 0) StatusGate.BASE_MS else StatusGate.backoffMs(state.failures + 1)
         return maxOf(backoff.coerceAtMost(StatusGate.MAX_PAUSE_MS), state.pausedForMs)
     }
@@ -34,7 +35,7 @@ object ThreadWatchPolicy {
         agentWorking == false && !runActive && !streaming && !outboundPending
 
     /** A call is due after an event (resume, a live run noticed elsewhere) only when the thread is on screen. */
-    fun kickAllowed(state: WatchState): Boolean = state.foreground && !state.busy
+    fun kickAllowed(state: WatchState): Boolean = state.foreground && !state.busy && !state.sessionExpired
 }
 
 /** "Refresh paused, retrying in 12s" while the rate-limit gate is shut, or null when there is nothing to say. */

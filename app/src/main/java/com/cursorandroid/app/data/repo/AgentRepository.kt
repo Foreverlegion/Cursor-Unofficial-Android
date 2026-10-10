@@ -42,6 +42,7 @@ import com.cursorandroid.app.data.api.withDetail
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.auth.SessionGuard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -72,6 +73,7 @@ class AgentRepository(
     private val json: Json,
     private val machines: MachineStore? = null,
     val statusGate: StatusGate = StatusGate(),
+    val session: SessionGuard = SessionGuard { store.apiKey },
 ) {
     private val statusCache = StatusCache()
 
@@ -524,6 +526,7 @@ class AgentRepository(
         if (store.demoMode) {
             return flow { emit(StreamEvent.Done) }
         }
+        if (session.expired()) return flow { throw ApiException.sessionExpired() }
         return sse.stream(agentId, runId, apiKey(), lastEventId)
     }
 
@@ -744,17 +747,22 @@ class AgentRepository(
     }
 
     private suspend fun <T> wrap(block: suspend () -> T): T {
+        val key = if (store.demoMode) null else store.apiKey
+        if (session.expiredFor(key)) throw ApiException.sessionExpired()
         return try {
             block()
         } catch (e: ApiException) {
+            if (e.isInvalidKey) session.markExpired(key)
             throw e
         } catch (e: HttpException) {
             val body = e.response()?.errorBody()?.string().orEmpty()
-            throw ApiException.fromBody(
+            val api = ApiException.fromBody(
                 e.code(),
                 body.ifBlank { e.message() },
                 e.response()?.headers()?.get("Retry-After"),
             )
+            if (api.isInvalidKey) session.markExpired(key)
+            throw api
         }
     }
 

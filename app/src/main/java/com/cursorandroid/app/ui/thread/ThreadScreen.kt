@@ -287,6 +287,11 @@ class ThreadViewModel(
     }
 
     private fun fail(e: Throwable) {
+        if (e is ApiException && e.isInvalidKey) {
+            // The app-wide "sign-in expired" banner owns this; a raw red line here would just repeat it.
+            error = null
+            return
+        }
         if (e is ApiException && e.isRateLimited) {
             error = null
             retryRefreshLater()
@@ -327,6 +332,7 @@ class ThreadViewModel(
             busy = busy,
             failures = failures,
             pausedForMs = container.repo.statusGate.remainingMs(),
+            sessionExpired = container.session.expired(),
         )
     }
 
@@ -990,7 +996,7 @@ class ThreadViewModel(
                             if (event.recoverable || event.message == "stream_expired") {
                                 handleStreamGone(runId)
                             } else if (event.message != "stream_canceled") {
-                                error = event.message
+                                error = if (container.session.expired()) null else event.message
                                 streaming = false
                                 receiving = false
                             }
@@ -1073,6 +1079,7 @@ class ThreadViewModel(
             while (isActive && run?.id == runId && run?.isActive() == true) {
                 val step = tick++
                 delay(runPollDelayMs(receiving, step))
+                if (container.session.expired()) break
                 if (!VisibleAgent.isOpenInForeground(agentId)) {
                     // The background run watch covers an active run while the app is away.
                     delay(ThreadWatchPolicy.IDLE_RECHECK_MS)

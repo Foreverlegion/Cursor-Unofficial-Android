@@ -42,6 +42,7 @@ class SseStreamer(
     private val json: Json,
     private val baseUrl: String = "https://api.cursor.com/",
     private val probe: ((type: String, data: String) -> Unit)? = null,
+    private val onUnauthorized: ((apiKey: String) -> Unit)? = null,
 ) {
     fun stream(agentId: String, runId: String, apiKey: String, lastEventId: String? = null): Flow<StreamEvent> {
         return callbackFlow {
@@ -76,6 +77,7 @@ class SseStreamer(
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                     val code = response?.code
+                    if (code == 401) onUnauthorized?.invoke(apiKey)
                     val body = runCatching { response?.body?.string() }.getOrNull().orEmpty()
                     val parsed = ApiException.fromBody(code ?: 0, body.ifBlank { t?.message.orEmpty() }, response?.header("Retry-After"))
                     val recoverable = code == 410 || parsed.isStreamGone ||

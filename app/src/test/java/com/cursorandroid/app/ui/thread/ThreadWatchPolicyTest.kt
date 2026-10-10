@@ -144,3 +144,37 @@ class ThreadWatchLoopTest {
         assertEquals(45_000L, calls.first())
     }
 }
+
+class ExpiredSessionWatchTest {
+    private val live = WatchState(foreground = true, finished = false, streamLive = false, busy = false)
+
+    @Test
+    fun anExpiredSessionStopsTheThreadWatchAndIgnoresKicks() {
+        val expired = live.copy(sessionExpired = true)
+        assertNull(ThreadWatchPolicy.nextDelayMs(expired))
+        assertFalse(ThreadWatchPolicy.kickAllowed(expired))
+    }
+
+    @Test
+    fun noStatusCallIsMadeOnceTheSessionExpires() {
+        var round = 0
+        var calls = 0
+        try {
+            kotlinx.coroutines.runBlocking {
+                threadWatchLoop(
+                    state = { _ -> live.copy(sessionExpired = round >= 2) },
+                    awaitKick = { _ ->
+                        if (round++ >= 300) throw kotlinx.coroutines.CancellationException("done")
+                        false
+                    },
+                    attach = {
+                        calls++
+                        true
+                    },
+                )
+            }
+        } catch (_: kotlinx.coroutines.CancellationException) {
+        }
+        assertTrue("only the calls before the 401 went out, got $calls", calls <= 2)
+    }
+}
