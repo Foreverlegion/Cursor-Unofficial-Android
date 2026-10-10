@@ -22,7 +22,7 @@ A sideloaded APK that lets you run and follow Cloud Agent work from Android:
 - Start an agent on a repo, a saved cloud environment, a machine, or a pool
 - Follow-ups, artifacts, and run status
 - Notifications when a run finishes or needs approval, including per-chat mute
-- MCP servers you configure on the phone (HTTP or stdio for cloud VMs)
+- MCP servers you configure on the phone (HTTP, SSE or stdio for cloud VMs), with import from `mcp.json`
 - Create a GitHub repo from New agent if you add a GitHub token
 - Settings backup
 
@@ -50,6 +50,59 @@ The phone does **not** run the agent. The work happens on Cursor's cloud VMs or 
 Play Protect may scan a sideloaded APK. That is Google, not this app. You can install anyway or turn Play Protect off yourself.
 
 Play installs update from the Play Store. This app does not download or install APKs.
+
+## Importing MCP servers
+
+Steps:
+
+1. Get an `mcp.json` onto the phone, or have its text ready to paste. It uses the same format as `~/.cursor/mcp.json` and `.cursor/mcp.json` on a PC. To start from a template, open Settings, Connections, MCP and tap Create MCP sheet for import. That saves `mcp-template.json` to your Downloads folder, and the message at the bottom has an Open button.
+2. In Settings, Connections, MCP, tap Import, then From mcp.json.
+3. Tap Choose file (or paste the text), then Preview. Tick the servers you want and tap Import.
+
+The format:
+
+```json
+{
+  "mcpServers": {
+    "example-http": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" },
+      "enabled": false
+    },
+    "example-sse": {
+      "type": "sse",
+      "url": "https://example.com/sse",
+      "enabled": false
+    },
+    "example-stdio": {
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server"],
+      "env": { "API_KEY": "YOUR_TOKEN_HERE" },
+      "enabled": false
+    }
+  }
+}
+```
+
+Fields:
+
+- `mcpServers` (required): a map from server name to its settings. The name is the key. It must not be empty, and names are matched case-insensitively. A top-level `servers` map, or a bare map of servers, is accepted too.
+- HTTP server: `url` is required and must start with `https://`. `headers` is optional. `type` is optional (`"http"` is assumed when there is a `url`).
+- SSE server: `type` must be `"sse"`, and `url` is required. Cursor says SSE is not supported for cloud agents, so the importer flags it.
+- Stdio server: `command` is required. `args` (a list of strings) and `env` (a map of strings) are optional. It runs inside the cloud VM. `type` is optional (`"stdio"` is assumed when there is a `command` and no `url`).
+- `enabled`: optional. `false` imports the server switched off. Without it the server is on, and on for every new agent. `"disabled": true` means the same and is the only form version 1.0.28 reads.
+- `auth`: optional OAuth client for HTTP and SSE servers: `CLIENT_ID` (required), `CLIENT_SECRET`, `scopes`.
+- Header, env and `args` values are used exactly as written. `${VAR}` placeholders are not expanded.
+
+Secrets and headers:
+
+- Header values, env values and OAuth client secrets are stored encrypted on the phone. A header whose value is only `Bearer` (no token) is never sent.
+- Enabled servers, with their headers and env, are sent to Cursor when you start a new agent, because that is how Cursor's API takes MCP servers. Nothing else leaves the phone, and there is no tracking.
+- If a name is already saved, the importer leaves it unchecked and asks before replacing it. A replaced server keeps its saved header, env and OAuth values wherever the file leaves them empty.
+- Export writes the same format with header and env values and client secrets left empty. Turn on Include secrets only for a file you will keep private, because it is plain text.
+- OAuth-only servers (for example GitLab, Slack, Sentry) are connected at cursor.com/agents, MCP Servers. This app cannot finish that sign-in.
+- A phone holds at most 50 servers.
+- The template's three servers are placeholders and are all switched off. Importing it as it is saves three disabled entries and nothing is sent to an agent. Replace the `example.com` URLs and `YOUR_TOKEN_HERE` values, and remove `"enabled": false`, to use one.
 
 ## Sign in
 
