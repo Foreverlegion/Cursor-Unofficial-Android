@@ -23,6 +23,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 /**
@@ -169,9 +171,17 @@ class UiPrefsStore internal constructor(
             val legacyChats = app.getSharedPreferences("local_chats", Context.MODE_PRIVATE)
             val legacy = LegacyUiPrefs(
                 prefs = legacyPrefs.all,
-                chatMetaJson = legacyChats.getString("meta", null) ?: legacyPrefs.getString("chat_meta", null),
+                chatMetaJson = firstReadableChatMeta(legacyChats.getString("meta", null), legacyPrefs.getString("chat_meta", null)),
             )
             return open(legacy, app.preferencesDataStoreFile(FILE))
+        }
+
+        /** The older store wrote `local_chats/meta` and mirrored it to `cursor_prefs/chat_meta`; use whichever still parses. */
+        internal fun firstReadableChatMeta(vararg candidates: String?): String? {
+            val present = candidates.filter { !it.isNullOrBlank() }
+            return present.firstOrNull { raw ->
+                runCatching { Json.parseToJsonElement(raw!!) is JsonObject }.getOrDefault(false)
+            } ?: present.firstOrNull()
         }
 
         @OptIn(ExperimentalCoroutinesApi::class)

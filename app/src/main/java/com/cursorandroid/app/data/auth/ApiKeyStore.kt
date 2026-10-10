@@ -5,8 +5,10 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.io.File
 import com.cursorandroid.app.data.api.McpServer
 import com.cursorandroid.app.data.repo.ForgeConnection
+import com.cursorandroid.app.data.repo.ForgeKind
 import com.cursorandroid.app.data.repo.RepoDefault
 import com.cursorandroid.app.data.repo.StoredMcpServer
 import com.cursorandroid.app.data.repo.decodeForges
@@ -26,10 +28,17 @@ import com.cursorandroid.app.data.repo.UiKeys
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.upsertRepoDefault
 
-class ApiKeyStore(context: Context, private val ui: UiPrefsStore) {
+class ApiKeyStore internal constructor(
+    context: Context,
+    private val ui: UiPrefsStore,
+    secureOpener: (Context, String) -> SharedPreferences?,
+) {
+    constructor(context: Context, ui: UiPrefsStore) : this(context, ui, ::openEncrypted)
+
+
     private val app = context.applicationContext
-    private val primary = openEncrypted(app, PREFS)
-    private val backup = openEncrypted(app, PREFS_BAK)
+    private val primary = secureOpener(app, PREFS)
+    private val backup = secureOpener(app, PREFS_BAK)
     // Survives uninstall/downgrade when Android keeps app data or restores backup.
     // Encrypted prefs cannot: Keystore keys die with the package.
     private val fallback = app.getSharedPreferences(PREFS_FALLBACK, Context.MODE_PRIVATE)
@@ -37,6 +46,7 @@ class ApiKeyStore(context: Context, private val ui: UiPrefsStore) {
 
     init {
         recover()
+        runCatching { migrateSecrets() }
         runCatching { forges() }
     }
 
@@ -152,24 +162,27 @@ class ApiKeyStore(context: Context, private val ui: UiPrefsStore) {
             ?: readSecret(GITHUB)
         set(value) {
             val token = value?.trim()?.takeIf { it.isNotEmpty() }
-            val current = decodeForges(readSecret(FORGES))
+            val raw = readSecret(FORGES)
+            val current = decodeForges(raw)
+            if (current.isEmpty() && !raw.isNullOrBlank()) stashUnreadable(FORGES, raw)
             val base = if (current.isEmpty()) migrateForges(emptyList(), readSecret(GITHUB)) else current
             saveForges(upsertPublicGithub(base, token))
+            if (token == null) removeLegacyGithub()
         }
 
     fun forges(): List<ForgeConnection> {
-        val stored = decodeForges(readSecret(FORGES))
+        val raw = readSecret(FORGES)
+        val stored = decodeForges(raw)
+        if (stored.isEmpty() && !raw.isNullOrBlank()) return emptyList()
         val legacy = readSecret(GITHUB)
         val migrated = migrateForges(stored, legacy)
         if (migrated != stored) saveForges(migrated)
-        return if (migrated != stored) migrated else stored
+        return migrated
     }
 
     fun saveForges(items: List<ForgeConnection>) {
         val next = items.take(20)
         writeSecret(FORGES, if (next.isEmpty()) null else encodeForges(next))
-        val github = next.firstOrNull { it.provider == com.cursorandroid.app.data.repo.ForgeKind.GITHUB.id }?.token
-        writeSecret(GITHUB, github?.trim()?.takeIf { it.isNotEmpty() })
     }
 
     fun forgeForRepo(repoUrl: String): ForgeConnection? = forgeForRepo(forges(), repoUrl)
@@ -244,7 +257,7 @@ class ApiKeyStore(context: Context, private val ui: UiPrefsStore) {
 
     fun clear() {
         writeSecret(KEY, null)
-        writeSecret(GITHUB, null)
+        removeLegacyGithub()
         writeSecret(FORGES, null)
     }
 
@@ -275,43 +288,91 @@ class ApiKeyStore(context: Context, private val ui: UiPrefsStore) {
     }
 
     private fun recover() {
-        val found = readKey()
-        if (!found.isNullOrEmpty()) {
-            writeKey(found)
-        }
-        val github = readSecret(GITHUB)
-        if (!github.isNullOrEmpty()) {
-            writeSecret(GITHUB, github)
+        for (name in listOf(KEY, FORGES, REPO_DEFAULTS, MCP_LIST, GITHUB)) {
+            val found = readSecret(name)
+            if (!found.isNullOrEmpty()) writeSecret(name, found)
         }
     }
 
-    private fun openEncrypted(context: Context, name: String): SharedPreferences? {
-        val opened = runCatching { createEncrypted(context, name) }.getOrNull()
-        if (opened != null) return opened
-        runCatching { context.deleteSharedPreferences(name) }
-        return runCatching { createEncrypted(context, name) }.getOrNull()
+    private fun legacyGithubTokens(): List<String> {
+        val encrypted = listOfNotNull(primary, backup).map { it.getString(GITHUB, null) }
+        return (encrypted + fallback.getString(GITHUB, null))
+            .mapNotNull { it?.trim()?.takeIf { token -> token.isNotEmpty() } }
     }
 
-    private fun createEncrypted(context: Context, name: String): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            name,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+    private fun removeLegacyGithub() {
+        writeSecret(GITHUB, null)
+    }
+
+    /**
+     * Versioned. 0 -> 1 moves the pre-forge `github_token` into the forge list. The new entry is read
+     * back before any legacy copy is removed, an existing GitHub token in the forge list is never
+     * replaced, and the version is recorded only when every step held, so a failed run repeats.
+     */
+    private fun migrateSecrets() {
+        if (notifyPrefs.getInt(SECRETS_SCHEMA, 0) >= SECRETS_VERSION) return
+        if (!migrateGithubToken()) return
+        notifyPrefs.edit(commit = true) { putInt(SECRETS_SCHEMA, SECRETS_VERSION) }
+    }
+
+    private fun migrateGithubToken(): Boolean {
+        val legacy = legacyGithubTokens().firstOrNull() ?: return true
+        val raw = readSecret(FORGES)
+        val stored = decodeForges(raw)
+        if (stored.isEmpty() && !raw.isNullOrBlank()) return false
+        if (stored.none { it.provider == ForgeKind.GITHUB.id && it.token.isNotBlank() }) {
+            saveForges(migrateForges(stored, legacy))
+        }
+        val verified = decodeForges(readSecret(FORGES))
+            .any { it.provider == ForgeKind.GITHUB.id && it.token.isNotBlank() }
+        if (!verified) return false
+        removeLegacyGithub()
+        return true
+    }
+
+    private fun stashUnreadable(name: String, raw: String) {
+        if (readSecret("$name$UNREADABLE") == null) writeSecret("$name$UNREADABLE", raw)
     }
 
     companion object {
+        private fun openEncrypted(context: Context, name: String): SharedPreferences? {
+            val opened = runCatching { createEncrypted(context, name) }.getOrNull()
+            if (opened != null) return opened
+            setAside(context, name)
+            return runCatching { createEncrypted(context, name) }.getOrNull()
+        }
+
+        // A file that will not open may only be unreadable to this build, so keep it instead of deleting it.
+        private fun setAside(context: Context, name: String) {
+            val file = File(context.applicationInfo.dataDir, "shared_prefs/$name.xml")
+            if (!file.exists()) return
+            val kept = File(file.parentFile, "$name.xml.unreadable")
+            if (!kept.exists() && file.renameTo(kept)) return
+            runCatching { context.deleteSharedPreferences(name) }
+        }
+
+        private fun createEncrypted(context: Context, name: String): SharedPreferences {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            return EncryptedSharedPreferences.create(
+                context,
+                name,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
+
         private const val PREFS = "cursor_secure"
         private const val PREFS_BAK = "cursor_secure_bak"
         private const val PREFS_FALLBACK = "cursor_secure_fallback"
         private const val PREFS_NOTIFY = "cursor_prefs"
         private const val KEY = "api_key"
         private const val GITHUB = "github_token"
+        private const val UNREADABLE = "_unreadable"
+        private const val SECRETS_SCHEMA = "secrets_schema"
+        private const val SECRETS_VERSION = 1
         private const val FORGES = "forges"
         private const val REPO_DEFAULTS = "repo_defaults"
         private const val NOTIFY = "notify_on_complete"
