@@ -909,25 +909,11 @@ data class TokenUsage(
     }
 }
 
+@Serializable
 data class AgentUsageRow(
     val id: String,
     val name: String,
     val tokens: Long,
-)
-
-data class AccountOverview(
-    val me: MeResponse? = null,
-    val agentCount: Int = 0,
-    val runningCount: Int = 0,
-    val modelNames: List<String> = emptyList(),
-    val repoCount: Int = 0,
-    val computerCount: Int = 0,
-    val computersOnline: Int = 0,
-    val poolCount: Int = 0,
-    val poolsConnected: Int = 0,
-    val usage: TokenUsage = TokenUsage(),
-    val sampledAgents: Int = 0,
-    val top: List<AgentUsageRow> = emptyList(),
 )
 
 @Serializable

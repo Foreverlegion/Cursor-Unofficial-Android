@@ -123,7 +123,12 @@ fun InboxScreen(
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var metas by remember { mutableStateOf(container.chats.snapshot()) }
     val notices by container.notices.feed.collectAsStateWithLifecycle()
-    var git by remember { mutableStateOf(container.catalog.gitSnaps()) }
+    fun loadGit(): Map<String, GitSnap> = withRepoFallbacks(
+        container.catalog.gitSnaps(),
+        container.catalog.agentRepos(),
+        container.chats.snapshot().mapValues { it.value.repoUrl },
+    )
+    var git by remember { mutableStateOf(loadGit()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
@@ -178,7 +183,8 @@ fun InboxScreen(
                 metas = container.chats.snapshot()
                 scope.launch {
                     runCatching { container.repo.refreshGitSnaps(latest) }
-                    git = container.catalog.gitSnaps()
+                    runCatching { container.repo.resolveAgentRepos(latest) }
+                    git = loadGit()
                     val url = container.chats.claimFinishedPr(git)
                     if (!url.isNullOrBlank()) SafeLinks.open(context, url)
                 }
@@ -241,6 +247,8 @@ fun InboxScreen(
                 val agents = mergeInboxAgents(items, incoming)
                 applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
                 metas = container.chats.snapshot()
+                runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                git = loadGit()
                 val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
                 if (next != null) {
                     computers = next
@@ -1199,6 +1207,10 @@ private fun AgentRow(
         }
     }
     val whenLabel = relativeAge(agent.updatedAt ?: agent.createdAt)
+    val compactTime = listOfNotNull(
+        whenLabel.takeIf { it.isNotBlank() },
+        "Muted".takeIf { muted },
+    ).joinToString(" · ")
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1215,26 +1227,47 @@ private fun AgentRow(
                         if (longPressMenu) menu = true else onLongClick()
                     },
                 )
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(start = 14.dp, end = 6.dp, top = if (compact) 6.dp else 10.dp, bottom = if (compact) 6.dp else 10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             if (selecting) {
                 Checkbox(checked = checked, onCheckedChange = null)
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    name,
-                    style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = if (compact) 1 else 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        name,
+                        modifier = Modifier.weight(1f),
+                        style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = if (compact) 1 else 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (compact && compactTime.isNotBlank()) {
+                        Text(
+                            compactTime,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = PlayColors.Muted,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                    StatusPill(indicator)
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
+                    }
+                }
                 if (!compact && subtitle.isNotBlank()) {
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = PlayColors.Muted,
+                        modifier = Modifier.padding(end = 8.dp),
                     )
                 }
                 if (!compact && whenLabel.isNotBlank()) {
@@ -1254,28 +1287,6 @@ private fun AgentRow(
                             SafeLinks.open(context, prUrl)
                         },
                     )
-                }
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (compact && (whenLabel.isNotBlank() || muted)) {
-                        Text(
-                            listOfNotNull(
-                                whenLabel.takeIf { it.isNotBlank() },
-                                "Muted".takeIf { muted },
-                            ).joinToString(" · "),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = PlayColors.Muted,
-                            maxLines = 1,
-                        )
-                    }
-                    StatusPill(indicator)
-                }
-                IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
                 }
             }
         }

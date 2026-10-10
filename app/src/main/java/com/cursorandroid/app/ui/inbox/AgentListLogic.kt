@@ -58,6 +58,26 @@ fun repoGroupLabel(url: String?): String {
     return path.substringAfterLast('/').ifBlank { "No repo" }
 }
 
+/**
+ * Fills a missing repo on each git snapshot. Newer agents often have no run git yet, so the repo
+ * comes from the Get Agent record, then from what the app stored when it launched the chat.
+ */
+fun withRepoFallbacks(
+    git: Map<String, GitSnap>,
+    agentRepos: Map<String, String>,
+    chatRepos: Map<String, String?>,
+): Map<String, GitSnap> {
+    val out = LinkedHashMap(git)
+    val ids = git.keys + agentRepos.keys + chatRepos.keys
+    for (id in ids) {
+        val snap = git[id]
+        if (!snap?.repoUrl.isNullOrBlank()) continue
+        val repo = agentRepos[id]?.takeIf { it.isNotBlank() } ?: chatRepos[id]?.takeIf { it.isNotBlank() } ?: continue
+        out[id] = (snap ?: GitSnap(agentId = id)).copy(repoUrl = repo)
+    }
+    return out
+}
+
 fun cloudBucket(agent: AgentSummary, needsApproval: Boolean): CloudFilter {
     return when (runIndicator(agent.status, approvalPending = needsApproval)) {
         RunIndicator.Running -> CloudFilter.Running

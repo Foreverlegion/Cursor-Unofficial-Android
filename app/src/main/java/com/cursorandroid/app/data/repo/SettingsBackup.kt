@@ -32,6 +32,10 @@ object SettingsBackup {
             inboxShowArchived = container.chats.inboxShowArchived,
             inboxShowHidden = container.chats.inboxShowHidden,
             themeColor = container.store.themeColor,
+            uiFont = container.store.uiFont,
+            codeFont = container.store.codeFont,
+            textScalePct = container.store.textScalePct,
+            chatDensity = container.store.chatDensity,
             showInboxEnvs = container.store.showInboxEnvs,
             showInboxRemote = container.store.showInboxRemote,
             groupByRepo = container.chats.groupByRepo,
@@ -81,6 +85,10 @@ object SettingsBackup {
         container.chats.inboxShowArchived = snap.inboxShowArchived
         container.chats.inboxShowHidden = snap.inboxShowHidden
         container.store.themeColor = snap.themeColor
+        container.store.uiFont = snap.uiFont
+        container.store.codeFont = snap.codeFont
+        container.store.textScalePct = snap.textScalePct
+        container.store.chatDensity = snap.chatDensity
         container.store.showInboxEnvs = snap.showInboxEnvs
         container.store.showInboxRemote = snap.showInboxRemote
         container.chats.groupByRepo = snap.groupByRepo
@@ -121,6 +129,10 @@ data class SettingsSnapshot(
     val inboxShowArchived: Boolean = false,
     val inboxShowHidden: Boolean = false,
     val themeColor: Int = 0xFFF54E00.toInt(),
+    val uiFont: String = "system",
+    val codeFont: String = "system_mono",
+    val textScalePct: Int = 100,
+    val chatDensity: String = "comfortable",
     val showInboxEnvs: Boolean = true,
     val showInboxRemote: Boolean = true,
     val groupByRepo: Boolean = true,

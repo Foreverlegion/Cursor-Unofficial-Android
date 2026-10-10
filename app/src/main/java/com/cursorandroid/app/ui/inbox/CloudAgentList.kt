@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -185,18 +186,21 @@ internal fun SwipeArchiveRow(
         state = state,
         enableDismissFromStartToEnd = false,
         backgroundContent = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 5.dp)
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
-                contentAlignment = Alignment.CenterEnd,
-            ) {
-                Text(
-                    "Archive",
-                    modifier = Modifier.padding(end = 20.dp),
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
+            if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Text(
+                        "Archive",
+                        modifier = Modifier.padding(end = 20.dp),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
             }
         },
         content = { content() },

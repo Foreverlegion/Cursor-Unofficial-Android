@@ -91,3 +91,31 @@ class AccountStatsTest {
         assertEquals(5L, sample.top.first { it.id == "b" }.tokens)
     }
 }
+
+class UsageWindowTest {
+    private val now = java.time.Instant.parse("2026-10-10T12:00:00Z").toEpochMilli()
+
+    private fun agent(id: String, at: String?) = AgentSummary(id = id, updatedAt = at)
+
+    @Test
+    fun onlyChatsInsideTheWindowAreSampled() {
+        val picked = usageWindowAgents(
+            listOf(
+                agent("fresh", "2026-10-09T00:00:00Z"),
+                agent("edge", "2026-09-11T00:00:00Z"),
+                agent("stale", "2026-08-01T00:00:00Z"),
+                agent("undated", null),
+            ),
+            now,
+        )
+        assertEquals(listOf("fresh", "edge"), picked.map { it.id })
+    }
+
+    @Test
+    fun newestFirstAndCapped() {
+        val many = (1..30).map { agent("a$it", "2026-10-%02dT00:00:00Z".format(minOf(it, 9) + 0)) }
+        val picked = usageWindowAgents(many, now, days = 30, limit = 5)
+        assertEquals(5, picked.size)
+        assertEquals("2026-10-09T00:00:00Z", picked.first().updatedAt)
+    }
+}

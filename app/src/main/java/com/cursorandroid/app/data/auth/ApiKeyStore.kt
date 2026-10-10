@@ -102,6 +102,30 @@ class ApiKeyStore(context: Context) {
             notifyPrefs.edit { putInt(THEME_COLOR, packed) }
         }
 
+    var uiFont: String
+        get() = notifyPrefs.getString(UI_FONT, "system").orEmpty()
+        set(value) {
+            notifyPrefs.edit { putString(UI_FONT, value) }
+        }
+
+    var codeFont: String
+        get() = notifyPrefs.getString(CODE_FONT, "system_mono").orEmpty()
+        set(value) {
+            notifyPrefs.edit { putString(CODE_FONT, value) }
+        }
+
+    var textScalePct: Int
+        get() = notifyPrefs.getInt(TEXT_SCALE, 100)
+        set(value) {
+            notifyPrefs.edit { putInt(TEXT_SCALE, value) }
+        }
+
+    var chatDensity: String
+        get() = notifyPrefs.getString(CHAT_DENSITY, "comfortable").orEmpty()
+        set(value) {
+            notifyPrefs.edit { putString(CHAT_DENSITY, value) }
+        }
+
     var showInboxEnvs: Boolean
         get() = notifyPrefs.getBoolean(SHOW_INBOX_ENVS, true)
         set(value) {
@@ -310,6 +334,10 @@ class ApiKeyStore(context: Context) {
         private const val DEFAULT_MODEL = "default_model"
         private const val SHOW_MIC = "show_microphone"
         private const val THEME_COLOR = "theme_color"
+        private const val UI_FONT = "ui_font"
+        private const val CODE_FONT = "code_font"
+        private const val TEXT_SCALE = "text_scale_pct"
+        private const val CHAT_DENSITY = "chat_density"
         private const val SHOW_INBOX_ENVS = "show_inbox_envs"
         private const val SHOW_INBOX_REMOTE = "show_inbox_remote"
         private const val BATTERY_ASKED = "battery_asked"

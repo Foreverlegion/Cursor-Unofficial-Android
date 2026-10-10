@@ -52,6 +52,11 @@ import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
+import com.cursorandroid.app.ui.theme.Appearance
+import com.cursorandroid.app.ui.theme.ChatDensity
+import com.cursorandroid.app.ui.theme.CodeFont
+import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,21 +64,30 @@ import kotlinx.coroutines.withContext
 
 private enum class Pane { Inbox, Compose, Settings }
 
+private fun readAppearance(container: AppContainer) = Appearance(
+    uiFont = UiFont.fromId(container.store.uiFont),
+    codeFont = CodeFont.fromId(container.store.codeFont),
+    textScalePct = clampTextScale(container.store.textScalePct),
+    density = ChatDensity.fromId(container.store.chatDensity),
+)
+
 @Composable
 fun CursorApp(
     container: AppContainer,
     launch: LaunchRequest,
 ) {
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
+    var appearance by remember { mutableStateOf(readAppearance(container)) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
     fun refreshAppearance() {
         themeColor = container.store.themeColor
+        appearance = readAppearance(container)
         showInboxEnvs = container.store.showInboxEnvs
         showInboxRemote = container.store.showInboxRemote
     }
 
-    CursorTheme(accentArgb = themeColor) {
+    CursorTheme(accentArgb = themeColor, appearance = appearance) {
         CursorAppContent(
             container = container,
             launch = launch,
