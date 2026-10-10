@@ -73,7 +73,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -160,7 +159,6 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -1177,15 +1175,6 @@ fun ThreadScreen(
         }
     }
 
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo.viewportEndOffset }
-            .drop(1)
-            .collect {
-                withFrameNanos { }
-                if (stickToBottom && !listState.isScrollInProgress) snapToBottom()
-            }
-    }
-
     LaunchedEffect(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey, stickToBottom) {
         if (stickToBottom && !listState.isScrollInProgress) {
             snapToBottom()
@@ -1325,12 +1314,32 @@ fun ThreadScreen(
             ) {
                 LazyColumn(
                     state = listState,
+                    reverseLayout = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp),
+                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp, Alignment.Top),
                 ) {
-                    items(rows, key = ::chatRowKey, contentType = ::chatRowType) { row ->
+                    if (liveThink != null && showThinking) {
+                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
+                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
+                        }
+                    } else if (showTyping) {
+                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
+                            TypingBubble(detail = waitText, model = workingModel)
+                        }
+                    }
+                    val latest = vm.pinnedArtifact
+                    if (latest != null) {
+                        item(key = "artifact-${latest.path}-${latest.whenIso().orEmpty()}") {
+                            LatestArtifactCard(
+                                item = latest,
+                                onOpen = { openArtifact(latest) },
+                                onSave = { saveArtifact(latest) },
+                            )
+                        }
+                    }
+                    items(rows.asReversed(), key = ::chatRowKey, contentType = ::chatRowType) { row ->
                         when (row) {
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
@@ -1364,25 +1373,6 @@ fun ThreadScreen(
                                 tools = row.tools,
                                 onCopy = { text -> copyMessage(context, text) },
                             )
-                        }
-                    }
-                    val latest = vm.pinnedArtifact
-                    if (latest != null) {
-                        item(key = "artifact-${latest.path}-${latest.whenIso().orEmpty()}") {
-                            LatestArtifactCard(
-                                item = latest,
-                                onOpen = { openArtifact(latest) },
-                                onSave = { saveArtifact(latest) },
-                            )
-                        }
-                    }
-                    if (liveThink != null && showThinking) {
-                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
-                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
-                        }
-                    } else if (showTyping) {
-                        item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
-                            TypingBubble(detail = waitText, model = workingModel)
                         }
                     }
                 }
@@ -2145,36 +2135,15 @@ internal fun quoteBlock(text: String): String {
     }
 }
 
-internal fun LazyListState.isTailOnScreen(): Boolean {
-    val last = layoutInfo.totalItemsCount - 1
-    return last >= 0 && layoutInfo.visibleItemsInfo.lastOrNull()?.index == last
-}
-
 /**
- * Moves the last row's bottom to the viewport bottom in one step when the tail is on screen, which
- * is the streaming case. Only when the tail is off screen does it jump to the row first.
+ * The chat list is laid out bottom-up, so index 0 is the newest row and growth of any row near the
+ * bottom extends upward without a scroll call. This only re-anchors after rows are added or removed
+ * at the bottom, where the list would otherwise keep the previous first row in place.
  */
 internal suspend fun LazyListState.scrollToBottom() {
-    val last = layoutInfo.totalItemsCount - 1
-    if (last < 0) return
-    if (!isTailOnScreen()) {
-        scrollToItem(last)
-    }
-    val info = layoutInfo
-    val lastItem = info.visibleItemsInfo.lastOrNull() ?: return
-    val overflow = lastItem.offset + lastItem.size - info.viewportEndOffset
-    if (overflow != 0) {
-        scrollBy(overflow.toFloat())
-    }
+    if (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0) scrollToItem(0)
 }
 
-/** True only when the last row's bottom is near the viewport bottom. */
-private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean {
-    val info = layoutInfo
-    val last = info.totalItemsCount - 1
-    if (last < 0) return true
-    val lastItem = info.visibleItemsInfo.lastOrNull() ?: return false
-    if (lastItem.index != last) return false
-    val gap = info.viewportEndOffset - (lastItem.offset + lastItem.size)
-    return gap >= -thresholdPx
-}
+/** True while the newest row's bottom is near the viewport bottom. */
+private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean =
+    firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset <= thresholdPx
