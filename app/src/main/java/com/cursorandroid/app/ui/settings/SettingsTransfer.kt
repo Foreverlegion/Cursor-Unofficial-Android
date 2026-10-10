@@ -30,7 +30,6 @@ import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.repo.ClientOrigin
 import com.cursorandroid.app.data.repo.BackupOpen
 import com.cursorandroid.app.data.repo.SecretsVault
-import com.cursorandroid.app.data.repo.openBackup
 import com.cursorandroid.app.data.repo.SettingsBackup
 import com.cursorandroid.app.data.repo.SettingsSnapshot
 import kotlinx.coroutines.Dispatchers
@@ -54,12 +53,8 @@ fun SettingsTransfer(
     var pendingImport by remember { mutableStateOf<SettingsSnapshot?>(null) }
     var staged by remember { mutableStateOf(stageOnly && container.stagedRestore.pending()) }
 
-    fun commit(loaded: SettingsSnapshot, passphrase: CharArray?): BackupOpen {
-        if (!stageOnly) return commit(loaded, passphrase)
-        val opened = openBackup(loaded, passphrase)
-        if (opened.result == BackupOpen.Ok) container.stagedRestore.stage(opened.snapshot)
-        return opened.result
-    }
+    fun commit(loaded: SettingsSnapshot, passphrase: CharArray?): BackupOpen =
+        SettingsBackup.restoreOrStage(container, loaded, passphrase, stage = stageOnly)
 
     val export = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),

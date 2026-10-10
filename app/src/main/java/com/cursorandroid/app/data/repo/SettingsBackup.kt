@@ -42,6 +42,14 @@ object SettingsBackup {
         return BackupOpen.Ok
     }
 
+    /** Settings > Import applies now; the sign-in screen only stages the file until sign-in completes. */
+    fun restoreOrStage(container: AppContainer, loaded: SettingsSnapshot, passphrase: CharArray?, stage: Boolean): BackupOpen {
+        if (!stage) return apply(container, loaded, passphrase)
+        val opened = openBackup(loaded, passphrase)
+        if (opened.result == BackupOpen.Ok) container.stagedRestore.stage(opened.snapshot)
+        return opened.result
+    }
+
     /** Applies the backup staged on the sign-in screen. Call right after sign-in: it never touches the session key. */
     fun applyStaged(container: AppContainer): Boolean {
         val staged = container.stagedRestore.take() ?: return false
