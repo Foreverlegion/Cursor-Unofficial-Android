@@ -10,7 +10,12 @@ class ApiException(
     val code: Int,
     override val message: String,
     val errorCode: String? = null,
+    val retryAfterMs: Long? = null,
 ) : RuntimeException(message) {
+    val isRateLimited: Boolean
+        get() = code == 429 ||
+            errorCode?.contains("rate_limit", ignoreCase = true) == true ||
+            message.contains("exceeded the rate limit", ignoreCase = true)
     val isBusy: Boolean
         get() = errorCode == "agent_busy" || (code == 409 && message.contains("busy", ignoreCase = true))
     val isNotCancellable: Boolean
@@ -27,6 +32,7 @@ class ApiException(
             isBusy -> "Agent is still working. Message queued."
             isNotCancellable -> "Run already finished."
             isStreamGone -> "Run stream ended. Refreshing."
+            isRateLimited -> "Too many requests. Retrying shortly."
             else -> message
         }
     }
@@ -34,10 +40,25 @@ class ApiException(
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
-        fun fromBody(code: Int, body: String): ApiException {
+        /** Seconds or an HTTP date, as sent in a Retry-After header. Null when absent or unusable. */
+        fun parseRetryAfter(value: String?, nowMs: Long = System.currentTimeMillis()): Long? {
+            val raw = value?.trim().orEmpty()
+            if (raw.isEmpty()) return null
+            raw.toLongOrNull()?.let { return (it * 1000).coerceIn(0, MAX_RETRY_AFTER_MS) }
+            val at = runCatching {
+                java.time.ZonedDateTime.parse(raw, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                    .toInstant().toEpochMilli()
+            }.getOrNull() ?: return null
+            return (at - nowMs).coerceIn(0, MAX_RETRY_AFTER_MS)
+        }
+
+        private const val MAX_RETRY_AFTER_MS = 10 * 60_000L
+
+        fun fromBody(code: Int, body: String, retryAfter: String? = null): ApiException {
             val raw = body.trim()
+            val wait = parseRetryAfter(retryAfter)
             if (raw.isEmpty()) {
-                return ApiException(code, "HTTP $code")
+                return ApiException(code, "HTTP $code", retryAfterMs = wait)
             }
             val parsed = runCatching {
                 val root = json.parseToJsonElement(raw)
@@ -49,7 +70,7 @@ class ApiException(
             }.getOrNull()
             val errCode = parsed?.first
             val errMsg = parsed?.second?.takeIf { it.isNotBlank() } ?: raw
-            return ApiException(code, errMsg, errCode)
+            return ApiException(code, errMsg, errCode, wait)
         }
     }
 }

@@ -71,7 +71,10 @@ class AgentRepository(
     private val publicHttp: OkHttpClient,
     private val json: Json,
     private val machines: MachineStore? = null,
+    val statusGate: StatusGate = StatusGate(),
 ) {
+    private val statusCache = StatusCache()
+
     fun apiKey(): String = store.apiKey.orEmpty()
 
     suspend fun me(): MeResponse = wrap { api.me() }
@@ -182,7 +185,8 @@ class AgentRepository(
         limit: Int = 15,
         only: Set<String>? = null,
     ): List<AgentSummary> {
-        val targets = agents.take(limit).filter { only == null || it.id in only }
+        if (statusGate.isPaused) return agents
+        val targets = hydrateTargets(agents, limit, only)
         if (targets.isEmpty()) return agents
         val foundRepos = HashMap<String, String>()
         val fresh = coroutineScope {
@@ -201,7 +205,8 @@ class AgentRepository(
         return agents.map { byId[it.id] ?: it }
     }
 
-    suspend fun resolveAgentRepos(agents: List<AgentSummary>, budget: Int = 40) {
+    suspend fun resolveAgentRepos(agents: List<AgentSummary>, budget: Int = 15) {
+        if (statusGate.isPaused) return
         val known = catalog.agentRepos()
         val snaps = catalog.gitSnaps()
         val missing = agents
@@ -211,7 +216,7 @@ class AgentRepository(
             .sortedByDescending { it.sortKey() }
             .take(budget)
         if (missing.isEmpty()) return
-        val gate = Semaphore(4)
+        val gate = Semaphore(2)
         val found = coroutineScope {
             missing.map { agent ->
                 async {
@@ -225,9 +230,17 @@ class AgentRepository(
         catalog.saveAgentRepos(found)
     }
 
-    suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
+    suspend fun getAgent(id: String): AgentDetail =
+        statusCache.get("agent:$id", AGENT_TTL_MS) { statusGate.call("agent") { wrap { api.getAgent(id) } } }
 
-    suspend fun getRun(agentId: String, runId: String): Run = wrap { api.getRun(agentId, runId) }
+    suspend fun getRun(agentId: String, runId: String): Run =
+        statusCache.get("run:$agentId:$runId", RUN_TTL_MS) { statusGate.call("run") { wrap { api.getRun(agentId, runId) } } }
+
+    /** Forget cached status for an agent after something we did changes it (a send, a stop). */
+    fun statusChanged(agentId: String) {
+        statusCache.invalidate("agent:$agentId")
+        statusCache.invalidate("run:$agentId:")
+    }
 
     suspend fun conversation(agentId: String): AgentConversation = wrap { api.getConversation(agentId) }
 
@@ -324,7 +337,9 @@ class AgentRepository(
     }
 
     suspend fun refreshGitSnaps(agents: List<AgentSummary>) {
-        val targets = agents.take(15)
+        if (statusGate.isPaused) return
+        val targets = gitSnapTargets(agents, catalog.gitSnaps().keys)
+        if (targets.isEmpty()) return
         coroutineScope {
             targets.map { agent ->
                 async {
@@ -479,7 +494,7 @@ class AgentRepository(
     ): Run {
         // Create Run replaces the servers the agent was created with, so they are left out unless this chat's
         // selection was changed on purpose; the agent then keeps the set it started with.
-        return wrap {
+        val created = wrap {
             api.createRun(
                 agentId,
                 CreateRunRequest(
@@ -490,10 +505,13 @@ class AgentRepository(
                 ),
             ).run
         }
+        statusChanged(agentId)
+        return created
     }
 
     suspend fun cancel(agentId: String, runId: String) {
         wrap { api.cancelRun(agentId, runId) }
+        statusChanged(agentId)
     }
 
     suspend fun steer(agentId: String, runId: String, prompt: Prompt): Boolean {
@@ -732,7 +750,11 @@ class AgentRepository(
             throw e
         } catch (e: HttpException) {
             val body = e.response()?.errorBody()?.string().orEmpty()
-            throw ApiException.fromBody(e.code(), body.ifBlank { e.message() })
+            throw ApiException.fromBody(
+                e.code(),
+                body.ifBlank { e.message() },
+                e.response()?.headers()?.get("Retry-After"),
+            )
         }
     }
 
@@ -741,6 +763,8 @@ class AgentRepository(
         private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
+        private const val AGENT_TTL_MS = 1_500L
+        private const val RUN_TTL_MS = 1_000L
         private const val WORKER_PAGE_SIZE = 50
         private const val WORKER_PAGES = 10
         private const val USAGE_BUDGET_MS = 25_000L

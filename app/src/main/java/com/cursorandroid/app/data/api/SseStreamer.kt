@@ -77,7 +77,7 @@ class SseStreamer(
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                     val code = response?.code
                     val body = runCatching { response?.body?.string() }.getOrNull().orEmpty()
-                    val parsed = ApiException.fromBody(code ?: 0, body.ifBlank { t?.message.orEmpty() })
+                    val parsed = ApiException.fromBody(code ?: 0, body.ifBlank { t?.message.orEmpty() }, response?.header("Retry-After"))
                     val recoverable = code == 410 || parsed.isStreamGone ||
                         (t?.message?.contains("no longer available", ignoreCase = true) == true)
                     val message = when {

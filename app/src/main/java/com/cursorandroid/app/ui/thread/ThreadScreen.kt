@@ -70,6 +70,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -119,6 +120,7 @@ import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
 import com.cursorandroid.app.data.repo.RunSettled
+import com.cursorandroid.app.data.repo.StatusGate
 import com.cursorandroid.app.data.repo.mergeConversationTranscript
 import com.cursorandroid.app.data.repo.runsOldestFirst
 import com.cursorandroid.app.data.repo.settledAgentStatus
@@ -171,10 +173,12 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 private const val STOPPING = "Stopping..."
@@ -236,9 +240,16 @@ class ThreadViewModel(
     var approvalPending by mutableStateOf(false)
         private set
 
+    /** Epoch millis until which status calls are paused by a rate limit; shown as a quiet note, never as an error. */
+    var pausedUntilMs by mutableLongStateOf(0L)
+        private set
+
     private var streamJob: Job? = null
     private var pollJob: Job? = null
     private var watchJob: Job? = null
+    private var retryJob: Job? = null
+    private var retryStrikes = 0
+    private val wake = Channel<Unit>(Channel.CONFLATED)
     private var assistantBuf = StringBuilder()
     private var thinkingBuf = StringBuilder()
     private var lastEventId: String? = null
@@ -250,6 +261,7 @@ class ThreadViewModel(
     private val refreshLock = Mutex()
     private val settleLock = Mutex()
     private val settledRuns = HashSet<String>()
+    private val hydratedRuns = HashSet<String>()
     private var runOrder: List<String> = emptyList()
     private var settledKey: String? = null
     private var afterNonAssistant = false
@@ -261,6 +273,61 @@ class ThreadViewModel(
         viewModelScope.launch {
             container.runSettle.settled.collect { map -> map[agentId]?.let { onSettled(it) } }
         }
+        viewModelScope.launch {
+            container.repo.statusGate.pausedUntil.collect { pausedUntilMs = it }
+        }
+        viewModelScope.launch {
+            container.runSettle.liveRuns.collect { map -> if (map[agentId] != null) wake.trySend(Unit) }
+        }
+    }
+
+    /** Asks the watch for one look now, e.g. when the screen comes back or another surface saw this agent run. */
+    fun nudge() {
+        wake.trySend(Unit)
+    }
+
+    private fun fail(e: Throwable) {
+        if (e is ApiException && e.isRateLimited) {
+            error = null
+            retryRefreshLater()
+            return
+        }
+        error = displayError(e)
+    }
+
+    private fun retryRefreshLater() {
+        retryJob?.cancel()
+        retryStrikes++
+        val wait = maxOf(container.repo.statusGate.remainingMs(), StatusGate.backoffMs(retryStrikes)) + 500
+        retryJob = viewModelScope.launch {
+            delay(wait)
+            if (VisibleAgent.isOpenInForeground(agentId)) refresh()
+        }
+    }
+
+    private suspend fun <T : Any> quiet(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun watchState(failures: Int): WatchState {
+        val streamLive = streaming || streamJob?.isActive == true
+        return WatchState(
+            foreground = VisibleAgent.isOpenInForeground(agentId),
+            finished = ThreadWatchPolicy.finished(
+                agentWorking = agent?.isWorking(),
+                runActive = run?.isActive() == true,
+                streaming = streamLive,
+                outboundPending = outbound.isNotEmpty(),
+            ),
+            streamLive = streamLive,
+            busy = busy,
+            failures = failures,
+            pausedForMs = container.repo.statusGate.remainingMs(),
+        )
     }
 
     private suspend fun onSettled(ended: RunSettled) {
@@ -354,10 +421,11 @@ class ThreadViewModel(
                     if (!detail.isWorking() && run?.isActive() != true) {
                         checkBehind(detail)
                     }
+                    retryStrikes = 0
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    error = displayError(e)
+                    fail(e)
                 }
             }
         }
@@ -440,7 +508,7 @@ class ThreadViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = displayError(e)
+                fail(e)
             }
         }
     }
@@ -454,7 +522,7 @@ class ThreadViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = displayError(e)
+                fail(e)
             }
         }
     }
@@ -614,7 +682,7 @@ class ThreadViewModel(
                     if (line.id == next.id) line.copy(queued = true) else line
                 }
                 persist()
-                error = displayError(e)
+                fail(e)
             }
         } finally {
             sendingId = null
@@ -783,8 +851,10 @@ class ThreadViewModel(
 
     private suspend fun hydrateRun(item: Run, force: Boolean): Run {
         val needResult = item.isTerminal() && item.result.isNullOrBlank()
-        if (!force && !needResult) return item
-        val full = runCatching { container.repo.getRun(agentId, item.id) }.getOrDefault(item)
+        if (!force && (!needResult || item.id in hydratedRuns)) return item
+        val fetched = runCatching { container.repo.getRun(agentId, item.id) }.getOrNull()
+        if (fetched != null) hydratedRuns += item.id
+        val full = fetched ?: item
         return item.copy(
             result = full.result ?: item.result,
             prompt = full.prompt ?: item.prompt,
@@ -860,7 +930,7 @@ class ThreadViewModel(
                     if (api?.isStreamGone == true || e.message?.contains("no longer available", true) == true) {
                         handleStreamGone(runId)
                     } else if (!isCancelMessage(e.message)) {
-                        error = displayError(e)
+                        fail(e)
                         streaming = false
                         receiving = false
                     }
@@ -948,29 +1018,31 @@ class ThreadViewModel(
     private fun startWatch() {
         watchJob?.cancel()
         watchJob = viewModelScope.launch {
-            while (isActive) {
-                delay(2_000)
-                if (!busy) attachLatestRun()
-            }
+            threadWatchLoop(
+                state = { failures -> watchState(failures) },
+                awaitKick = { ms -> withTimeoutOrNull(ms) { wake.receive(); true } == true },
+                attach = { attachLatestRun() },
+            )
         }
     }
 
-    private suspend fun attachLatestRun() {
-        val detail = runCatching { container.repo.getAgent(agentId) }.getOrNull() ?: return
+    /** One look at the agent. Returns false when the call failed, so the watch backs off. */
+    private suspend fun attachLatestRun(): Boolean {
+        val detail = quiet { container.repo.getAgent(agentId) } ?: return false
         agent = detail
         noteApiModels(detail = detail)
-        val runId = detail.latestRunId ?: return
+        val runId = detail.latestRunId ?: return true
         val live = runId == streamedRunId && (streaming || streamJob?.isActive == true)
         if (live) {
-            if (isLiveStatus(detail.status) || run?.isActive() != true) return
-            val ended = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
-            if (ended.isActive()) return
+            if (isLiveStatus(detail.status) || run?.isActive() != true) return true
+            val ended = quiet { container.repo.getRun(agentId, runId) } ?: return false
+            if (ended.isActive()) return true
             settleRun(ended)
             container.notifier.notifyIfNeeded(agentId, agent?.name, ended.id, ended.status, ended.result)
-            return
+            return true
         }
-        if (runId == run?.id && run?.isActive() != true && !streaming) return
-        val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
+        if (runId == run?.id && run?.isActive() != true && !streaming) return true
+        val latest = quiet { container.repo.getRun(agentId, runId) } ?: return false
         noteApiModels(runs = listOf(latest))
         run = latest
         latest.git?.branches?.firstOrNull()?.let { git ->
@@ -980,7 +1052,7 @@ class ThreadViewModel(
         }
         if (latest.isActive()) {
             adoptRun(latest)
-            return
+            return true
         }
         receiving = false
         if (!latest.result.isNullOrBlank() && !coversAssistant(lines, runId, latest.result)) {
@@ -991,6 +1063,7 @@ class ThreadViewModel(
             settleRun(latest)
             container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
         }
+        return true
     }
 
     private fun startPoll(runId: String) {
@@ -1000,8 +1073,18 @@ class ThreadViewModel(
             while (isActive && run?.id == runId && run?.isActive() == true) {
                 val step = tick++
                 delay(runPollDelayMs(receiving, step))
+                if (!VisibleAgent.isOpenInForeground(agentId)) {
+                    // The background run watch covers an active run while the app is away.
+                    delay(ThreadWatchPolicy.IDLE_RECHECK_MS)
+                    continue
+                }
                 if (pullConversationOnTick(receiving, step)) mergeConversationHistory()
-                val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
+                val latest = quiet { container.repo.getRun(agentId, runId) }
+                if (latest == null) {
+                    val paused = container.repo.statusGate.remainingMs()
+                    delay(if (paused > 0) paused else StatusGate.BASE_MS)
+                    continue
+                }
                 run = latest
                 if (!latest.isActive()) {
                     settleRun(latest)
@@ -1463,6 +1546,7 @@ fun ThreadScreen(
             if (working) {
                 WorkingBar(activity, workingModel, onStop = if (canKill) ({ vm.cancel() }) else null)
             }
+            RefreshPausedNote(vm.pausedUntilMs)
             if (vm.error != null) {
                 Text(
                     vm.error!!,
@@ -2332,3 +2416,23 @@ internal suspend fun LazyListState.scrollToBottom() {
 /** True while the newest row's bottom is near the viewport bottom. */
 private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean =
     firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset <= thresholdPx
+
+@Composable
+private fun RefreshPausedNote(untilMs: Long) {
+    if (untilMs <= 0) return
+    var remaining by remember(untilMs) { mutableLongStateOf((untilMs - System.currentTimeMillis()).coerceAtLeast(0)) }
+    LaunchedEffect(untilMs) {
+        while (true) {
+            remaining = (untilMs - System.currentTimeMillis()).coerceAtLeast(0)
+            if (remaining <= 0) break
+            delay(500)
+        }
+    }
+    val note = refreshPausedNote(remaining) ?: return
+    Text(
+        note,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("refresh-paused-note"),
+    )
+}

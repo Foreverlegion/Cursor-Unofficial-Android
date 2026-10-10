@@ -307,7 +307,10 @@ fun InboxScreen(
             inboxRefreshLoop(
                 first = RefreshReason.Resume,
                 intervalMs = { failures ->
-                    InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures)
+                    maxOf(
+                        InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures),
+                        container.repo.statusGate.remainingMs(),
+                    )
                 },
                 now = System::currentTimeMillis,
                 awaitTrigger = { hub.await(it) },
@@ -318,11 +321,7 @@ fun InboxScreen(
                     val page = container.repo.listAgentsPage(includeArchived = true)
                     val fresh = page.entries()
                     val checks = runCheckTargets(items, fresh, container.runSettle.settled.value)
-                    val full = InboxPollPolicy.fullHydrate(reason, tick)
-                    val only = if (full) null else {
-                        (fresh.filter { isLiveStatus(it.status) } + checks).map { it.id }.toSet()
-                    }
-                    val incoming = container.repo.hydrateStatuses(fresh, only = only)
+                    val incoming = container.repo.hydrateStatuses(fresh)
                     if (checks.isNotEmpty()) {
                         val runs = coroutineScope {
                             checks.map { agent ->
@@ -340,7 +339,8 @@ fun InboxScreen(
                                 container.notifier.notifyIfNeeded(agent.id, agent.name, run.id, run.status, run.result)
                             },
                         ) { agentId, runId ->
-                            runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
+                            if (VisibleAgent.isOpenInForeground(agentId)) null
+                            else runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
                         }
                     }
                     metas = container.chats.snapshot()

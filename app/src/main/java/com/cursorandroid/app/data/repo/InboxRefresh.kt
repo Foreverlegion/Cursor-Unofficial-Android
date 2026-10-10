@@ -37,7 +37,6 @@ object InboxPollPolicy {
     const val IDLE_MS = 20_000L
     const val MAX_BACKOFF_MS = 60_000L
     const val MIN_GAP_MS = 1_500L
-    const val FULL_HYDRATE_EVERY = 5
     const val MACHINES_EVERY_MS = 60_000L
     const val RUN_CHECK_LIMIT = 6
 
@@ -53,9 +52,6 @@ object InboxPollPolicy {
     /** Time to wait before polling after [reason]: a tick waits the interval, a trigger only the minimum gap. */
     fun pauseBefore(reason: RefreshReason, sinceLastPollMs: Long): Long =
         if (reason == RefreshReason.Tick) 0 else (MIN_GAP_MS - sinceLastPollMs).coerceAtLeast(0)
-
-    fun fullHydrate(reason: RefreshReason, tick: Int): Boolean =
-        reason != RefreshReason.Tick || tick % FULL_HYDRATE_EVERY == 0
 
     fun machinesDue(reason: RefreshReason, lastAtMs: Long, nowMs: Long): Boolean =
         reason != RefreshReason.Tick || nowMs - lastAtMs >= MACHINES_EVERY_MS

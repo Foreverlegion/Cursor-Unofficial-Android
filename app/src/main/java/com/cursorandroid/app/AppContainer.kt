@@ -2,6 +2,7 @@ package com.cursorandroid.app
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.util.Log
 import com.cursorandroid.app.data.api.ApiShape
 import com.cursorandroid.app.data.api.CancelLog
 import com.cursorandroid.app.data.api.CursorApi
@@ -12,6 +13,8 @@ import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
+import com.cursorandroid.app.data.repo.StatusCallMeter
+import com.cursorandroid.app.data.repo.StatusGate
 import com.cursorandroid.app.data.repo.CatalogCache
 import com.cursorandroid.app.data.repo.ConversationStore
 import com.cursorandroid.app.data.repo.DemoCursorApi
@@ -145,6 +148,10 @@ class AppContainer(context: Context) {
 
     val login = CursorBrowserLogin(publicHttp, json)
 
+    val statusGate = StatusGate(
+        meter = StatusCallMeter(sink = if (debug) { line -> Log.d("StatusCalls", line) } else null),
+    )
+
     val repo = AgentRepository(
         api = api,
         sse = SseStreamer(http, json, probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null),
@@ -153,5 +160,9 @@ class AppContainer(context: Context) {
         publicHttp = publicHttp,
         json = json,
         machines = machines,
+        statusGate = statusGate,
     )
+
+    /** Debug builds only: how many status calls went out in the last minute, for the About page. */
+    val statusCallsPerMinute: Int? get() = if (debug) statusGate.meter.lastMinute() else null
 }

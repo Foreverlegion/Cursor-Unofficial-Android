@@ -48,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +76,7 @@ import com.cursorandroid.app.ui.inbox.HideFinishedAge
 import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
@@ -574,6 +576,20 @@ internal fun SettingsScreenContent(
                             onClick = { info = KEY_INFO },
                         )
                         OverviewSection(model = overview, scope = overviewScope)
+                        if (container.statusCallsPerMinute != null) {
+                            val calls by produceState(0, container) {
+                                while (true) {
+                                    value = container.statusCallsPerMinute ?: 0
+                                    delay(2_000)
+                                }
+                            }
+                            val paused = container.statusGate.remainingMs()
+                            SettingsLinkRow(
+                                title = "Status calls (debug)",
+                                summary = "$calls in the last minute" + if (paused > 0) ", paused ${paused / 1000}s" else "",
+                                onClick = {},
+                            )
+                        }
                         val sample = overview.usage
                         val used = sample?.usage
                         val usageBusy = OverviewRow.Usage in overview.refreshing
