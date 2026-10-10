@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,14 +72,19 @@ fun ArtifactHistoryDialog(
                         .fillMaxWidth()
                         .heightIn(max = 360.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ordered.forEach { item ->
-                        ArtifactRow(
+                    ordered.forEachIndexed { index, item ->
+                        ArtifactHistoryRow(
                             item = item,
                             onOpen = { onOpen(item) },
                             onSave = { onSave(item) },
                         )
+                        if (index < ordered.lastIndex) {
+                            HorizontalDivider(
+                                thickness = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            )
+                        }
                     }
                 }
             }
@@ -87,6 +93,53 @@ fun ArtifactHistoryDialog(
             TextButton(onClick = onDismiss) { Text("Close") }
         },
     )
+}
+
+internal const val MAX_HISTORY_NAME = 120
+
+internal fun middleEllipsize(name: String, max: Int = MAX_HISTORY_NAME): String {
+    if (name.length <= max || max < 8) return name
+    val keep = max - 1
+    val tail = keep / 2
+    val head = keep - tail
+    return name.take(head) + "…" + name.takeLast(tail)
+}
+
+@Composable
+private fun ArtifactHistoryRow(
+    item: ArtifactItem,
+    onOpen: () -> Unit,
+    onSave: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    ) {
+        Text(
+            middleEllipsize(item.fileName()),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpen),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                ArtifactTime.format(item.whenIso()),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(onClick = onSave) { Text("Save") }
+        }
+    }
 }
 
 @Composable
