@@ -632,7 +632,7 @@ class AgentRepository(
         )
     }
 
-    private fun commitsBehind(repoUrl: String, base: String, head: String): Int? {
+    private suspend fun commitsBehind(repoUrl: String, base: String, head: String): Int? {
         val host = gitHost(repoUrl)
         val path = gitPath(repoUrl)
         if (path.isBlank()) return null
@@ -656,7 +656,11 @@ class AgentRepository(
         return commits?.size
     }
 
-    private fun publicJson(url: String): kotlinx.serialization.json.JsonElement? {
+    private suspend fun publicJson(url: String): kotlinx.serialization.json.JsonElement? = withContext(Dispatchers.IO) {
+        publicJsonBlocking(url)
+    }
+
+    private fun publicJsonBlocking(url: String): kotlinx.serialization.json.JsonElement? {
         if (store.demoMode) return null
         if (!SafeLinks.isHttps(url)) return null
         val request = Request.Builder()
@@ -684,7 +688,11 @@ class AgentRepository(
 
     private fun JsonObject.obj(key: String): JsonObject? = get(key) as? JsonObject
 
-    private fun publicBranches(repoUrl: String): List<String> {
+    private suspend fun publicBranches(repoUrl: String): List<String> = withContext(Dispatchers.IO) {
+        publicBranchesBlocking(repoUrl)
+    }
+
+    private fun publicBranchesBlocking(repoUrl: String): List<String> {
         val host = gitHost(repoUrl)
         val path = gitPath(repoUrl)
         if (path.isBlank()) return emptyList()
