@@ -5,7 +5,6 @@ import com.cursorandroid.app.data.api.AgentConversation
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentListResponse
 import com.cursorandroid.app.data.api.AgentSummary
-import com.cursorandroid.app.data.api.AgentUsageRow
 import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.TokenUsage
 import com.cursorandroid.app.data.api.Computer
@@ -40,6 +39,8 @@ import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.withDetail
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -47,6 +48,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -219,55 +222,88 @@ class AgentRepository(
     suspend fun usage(agentId: String) = runCatching { wrap { api.agentUsage(agentId) } }.getOrNull()
 
     suspend fun accountOverview(): AccountOverview {
-        return coroutineScope {
-            val me = async { runCatching { me() }.getOrNull() }
-            val models = async { runCatching { models() }.getOrDefault(emptyList()) }
-            val agents = async {
-                catalog.agents().ifEmpty {
-                    runCatching { listAgents() }.getOrDefault(emptyList())
-                }
+        return withinBudget(STATS_BUDGET_MS) {
+            coroutineScope {
+                val me = async { runCatching { me() }.getOrNull() }
+                val models = async { runCatching { models() }.getOrDefault(emptyList()) }
+                val pools = async { refreshPools() }
+                val repos = async { refreshRepos() }
+                val agents = refreshAgents()
+                val machines = refreshComputers(agents)
+                val poolList = pools.await()
+                val repoList = repos.await()
+                val counts = accountCounts(agents, machines, poolList, repoList.size)
+                AccountOverview(
+                    me = me.await(),
+                    agentCount = counts.agentCount,
+                    runningCount = counts.runningCount,
+                    modelNames = models.await().map { it.displayName ?: it.id },
+                    repoCount = counts.repoCount,
+                    computerCount = counts.computerCount,
+                    computersOnline = counts.computersOnline,
+                    poolCount = counts.poolCount,
+                    poolsConnected = counts.poolsConnected,
+                )
             }
-            val computers = async {
-                catalog.computers().ifEmpty {
-                    runCatching { listComputers() }.getOrDefault(emptyList())
+        }
+    }
+
+    suspend fun recentUsage(limit: Int = 20): UsageSample {
+        return withinBudget(USAGE_BUDGET_MS) {
+            coroutineScope {
+                val listed = runCatching { listAgents() }
+                val agents = try {
+                    pickFreshList(listed, catalog.agents())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    throw IllegalStateException("Couldn't load recent chats", e)
                 }
+                if (agents.isEmpty()) {
+                    return@coroutineScope UsageSample(TokenUsage(), 0, emptyList())
+                }
+                val rows = agents.take(limit).map { agent ->
+                    async {
+                        val used = withTimeoutOrNull(USAGE_CALL_MS) {
+                            usage(agent.id)?.totalUsage
+                        } ?: return@async null
+                        agent to used
+                    }
+                }.awaitAll().filterNotNull()
+                if (rows.isEmpty()) throw IllegalStateException("Couldn't load token usage")
+                combineTokenUsage(rows)
             }
-            val list = agents.await()
-            val samples = list.take(20)
-            val usages = samples.map { agent ->
-                async {
-                    val used = usage(agent.id)?.totalUsage ?: return@async null
-                    agent to used
-                }
-            }.mapNotNull { it.await() }
-            val total = usages.fold(TokenUsage()) { acc, row -> acc.plus(row.second) }
-            val top = usages
-                .map { (agent, used) ->
-                    AgentUsageRow(
-                        id = agent.id,
-                        name = agent.name?.ifBlank { null } ?: agent.id,
-                        tokens = used.totalTokens ?: 0L,
-                    )
-                }
-                .sortedByDescending { it.tokens }
-                .take(8)
-            val machines = computers.await()
-            val pools = catalog.pools().ifEmpty {
-                runCatching { listPools() }.getOrDefault(emptyList())
-            }
-            AccountOverview(
-                me = me.await(),
-                agentCount = list.size,
-                modelNames = models.await().map { it.displayName ?: it.id },
-                repoCount = catalog.repos().size,
-                computerCount = machines.size,
-                computersOnline = machines.count { it.online },
-                poolCount = pools.size,
-                poolsConnected = pools.sumOf { it.connectedWorkerCount },
-                usage = total,
-                sampledAgents = samples.size,
-                top = top,
-            )
+        }
+    }
+
+    private suspend fun refreshAgents(): List<AgentSummary> {
+        val listed = runCatching { listAgents() }
+        val agents = pickFreshList(listed, catalog.agents())
+        listed.onSuccess { catalog.saveAgents(it) }
+        return agents
+    }
+
+    private suspend fun refreshComputers(agents: List<AgentSummary>): List<Computer> {
+        val listed = runCatching { listComputers(agents) }.getOrNull() ?: return catalog.computers()
+        if (listed.isEmpty()) return catalog.computers()
+        catalog.saveComputers(listed)
+        return listed
+    }
+
+    private suspend fun refreshPools(): List<WorkerPool> {
+        val listed = runCatching { listPools() }.getOrNull() ?: return catalog.pools()
+        return listed.ifEmpty { catalog.pools() }
+    }
+
+    private suspend fun refreshRepos(): List<RepositoryItem> {
+        return runCatching { repositories() }.getOrElse { catalog.repos() }
+    }
+
+    private suspend fun <T> withinBudget(millis: Long, block: suspend () -> T): T {
+        return try {
+            withTimeout(millis) { block() }
+        } catch (e: TimeoutCancellationException) {
+            throw IllegalStateException("Timed out", e)
         }
     }
 
@@ -648,5 +684,8 @@ class AgentRepository(
         private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
+        private const val STATS_BUDGET_MS = 60_000L
+        private const val USAGE_BUDGET_MS = 45_000L
+        private const val USAGE_CALL_MS = 20_000L
     }
 }

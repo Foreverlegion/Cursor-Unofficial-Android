@@ -914,6 +914,7 @@ data class AgentUsageRow(
 data class AccountOverview(
     val me: MeResponse? = null,
     val agentCount: Int = 0,
+    val runningCount: Int = 0,
     val modelNames: List<String> = emptyList(),
     val repoCount: Int = 0,
     val computerCount: Int = 0,

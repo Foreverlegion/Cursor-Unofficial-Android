@@ -64,6 +64,8 @@ import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.FeedbackPolicy
 import com.cursorandroid.app.data.repo.GithubRepos
 import com.cursorandroid.app.data.repo.SafeLinks
+import com.cursorandroid.app.data.repo.UsageSample
+import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.inbox.HideFinishedAge
 import com.cursorandroid.app.ui.scaffoldBars
@@ -82,7 +84,7 @@ private enum class SettingsPage(val title: String, val summary: String) {
     Connections("Connections", "Links, MCP, and GitHub"),
     Backup("Backup", "Export and import"),
     Feedback("Feedback", "Bugs and feature requests"),
-    About("About & account", "Version, usage, and sign out"),
+    About("About & account", "Stats, usage, and sign out"),
 }
 
 private const val LINK_INFO =
@@ -119,6 +121,13 @@ fun SettingsScreen(
     var page by remember { mutableStateOf(SettingsPage.Home) }
     var info by remember { mutableStateOf<String?>(null) }
     var overview by remember { mutableStateOf<AccountOverview?>(null) }
+    var overviewError by remember { mutableStateOf<String?>(null) }
+    var overviewLoading by remember { mutableStateOf(true) }
+    var overviewAttempt by remember { mutableIntStateOf(0) }
+    var usageSample by remember { mutableStateOf<UsageSample?>(null) }
+    var usageError by remember { mutableStateOf<String?>(null) }
+    var usageLoading by remember { mutableStateOf(true) }
+    var usageAttempt by remember { mutableIntStateOf(0) }
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
     var notifyApprovals by remember { mutableStateOf(container.store.notifyOnApproval) }
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
@@ -172,11 +181,34 @@ fun SettingsScreen(
     }
 
     LaunchedEffect(Unit) {
-        overview = runCatching { container.repo.accountOverview() }.getOrNull()
         modelItems = runCatching { container.repo.models() }.getOrDefault(emptyList())
         githubLogin = withContext(Dispatchers.IO) {
             runCatching { GithubRepos.authenticatedLogin(container.store.githubToken) }.getOrNull()
         }
+    }
+    LaunchedEffect(overviewAttempt) {
+        overviewLoading = true
+        overviewError = null
+        val result = runCatching { container.repo.accountOverview() }
+        if (result.isSuccess) {
+            overview = result.getOrNull()
+            overviewError = null
+        } else {
+            overviewError = "Couldn't load your stats. Tap to retry."
+        }
+        overviewLoading = false
+    }
+    LaunchedEffect(usageAttempt) {
+        usageLoading = true
+        usageError = null
+        val result = runCatching { container.repo.recentUsage() }
+        if (result.isSuccess) {
+            usageSample = result.getOrNull()
+            usageError = null
+        } else {
+            usageError = "Couldn't load token usage. Tap to retry."
+        }
+        usageLoading = false
     }
     LaunchedEffect(openAccountTick) {
         if (openAccountTick > 0) page = SettingsPage.Feedback
@@ -560,21 +592,34 @@ fun SettingsScreen(
                             onInfo = { info = it },
                             onClick = { info = KEY_INFO },
                         )
-                        val used = overview?.usage
-                        val usageSummary = if (used == null) {
-                            "Not loaded"
-                        } else {
-                            "${fmt.format(used.totalTokens ?: 0)} tokens across ${overview?.sampledAgents ?: 0} recent chats"
+                        OverviewSection(
+                            loading = overviewLoading,
+                            error = overviewError,
+                            overview = overview,
+                            onRetry = { overviewAttempt++ },
+                        )
+                        val sample = usageSample
+                        val used = sample?.usage
+                        val usageSummary = when {
+                            usageLoading -> "Loading token totals…"
+                            usageError != null -> usageError
+                            sample == null -> "Couldn't load token usage. Tap to retry."
+                            sample.sampledAgents == 0 -> "No recent chats"
+                            else -> "${fmt.format(used?.displayTotal() ?: 0)} tokens across ${sample.sampledAgents} recent chats"
                         }
                         val usageDetail = buildString {
                             append(USAGE_INFO)
-                            if (used != null) {
+                            if (usageError != null) {
+                                append("\n\n")
+                                append(usageError)
+                            }
+                            if (used != null && (sample?.sampledAgents ?: 0) > 0) {
                                 append("\n\n")
                                 append("in ${fmt.format(used.inputTokens ?: 0)}")
                                 append(" · out ${fmt.format(used.outputTokens ?: 0)}")
                                 append(" · cache write ${fmt.format(used.cacheWriteTokens ?: 0)}")
                                 append(" · cache read ${fmt.format(used.cacheReadTokens ?: 0)}")
-                                overview?.top.orEmpty().forEach { row ->
+                                sample?.top.orEmpty().forEach { row ->
                                     append("\n")
                                     append(row.name)
                                     append(" · ")
@@ -584,24 +629,21 @@ fun SettingsScreen(
                         }
                         SettingsLinkRow(
                             title = "Usage",
-                            summary = usageSummary,
+                            summary = usageSummary.orEmpty(),
                             info = usageDetail,
                             onInfo = { info = it },
-                            onClick = { info = usageDetail },
+                            onClick = {
+                                if (usageError != null || (!usageLoading && sample == null)) {
+                                    usageAttempt++
+                                } else if (!usageLoading && sample != null) {
+                                    info = usageDetail
+                                }
+                            },
                         )
                         SettingsLinkRow(
                             title = "Open usage dashboard",
                             summary = "Cursor dashboard",
                             onClick = { SafeLinks.open(context, "https://cursor.com/dashboard/usage") },
-                        )
-                        val catalog = "${overview?.agentCount ?: 0} chats · ${overview?.computersOnline ?: 0}/${overview?.computerCount ?: 0} remote online · ${overview?.poolCount ?: 0} pools · ${overview?.repoCount ?: 0} cached repos"
-                        val models = overview?.modelNames.orEmpty().joinToString(", ")
-                        SettingsLinkRow(
-                            title = "Diagnostics",
-                            summary = catalog,
-                            info = if (models.isBlank()) catalog else "$catalog\n\n$models",
-                            onInfo = { info = it },
-                            onClick = { info = if (models.isBlank()) catalog else "$catalog\n\n$models" },
                         )
                         SettingsStaticRow("Free to use", "No charge for this app")
                         SettingsStaticRow("Made by ForeverLegion", "Unofficial Cursor for Android")
@@ -628,6 +670,47 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OverviewSection(
+    loading: Boolean,
+    error: String?,
+    overview: AccountOverview?,
+    onRetry: () -> Unit,
+) {
+    Text(
+        "Overview",
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    if (overview == null && !loading) {
+        SettingsLinkRow(
+            title = "Overview",
+            summary = error ?: "Couldn't load your stats. Tap to retry.",
+            onClick = onRetry,
+        )
+        return
+    }
+    val fmt = remember { NumberFormat.getIntegerInstance(Locale.getDefault()) }
+    fun value(text: String) = if (loading && overview == null) "Loading…" else text
+    val stats = overview
+    SettingsStaticRow("Cloud agents", value(fmt.format(stats?.agentCount ?: 0)))
+    SettingsStaticRow("Running", value(fmt.format(stats?.runningCount ?: 0)))
+    SettingsStaticRow(
+        "Remote machines online",
+        value("${fmt.format(stats?.computersOnline ?: 0)} of ${fmt.format(stats?.computerCount ?: 0)}"),
+    )
+    SettingsStaticRow("Pools", value(fmt.format(stats?.poolCount ?: 0)))
+    SettingsStaticRow("Cached repos", value(fmt.format(stats?.repoCount ?: 0)))
+    if (error != null && !loading) {
+        SettingsLinkRow(
+            title = "Refresh stats",
+            summary = error,
+            onClick = onRetry,
+        )
     }
 }
 
