@@ -199,7 +199,7 @@ class SettingsTransferImportTest {
         compose.onNodeWithTag("restore-settings").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Without secrets").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Without secrets").performClick()
-        compose.waitUntil(30_000) { container.store.defaultModel == "sonnet" }
+        compose.waitUntil(30_000) { container.store.defaultModel == "sonnet" && container.store.forges().isNotEmpty() }
         assertEquals("", container.store.forges().single().token)
         assertEquals("key_CURRENT_SESSION", container.store.apiKey)
     }
@@ -263,7 +263,9 @@ class SettingsTransferImportTest {
         compose.onNodeWithTag("restore-settings").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Without secrets").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Without secrets").performClick()
-        compose.waitUntil(60_000) { container.store.storedMcps().size == shape.mcpServers.size }
+        compose.waitUntil(60_000) {
+            container.store.storedMcps().size == shape.mcpServers.size && container.store.forges().size == shape.forges.size
+        }
         assertTrue(container.store.forges().all { it.token.isBlank() })
         assertEquals("key_CURRENT_SESSION", container.store.apiKey)
     }
