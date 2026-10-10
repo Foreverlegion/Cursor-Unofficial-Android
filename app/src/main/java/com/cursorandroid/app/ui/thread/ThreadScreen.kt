@@ -852,8 +852,11 @@ class ThreadViewModel(
     private fun startPoll(runId: String) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
+            var tick = 0
             while (isActive && run?.id == runId && run?.isActive() == true) {
-                delay(4_000)
+                val step = tick++
+                delay(runPollDelayMs(receiving, step))
+                if (pullConversationOnTick(receiving, step)) mergeConversationHistory()
                 val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
                 run = latest
                 if (!latest.isActive()) {
