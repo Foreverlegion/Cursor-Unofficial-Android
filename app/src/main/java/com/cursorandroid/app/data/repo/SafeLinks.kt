@@ -44,6 +44,15 @@ object SafeLinks {
 
     fun isHttps(raw: String?): Boolean = httpsUri(raw) != null
 
+    private val PR_PATH = Regex("^(https://[^/\\s]+/\\S+?/(?:pull|pulls|-/merge_requests|pull-requests)/\\d+)(?:[/?#]\\S*)?$")
+
+    /** A lone pull/merge request URL, or null. */
+    fun pullRequestUrl(raw: String?): String? {
+        val text = raw?.trim()?.takeIf { it.isNotEmpty() && it.none(Char::isWhitespace) } ?: return null
+        if (!isHttps(text)) return null
+        return PR_PATH.matchEntire(text)?.groupValues?.get(1)
+    }
+
     @android.annotation.SuppressLint("UnsafeImplicitIntentLaunch")
     fun openSupportedLinks(context: Context) {
         val uri = Uri.parse("package:${context.packageName}")

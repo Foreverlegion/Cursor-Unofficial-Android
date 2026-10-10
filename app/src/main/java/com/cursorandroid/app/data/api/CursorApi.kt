@@ -29,6 +29,7 @@ interface CursorApi {
         @Query("limit") limit: Int = 100,
         @Query("cursor") cursor: String? = null,
         @Query("includeArchived") includeArchived: Boolean = true,
+        @Query("prUrl") prUrl: String? = null,
     ): AgentListResponse
 
     @GET("v1/agents/{id}")
