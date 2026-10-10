@@ -45,9 +45,35 @@ object Attachments {
         return normalizeMime(mime) in OFFICIAL_IMAGE
     }
 
+    @Volatile
+    private var roots: List<String> = emptyList()
+
+    fun init(context: Context) {
+        roots = listOf(File(context.filesDir, "attaches"), File(context.cacheDir, "thumbs"))
+            .map { it.canonicalPath }
+    }
+
+    fun owns(path: String): Boolean = within(path, roots)
+
+    internal fun within(path: String, roots: List<String>): Boolean {
+        if (path.isBlank() || roots.isEmpty()) return false
+        val canonical = runCatching { File(path).canonicalPath }.getOrNull() ?: return false
+        return roots.any { canonical.startsWith(it + File.separator) }
+    }
+
+    // Shared or picked URIs only: file:// and our own providers would expose private app files.
+    fun readable(uri: Uri, ownPackage: String): Boolean {
+        if (uri.scheme != "content") return false
+        val authority = uri.authority ?: return false
+        return authority != ownPackage && !authority.startsWith("$ownPackage.")
+    }
+
     fun read(context: Context, uris: List<Uri>, alreadyImages: Int = 0): List<AttachItem> {
         var imageCount = alreadyImages
         return uris.mapNotNull { uri ->
+            if (!readable(uri, context.packageName)) {
+                return@mapNotNull AttachItem(uri.toString(), uri.lastPathSegment ?: "file", "application/octet-stream", error = "Unsupported file source")
+            }
             val name = displayName(context, uri) ?: uri.lastPathSegment ?: "file"
             val mime = context.contentResolver.getType(uri)
                 ?: guessMime(name)
@@ -150,7 +176,7 @@ object Attachments {
 
     fun forget(items: List<AttachItem>) {
         items.forEach { item ->
-            item.cachePath?.let { path -> File(path).delete() }
+            item.cachePath?.takeIf { owns(it) }?.let { path -> File(path).delete() }
         }
     }
 
@@ -184,7 +210,7 @@ object Attachments {
 
     fun fromCache(path: String, name: String, mime: String): AttachItem {
         val file = File(path)
-        val bytes = runCatching { file.readBytes() }.getOrNull()
+        val bytes = if (owns(path)) runCatching { file.readBytes() }.getOrNull() else null
         if (bytes == null) {
             return AttachItem(path, name, mime, error = "Draft file missing")
         }

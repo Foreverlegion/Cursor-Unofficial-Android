@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import androidx.work.WorkManager
+import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.CachePruneWorker
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
@@ -16,6 +17,7 @@ class CursorAndroidApp : Application() {
     override fun onCreate() {
         super.onCreate()
         registerActivityLifecycleCallbacks(ForegroundCallbacks)
+        Attachments.init(this)
         container = AppContainer(this)
         container.notifier.ensureChannel()
         if (container.store.hasKey()) {

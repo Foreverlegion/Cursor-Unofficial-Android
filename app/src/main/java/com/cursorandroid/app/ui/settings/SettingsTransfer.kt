@@ -69,14 +69,19 @@ fun SettingsTransfer(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (allowExport) {
-            Text(
-                "Export settings",
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { export.launch("${ClientOrigin.ID}-settings.json") }
                     .padding(vertical = 14.dp),
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            ) {
+                Text("Export settings", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Contains your API key and forge tokens in plain text. Keep the file private.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Text(
             "Import settings",

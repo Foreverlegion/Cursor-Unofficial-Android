@@ -1754,7 +1754,7 @@ private fun TranscriptBubble(
                     if (line.thumbs.isNotEmpty()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             line.thumbs.forEach { path ->
-                                val bmp = remember(path) { BitmapFactory.decodeFile(path) }
+                                val bmp = remember(path) { if (Attachments.owns(path)) BitmapFactory.decodeFile(path) else null }
                                 if (bmp != null) {
                                     Image(
                                         bitmap = bmp.asImageBitmap(),
