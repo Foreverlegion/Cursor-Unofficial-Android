@@ -92,6 +92,11 @@ private fun CursorAppContent(
     showInboxRemote: Boolean,
     onAppearanceChanged: () -> Unit,
 ) {
+    var settingsEpoch by remember { mutableIntStateOf(0) }
+    val refreshSettings = {
+        onAppearanceChanged()
+        settingsEpoch += 1
+    }
     var signedIn by rememberSaveable { mutableStateOf(container.store.hasSession()) }
     var demo by rememberSaveable { mutableStateOf(container.store.demoMode) }
     var askedFeedback by rememberSaveable { mutableStateOf(container.store.feedbackNoticeSeen) }
@@ -229,6 +234,7 @@ private fun CursorAppContent(
                     onSettings = { pane = Pane.Settings },
                     showEnvs = showInboxEnvs,
                     showRemote = showInboxRemote,
+                    settingsEpoch = settingsEpoch,
                     modifier = Modifier
                         .weight(0.38f)
                         .fillMaxHeight(),
@@ -245,7 +251,7 @@ private fun CursorAppContent(
                             onBack = { pane = Pane.Inbox },
                             onSignedOut = { signedIn = false },
                             onSessionChanged = { demo = container.store.demoMode },
-                            onAppearanceChanged = onAppearanceChanged,
+                            onAppearanceChanged = refreshSettings,
                             openAccountTick = accountTick,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -282,7 +288,7 @@ private fun CursorAppContent(
                     onBack = { pane = Pane.Inbox },
                     onSignedOut = { signedIn = false },
                     onSessionChanged = { demo = container.store.demoMode },
-                    onAppearanceChanged = onAppearanceChanged,
+                    onAppearanceChanged = refreshSettings,
                     openAccountTick = accountTick,
                 )
                 pane == Pane.Compose -> NewAgentScreen(
@@ -319,6 +325,7 @@ private fun CursorAppContent(
                     onSettings = { pane = Pane.Settings },
                     showEnvs = showInboxEnvs,
                     showRemote = showInboxRemote,
+                    settingsEpoch = settingsEpoch,
                 )
             }
         }

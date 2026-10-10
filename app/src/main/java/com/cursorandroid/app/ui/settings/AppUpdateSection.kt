@@ -26,7 +26,7 @@ fun GithubTokenField(
         },
         modifier = modifier.fillMaxWidth(),
         label = { Text("GitHub token") },
-        placeholder = { Text("Needed to create repos or read a private GitHub repo") },
+        placeholder = { Text("Personal access token") },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
     )

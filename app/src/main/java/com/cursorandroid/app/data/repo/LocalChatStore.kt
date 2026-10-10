@@ -124,6 +124,43 @@ class LocalChatStore(context: Context) {
             durable.edit { putBoolean(INBOX_HIDDEN, value) }
         }
 
+    var groupByRepo: Boolean
+        get() = durable.getBoolean(GROUP_BY_REPO, true)
+        set(value) {
+            durable.edit { putBoolean(GROUP_BY_REPO, value) }
+        }
+
+    var compactCards: Boolean
+        get() = durable.getBoolean(COMPACT_CARDS, true)
+        set(value) {
+            durable.edit { putBoolean(COMPACT_CARDS, value) }
+        }
+
+    var hideFinishedDays: Int
+        get() {
+            val days = durable.getInt(HIDE_FINISHED, 0)
+            return if (days == 1 || days == 3 || days == 7) days else 0
+        }
+        set(value) {
+            val days = if (value == 1 || value == 3 || value == 7) value else 0
+            durable.edit { putInt(HIDE_FINISHED, days) }
+        }
+
+    var collapsedRepos: Set<String>
+        get() = durable.getStringSet(COLLAPSED_REPOS, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            durable.edit { putStringSet(COLLAPSED_REPOS, value.toHashSet()) }
+        }
+
+    fun setPinned(agentId: String, pinned: Boolean) {
+        update(agentId) {
+            it.copy(
+                pinned = pinned,
+                pinnedAt = if (pinned) System.currentTimeMillis() else 0L,
+            )
+        }
+    }
+
     private fun update(agentId: String, block: (ChatMeta) -> ChatMeta) {
         val all = loadAll().toMutableMap()
         all[agentId] = block(all[agentId] ?: ChatMeta())
@@ -160,6 +197,10 @@ class LocalChatStore(context: Context) {
         private const val INBOX_WORKING = "inbox_working_only"
         private const val INBOX_ARCHIVED = "inbox_archived_view"
         private const val INBOX_HIDDEN = "inbox_show_hidden"
+        private const val GROUP_BY_REPO = "agent_group_by_repo"
+        private const val COMPACT_CARDS = "agent_compact_cards"
+        private const val HIDE_FINISHED = "agent_hide_finished_days"
+        private const val COLLAPSED_REPOS = "agent_collapsed_repos"
     }
 }
 
@@ -174,4 +215,6 @@ data class ChatMeta(
     val baseBranch: String? = null,
     val startSha: String? = null,
     val ignoredRemoteSha: String? = null,
+    val pinned: Boolean = false,
+    val pinnedAt: Long = 0L,
 )

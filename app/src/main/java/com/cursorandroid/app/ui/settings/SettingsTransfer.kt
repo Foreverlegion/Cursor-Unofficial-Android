@@ -2,13 +2,13 @@ package com.cursorandroid.app.ui.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,27 +68,23 @@ fun SettingsTransfer(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            if (allowExport) {
-                TextButton(onClick = { export.launch("${ClientOrigin.ID}-settings.json") }) {
-                    Text("Export settings")
-                }
-            }
-            TextButton(onClick = { importer.launch(IMPORT_TYPES) }) {
-                Text("Import settings")
-            }
+        if (allowExport) {
+            Text(
+                "Export settings",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { export.launch("${ClientOrigin.ID}-settings.json") }
+                    .padding(vertical = 14.dp),
+                style = MaterialTheme.typography.bodyLarge,
+            )
         }
         Text(
-            if (allowExport) {
-                "Export includes the API key, GitHub token, theme color, inbox tabs, notify, approval alerts, hide thinking/tools, default model, MCP, chat names, favorites, drafts (including subagents and model params), and cached transcripts. Keep the file private."
-            } else {
-                "Import a previous export to restore the API key and local settings."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            "Import settings",
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { importer.launch(IMPORT_TYPES) }
+                .padding(vertical = 14.dp),
+            style = MaterialTheme.typography.bodyLarge,
         )
         if (status != null) {
             Text(

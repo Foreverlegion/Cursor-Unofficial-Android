@@ -32,6 +32,9 @@ object SettingsBackup {
             themeColor = container.store.themeColor,
             showInboxEnvs = container.store.showInboxEnvs,
             showInboxRemote = container.store.showInboxRemote,
+            groupByRepo = container.chats.groupByRepo,
+            compactCards = container.chats.compactCards,
+            hideFinishedDays = container.chats.hideFinishedDays,
             chats = container.chats.snapshot(),
             conversations = container.conversations.exportAll(),
             drafts = container.drafts.exportAll(),
@@ -72,6 +75,9 @@ object SettingsBackup {
         container.store.themeColor = snap.themeColor
         container.store.showInboxEnvs = snap.showInboxEnvs
         container.store.showInboxRemote = snap.showInboxRemote
+        container.chats.groupByRepo = snap.groupByRepo
+        container.chats.compactCards = snap.compactCards
+        container.chats.hideFinishedDays = snap.hideFinishedDays
         container.chats.mergeAll(snap.chats)
         if (snap.conversations.isNotEmpty()) {
             container.conversations.importAll(snap.conversations)
@@ -107,6 +113,9 @@ data class SettingsSnapshot(
     val themeColor: Int = 0xFFF54E00.toInt(),
     val showInboxEnvs: Boolean = true,
     val showInboxRemote: Boolean = true,
+    val groupByRepo: Boolean = true,
+    val compactCards: Boolean = true,
+    val hideFinishedDays: Int = 0,
     val chats: Map<String, ChatMeta> = emptyMap(),
     val conversations: Map<String, List<TranscriptLine>> = emptyMap(),
     val drafts: Map<String, ChatDraft> = emptyMap(),

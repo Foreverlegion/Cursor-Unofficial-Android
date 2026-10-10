@@ -1,11 +1,12 @@
 package com.cursorandroid.app.ui.settings
 
 import android.os.Build
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -65,37 +66,15 @@ fun FeedbackSection(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("Feedback", style = MaterialTheme.typography.titleMedium)
-        Text(
-            FeedbackPolicy.ANONYMOUS + " Replies show up here.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Button(
-            onClick = {
-                if (!banned) {
-                    reportKind = FeedbackPolicy.Kind.BUG
-                    reportOpen = true
-                }
-            },
-            enabled = !banned,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(FeedbackPolicy.BUTTON_BUG)
+        FeedbackAction(FeedbackPolicy.BUTTON_BUG, enabled = !banned) {
+            reportKind = FeedbackPolicy.Kind.BUG
+            reportOpen = true
         }
-        Button(
-            onClick = {
-                if (!banned) {
-                    reportKind = FeedbackPolicy.Kind.FEATURE
-                    reportOpen = true
-                }
-            },
-            enabled = !banned,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(FeedbackPolicy.BUTTON_FEATURE)
+        FeedbackAction(FeedbackPolicy.BUTTON_FEATURE, enabled = !banned) {
+            reportKind = FeedbackPolicy.Kind.FEATURE
+            reportOpen = true
         }
         if (banned) {
             Text(
@@ -142,7 +121,7 @@ fun FeedbackSection(
         if (operator) {
             Text("Incoming reports", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Ban stops that install from sending another report. The report does not name who sent it.",
+                "Ban stops that install from sending another report.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -304,6 +283,23 @@ fun FeedbackSection(
             },
         )
     }
+}
+
+@Composable
+private fun FeedbackAction(
+    title: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        title,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 14.dp),
+        color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyLarge,
+    )
 }
 
 @Composable
