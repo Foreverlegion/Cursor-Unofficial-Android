@@ -83,6 +83,10 @@ import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.data.repo.ForgeClient
+import com.cursorandroid.app.data.repo.machineKey
+import com.cursorandroid.app.data.repo.visibleMachines
+import com.cursorandroid.app.ui.MachineActionsDialog
+import com.cursorandroid.app.ui.MachineMenuRow
 import com.cursorandroid.app.data.repo.filterRepos
 import com.cursorandroid.app.data.repo.forgeForLabel
 import com.cursorandroid.app.data.repo.forgeSupportsRepoList
@@ -135,6 +139,8 @@ fun NewAgentScreen(
     var modelMenu by remember { mutableStateOf(false) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var computerMenu by remember { mutableStateOf(false) }
+    var machinePrefs by remember { mutableStateOf(container.machines.prefs()) }
+    var machineAction by remember { mutableStateOf<Computer?>(null) }
     var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var pools by remember { mutableStateOf(container.catalog.pools()) }
     var poolMenu by remember { mutableStateOf(false) }
@@ -169,6 +175,9 @@ fun NewAgentScreen(
     var draftReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val shownComputers = remember(computers, machinePrefs) {
+        visibleMachines(computers, machinePrefs, container.machines.now())
+    }
     val allRepos = remember(repos, forgeRepos) { mergeRepos(repos, forgeRepos) }
     val providers = remember(repos, forges) { sourceLabels(repos, forges) }
     val createForge = remember(forges, provider) { forgeForLabel(forges, provider) }
@@ -362,11 +371,13 @@ fun NewAgentScreen(
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
         scope.launch {
             computers = runCatching { container.repo.listComputers() }.getOrDefault(computers)
+            machinePrefs = container.machines.prefs()
             pools = runCatching { container.repo.listPools() }.getOrDefault(pools)
             if (envType == "machine") {
-                val picked = computers.firstOrNull { it.name.equals(envName, ignoreCase = true) && it.online }
-                    ?: computers.firstOrNull { it.name.equals(envName, ignoreCase = true) }
-                    ?: computers.firstOrNull { it.online }
+                val usable = visibleMachines(computers, machinePrefs, container.machines.now())
+                val picked = usable.firstOrNull { it.name.equals(envName, ignoreCase = true) && it.online }
+                    ?: usable.firstOrNull { it.name.equals(envName, ignoreCase = true) }
+                    ?: usable.firstOrNull { it.online }
                 if (picked != null) {
                     envName = picked.name
                     selectedWorkerId = picked.workerId
@@ -799,7 +810,7 @@ fun NewAgentScreen(
                         }
                     }
                 } else if (envType == "machine") {
-                    val online = computers.filter { it.online }
+                    val online = shownComputers.filter { it.online }
                     ExposedDropdownMenuBox(expanded = computerMenu, onExpandedChange = { computerMenu = it }) {
                         OutlinedTextField(
                             value = envName.ifBlank { "Select a computer" },
@@ -820,40 +831,66 @@ fun NewAgentScreen(
                                 )
                             }
                             online.forEach { computer ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(computer.name)
-                                            val detail = buildString {
-                                                append(if (computer.inUse) "Busy" else "Idle")
-                                                computer.detail?.let {
-                                                    append(" · ")
-                                                    append(it)
-                                                }
-                                            }
-                                            Text(detail, style = MaterialTheme.typography.bodySmall)
+                                MachineMenuRow(
+                                    onClick = {
+                                        envName = computer.name
+                                        selectedWorkerId = computer.workerId
+                                        computer.boundRepo()?.let { adoptRepo(it) }
+                                        computerMenu = false
+                                    },
+                                    onLongClick = { machineAction = computer },
+                                    onMore = { machineAction = computer },
+                                ) {
+                                    Text(computer.name)
+                                    val detail = buildString {
+                                        append(if (computer.inUse) "Busy" else "Idle")
+                                        computer.detail?.let {
+                                            append(" · ")
+                                            append(it)
                                         }
-                                    },
-                                    onClick = {
-                                        envName = computer.name
-                                        selectedWorkerId = computer.workerId
-                                        computer.boundRepo()?.let { adoptRepo(it) }
-                                        computerMenu = false
-                                    },
-                                )
+                                    }
+                                    Text(detail, style = MaterialTheme.typography.bodySmall)
+                                }
                             }
-                            computers.filter { !it.online }.forEach { computer ->
-                                DropdownMenuItem(
-                                    text = { Text("${computer.name} · offline") },
+                            shownComputers.filter { !it.online }.forEach { computer ->
+                                MachineMenuRow(
                                     onClick = {
                                         envName = computer.name
                                         selectedWorkerId = computer.workerId
                                         computer.boundRepo()?.let { adoptRepo(it) }
                                         computerMenu = false
                                     },
-                                )
+                                    onLongClick = { machineAction = computer },
+                                    onMore = { machineAction = computer },
+                                ) {
+                                    Text("${computer.name} · offline")
+                                }
                             }
                         }
+                    }
+                    machineAction?.let { target ->
+                        MachineActionsDialog(
+                            name = target.name,
+                            onHide = {
+                                container.machines.hide(target.machineKey(), target.name)
+                                machinePrefs = container.machines.prefs()
+                                machineAction = null
+                            },
+                            onDelete = {
+                                container.machines.forget(target.machineKey(), target.name)
+                                machinePrefs = container.machines.prefs()
+                                machineAction = null
+                            },
+                            onDismiss = { machineAction = null },
+                        )
+                    }
+                    val hiddenCount = computers.size - shownComputers.size
+                    if (hiddenCount > 0) {
+                        Text(
+                            "$hiddenCount hidden. Unhide them under Settings, Connections, Machines. Long-press a machine to hide or delete it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Text(
                         "Online machines you are signed into. The PC must stay awake with Remote Control or a My Machines worker. The public API needs a repo on the request, even when the checkout is already on the PC.",

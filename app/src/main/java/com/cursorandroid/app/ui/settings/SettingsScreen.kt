@@ -65,6 +65,7 @@ import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
+import com.cursorandroid.app.data.repo.MachineMarkState
 import com.cursorandroid.app.data.repo.FeedbackPolicy
 import com.cursorandroid.app.data.repo.GithubRepos
 import com.cursorandroid.app.data.repo.SafeLinks
@@ -87,6 +88,7 @@ internal enum class SettingsPage(val title: String, val summary: String) {
     Notifications("Notifications", "Run alerts and battery"),
     Connections("Connections", "Links, MCP, and forges"),
     Forges("Forges", "Git hosts and tokens"),
+    Machines("Machines", "Hide or forget remote machines"),
     Backup("Backup", "Export and import"),
     Feedback("Feedback", "Bugs and feature requests"),
     About("About & account", "Stats, usage, and sign out"),
@@ -104,6 +106,8 @@ private const val MCP_INFO =
 private const val GITHUB_INFO = "Forge tokens stay encrypted on this phone. They list branches and create repos from New agent. A GitHub token already saved on this phone is kept as a GitHub forge."
 private const val REMOTE_INFO =
     "On the PC: Cursor 3.9.8 or newer, Agents Window, Settings, Agents, Remote Control, then /remote-control. Local remotes show under Remote. To start new work on a named machine, use New agent, Machine."
+private const val REMOTE_MACHINES_INFO =
+    "Lists every machine and worker this phone has seen, with when it was last seen. Hide keeps one out of New agent and the Remote list. Delete forgets it on this phone only, because the Cursor API cannot remove a worker. Auto-hide hides offline machines not seen for a number of days."
 private const val BACKUP_INFO =
     "Export includes repo defaults, theme, inbox tabs, alerts, model, MCP servers, chat names, favorites, pins, drafts, and cached transcripts. The API key, forge tokens, and MCP header, env, and OAuth values are left out unless you turn on Include secrets, which seals them with a passphrase. Keep the file private."
 private const val KEY_INFO =
@@ -302,7 +306,7 @@ internal fun SettingsScreenContent(
                 SecureStorageNotice(container.store)
                 when (page) {
                     SettingsPage.Home -> {
-                        SettingsPage.entries.filter { it != SettingsPage.Home && it != SettingsPage.Forges }.forEach { item ->
+                        SettingsPage.entries.filter { it != SettingsPage.Home && it != SettingsPage.Forges && it != SettingsPage.Machines }.forEach { item ->
                             SettingsLinkRow(item.title, item.summary) { page = item }
                         }
                     }
@@ -503,8 +507,25 @@ internal fun SettingsScreenContent(
                                 page = SettingsPage.Forges
                             },
                         )
+                        val machinePrefs = container.machines.prefs()
+                        val hiddenMachines = machinePrefs.marks.values.count { it.state != MachineMarkState.SHOWN }
+                        SettingsLinkRow(
+                            title = "Machines",
+                            summary = when {
+                                hiddenMachines > 0 -> "$hiddenMachines hidden or forgotten"
+                                machinePrefs.autoHideDays > 0 -> "Auto-hide after ${machinePrefs.autoHideDays} days"
+                                else -> "Hide or forget remote machines"
+                            },
+                            info = REMOTE_MACHINES_INFO,
+                            onInfo = { info = it },
+                            onClick = {
+                                under = SettingsPage.Connections
+                                page = SettingsPage.Machines
+                            },
+                        )
                     }
                     SettingsPage.Forges -> ForgesPage(container)
+                    SettingsPage.Machines -> MachinesPage(container)
                     SettingsPage.RepoDefaults -> RepoDefaultsPage(container)
                     SettingsPage.Backup -> {
                         Column(Modifier.padding(horizontal = 16.dp)) {

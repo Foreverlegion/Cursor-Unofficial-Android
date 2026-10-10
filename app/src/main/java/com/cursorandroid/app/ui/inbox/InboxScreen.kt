@@ -87,6 +87,10 @@ import com.cursorandroid.app.data.repo.RepoGroupPrefs
 import com.cursorandroid.app.data.repo.markLocalActive
 import com.cursorandroid.app.data.repo.settleAgents
 import com.cursorandroid.app.data.api.Computer
+import com.cursorandroid.app.data.repo.machineKey
+import com.cursorandroid.app.data.repo.visibleMachines
+import com.cursorandroid.app.ui.MachineActionsDialog
+import com.cursorandroid.app.ui.MachineMenuRow
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.isArchived
 import com.cursorandroid.app.data.api.isLiveStatus
@@ -124,6 +128,27 @@ fun InboxScreen(
 ) {
     var items by remember { mutableStateOf(container.catalog.agents().sortedByDescending { it.sortKey() }) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
+    var machinePrefs by remember { mutableStateOf(container.machines.prefs()) }
+    var machineAction by remember { mutableStateOf<Computer?>(null) }
+    val shownComputers = remember(computers, machinePrefs) {
+        visibleMachines(computers, machinePrefs, container.machines.now())
+    }
+    machineAction?.let { target ->
+        MachineActionsDialog(
+            name = target.name,
+            onHide = {
+                container.machines.hide(target.machineKey(), target.name)
+                machinePrefs = container.machines.prefs()
+                machineAction = null
+            },
+            onDelete = {
+                container.machines.forget(target.machineKey(), target.name)
+                machinePrefs = container.machines.prefs()
+                machineAction = null
+            },
+            onDismiss = { machineAction = null },
+        )
+    }
     var metas by remember { mutableStateOf(container.chats.snapshot()) }
     val notices by container.notices.feed.collectAsStateWithLifecycle()
     fun loadGit(): Map<String, GitSnap> = withRepoFallbacks(
@@ -195,6 +220,7 @@ fun InboxScreen(
                 }
                 val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
                 computers = next
+                machinePrefs = container.machines.prefs()
                 container.catalog.saveComputers(next)
                 var cursor = page.nextCursor
                 while (!cursor.isNullOrBlank()) {
@@ -273,6 +299,7 @@ fun InboxScreen(
                 val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
                 if (next != null) {
                     computers = next
+                    machinePrefs = container.machines.prefs()
                     container.catalog.saveComputers(next)
                 }
             } catch (_: Exception) {
@@ -406,8 +433,9 @@ fun InboxScreen(
                     AgentList(
                         items = listed,
                         approvalIds = approvalIds,
-                        computers = if (tab == InboxTab.Remote) computers else emptyList(),
+                        computers = if (tab == InboxTab.Remote) shownComputers else emptyList(),
                         onSelectComputer = { onCompose("machine", it.name) },
+                        onComputerMenu = { machineAction = it },
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
@@ -628,6 +656,7 @@ private fun AgentList(
     approvalIds: Set<String>,
     computers: List<Computer>,
     onSelectComputer: (Computer) -> Unit,
+    onComputerMenu: (Computer) -> Unit,
     selectedId: String?,
     metas: Map<String, ChatMeta>,
     git: Map<String, GitSnap>,
@@ -906,7 +935,11 @@ private fun AgentList(
                 if (computers.isNotEmpty()) {
                     item(key = "machines") { SectionLabel("Machines") }
                     items(computers, key = { "pc:${it.workerId ?: it.name}" }) { computer ->
-                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
+                        ComputerRow(
+                            computer = computer,
+                            onClick = { onSelectComputer(computer) },
+                            onMenu = { onComputerMenu(computer) },
+                        )
                     }
                 }
                 if (arranged != null) {
@@ -1177,16 +1210,10 @@ private fun RemotePane(
 private fun ComputerRow(
     computer: Computer,
     onClick: () -> Unit,
+    onMenu: () -> Unit = {},
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    MachineMenuRow(onClick = onClick, onLongClick = onMenu, onMore = onMenu) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(computer.name, style = MaterialTheme.typography.titleSmall)
             Text(
                 buildString {

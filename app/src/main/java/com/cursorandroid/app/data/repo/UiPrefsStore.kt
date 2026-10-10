@@ -52,6 +52,9 @@ object UiKeys {
     val codeFont = stringPreferencesKey("code_font")
     val textScalePct = intPreferencesKey("text_scale_pct")
     val chatDensity = stringPreferencesKey("chat_density")
+
+    val machinePrefs = stringPreferencesKey("machine_prefs")
+    val machinePrefsUnreadable = stringPreferencesKey("machine_prefs_unreadable")
 }
 
 /** What the app kept in SharedPreferences before the DataStore existed. Read only, never deleted. */
@@ -67,7 +70,7 @@ class LegacyUiPrefs(
  */
 class UiMigrationStep(val from: Int, val run: (MutablePreferences, LegacyUiPrefs) -> Unit)
 
-const val UI_SCHEMA_VERSION = 1
+const val UI_SCHEMA_VERSION = 2
 
 private fun <T> MutablePreferences.seed(key: Preferences.Key<T>, value: Any?) {
     if (contains(key)) return
@@ -98,7 +101,12 @@ internal val schemaZeroToOne = UiMigrationStep(0) { p, legacy ->
     p.seed(UiKeys.chatMeta, legacy.chatMetaJson)
 }
 
-internal val uiMigrationSteps: List<UiMigrationStep> = listOf(schemaZeroToOne)
+/** Adds the machine list (hidden and forgotten machines, last seen times, auto-hide). Fills it only when missing. */
+internal val schemaOneToTwo = UiMigrationStep(1) { p, _ ->
+    p.seed(UiKeys.machinePrefs, "{}")
+}
+
+internal val uiMigrationSteps: List<UiMigrationStep> = listOf(schemaZeroToOne, schemaOneToTwo)
 
 internal class UiPrefsMigration(
     private val legacy: LegacyUiPrefs,

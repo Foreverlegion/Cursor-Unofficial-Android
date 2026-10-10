@@ -147,4 +147,22 @@ class SettingsPagesRenderTest {
         compose.onNodeWithText("Default model").assertIsDisplayed()
         compose.onNodeWithText("Default branch").assertExists()
     }
+
+    @Test
+    fun machinesPageListsSeenMachinesWithHideAndAutoHide() {
+        val c = container()
+        c.catalog.saveComputers(
+            listOf(
+                com.cursorandroid.app.data.api.Computer(name = "Laptop", online = true, workerId = "w-1"),
+                com.cursorandroid.app.data.api.Computer(name = "OldBox", online = false),
+            ),
+        )
+        c.machines.hide("id:w-1", "Laptop")
+        render(SettingsPage.Machines, c)
+        compose.onNodeWithText("Auto-hide offline machines").assertIsDisplayed()
+        compose.onNodeWithText("Hidden").assertExists()
+        compose.onNodeWithText("Unhide").assertExists()
+        compose.onNodeWithText("Laptop").assertExists()
+    }
 }
+

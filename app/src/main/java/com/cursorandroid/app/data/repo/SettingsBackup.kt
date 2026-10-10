@@ -53,6 +53,7 @@ object SettingsBackup {
         forges = container.store.forges(),
         repoDefaults = container.store.repoDefaults(),
         repoGroupPrefs = container.chats.repoGroupPrefs,
+        machinePrefs = container.machines.prefs(),
         inboxWorkingOnly = container.chats.inboxWorkingOnly,
         inboxShowArchived = container.chats.inboxShowArchived,
         inboxShowHidden = container.chats.inboxShowHidden,
@@ -102,6 +103,9 @@ object SettingsBackup {
         if (!snap.repoGroupPrefs.isEmpty) {
             container.chats.repoGroupPrefs = snap.repoGroupPrefs
         }
+        if (!snap.machinePrefs.isEmpty) {
+            container.machines.replace(mergeMachinePrefs(container.machines.prefs(), snap.machinePrefs))
+        }
         container.chats.inboxWorkingOnly = snap.inboxWorkingOnly
         container.chats.inboxShowArchived = snap.inboxShowArchived
         container.chats.inboxShowHidden = snap.inboxShowHidden
@@ -147,6 +151,7 @@ data class SettingsSnapshot(
     val forges: List<ForgeConnection> = emptyList(),
     val repoDefaults: List<RepoDefault> = emptyList(),
     val repoGroupPrefs: RepoGroupPrefs = RepoGroupPrefs(),
+    val machinePrefs: MachinePrefs = MachinePrefs(),
     val inboxWorkingOnly: Boolean = false,
     val inboxShowArchived: Boolean = false,
     val inboxShowHidden: Boolean = false,

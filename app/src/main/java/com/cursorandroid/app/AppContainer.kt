@@ -21,6 +21,7 @@ import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
 import com.cursorandroid.app.data.repo.RunSettleHub
+import com.cursorandroid.app.data.repo.MachineStore
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.settleAgents
 import kotlinx.serialization.json.Json
@@ -37,6 +38,7 @@ class AppContainer(context: Context) {
     val store = ApiKeyStore(context, ui)
     val conversations = ConversationStore(context)
     val chats = LocalChatStore(ui)
+    val machines = MachineStore(ui)
     val drafts = DraftStore(context)
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
@@ -136,5 +138,6 @@ class AppContainer(context: Context) {
         catalog = catalog,
         publicHttp = publicHttp,
         json = json,
+        machines = machines,
     )
 }

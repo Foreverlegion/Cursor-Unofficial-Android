@@ -10,6 +10,8 @@ Settings export leaves out the API key, forge tokens, and MCP header, env, and O
 
 New agent: the Source list now includes every forge saved in Settings, Connections, Forges (GitHub, GitLab, Bitbucket, Azure DevOps, Origin, self-hosted and custom HTTPS hosts), for Cloud, Machine, and Pool. Picking GitLab lists your projects with the saved GitLab token (membership projects, searchable, load more) and sends the HTTPS clone URL as the repo. Saved forges and tokens are only read, never changed.
 
+Machines: long-press a machine in New agent, Machine, Remote or in the Remote list (or tap its menu) to Hide it or Delete it. Settings, Connections, Machines lists every machine and worker this phone has seen, whether it is online, when it was last seen, and has Hide, Unhide, Delete, Restore, and an option to auto-hide offline machines not seen for 7 to 90 days. Cursor's API can deregister a pool but not a single worker, so Delete forgets the machine on this phone only; it shows again if it comes back under a new id. Hidden state is kept across restarts and updates.
+
 ---
 
 # 1.0.26

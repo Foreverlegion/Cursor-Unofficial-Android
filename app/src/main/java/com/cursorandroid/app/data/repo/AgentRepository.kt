@@ -69,6 +69,7 @@ class AgentRepository(
     private val catalog: CatalogCache,
     private val publicHttp: OkHttpClient,
     private val json: Json,
+    private val machines: MachineStore? = null,
 ) {
     fun apiKey(): String = store.apiKey.orEmpty()
 
@@ -535,7 +536,9 @@ class AgentRepository(
                 else Computer(name = name, online = false, detail = "Seen on a previous agent")
             }
             .distinctBy { it.name.lowercase() }
-        return fromWorkers + fromAgents
+        val all = fromWorkers + fromAgents
+        if (!store.demoMode) runCatching { machines?.observe(all, agents) }
+        return all
     }
 
     suspend fun listPools(): List<WorkerPool> {
