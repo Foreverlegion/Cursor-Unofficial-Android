@@ -66,6 +66,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -179,6 +180,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Locale
 import java.util.UUID
 
 private const val STOPPING = "Stopping..."
@@ -263,6 +267,8 @@ class ThreadViewModel(
     private val settledRuns = HashSet<String>()
     private val hydratedRuns = HashSet<String>()
     private var runOrder: List<String> = emptyList()
+    internal var runSpans by mutableStateOf<Map<String, RunSpan>>(emptyMap())
+        private set
     private var settledKey: String? = null
     private var afterNonAssistant = false
     private val lineGate = Any()
@@ -811,6 +817,7 @@ class ThreadViewModel(
             .take(PROMPT_LOOKUPS)
             .forEach { ensureRunHint(it.id) }
         var filled = runs.map { item -> hydrateRun(item, force = false) }
+        if (runs.isNotEmpty()) runSpans = spansOf(filled)
         filled.filter { it.isTerminal() }.forEach { settledRuns += it.id }
         var merged = mergeRunTranscript(lines, filled)
         val hasUser = merged.any { it.kind == "user" }
@@ -1142,7 +1149,8 @@ class ThreadViewModel(
                     (kind == "assistant" && runId != null && existing.kind == "assistant" && existing.runId == runId)
             }
             val existingThumbs = next.getOrNull(idx)?.thumbs.orEmpty()
-            val line = TranscriptLine(id, kind, text, runId, queued, thumbs.ifEmpty { existingThumbs })
+            val sentAt = next.getOrNull(idx)?.atMs ?: System.currentTimeMillis().takeIf { kind == "user" }
+            val line = TranscriptLine(id, kind, text, runId, queued, thumbs.ifEmpty { existingThumbs }, sentAt)
             if (idx >= 0) next[idx] = line else next.add(line)
             lines = coalesceTranscript(next)
         }
@@ -1301,8 +1309,15 @@ fun ThreadScreen(
     val shownLines by produceState(vm.lines, vm) {
         snapshotFlow { vm.lines }.coalesced(STREAM_COALESCE_MS).collect { value = it }
     }
-    val rows = remember(shownLines, showTools, showThinking) {
-        groupChatRows(shownLines, showTools, showThinking)
+    val zone = remember { ZoneId.systemDefault() }
+    val use24h = remember(context) { DateFormat.is24HourFormat(context) }
+    val runSpans = vm.runSpans
+    val rows = remember(shownLines, showTools, showThinking, runSpans, zone) {
+        withDaySeparators(
+            groupChatRows(shownLines, showTools, showThinking),
+            timeOf = { lineTimeMs(it, runSpans) },
+            zone = zone,
+        )
     }
     val runHints = vm.runHints
     val lineHints = remember(shownLines, runHints) { lineModelHints(shownLines, runHints) }
@@ -1573,6 +1588,9 @@ fun ThreadScreen(
                         when (row) {
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
+                                timeMs = lineTimeMs(row.line, runSpans),
+                                zone = zone,
+                                use24h = use24h,
                                 modelText = if (row.line.kind == "assistant") {
                                     runModelLabel(vm.modelBook, lineRunId(row.line), lineHints[row.line.id], models)
                                 } else {
@@ -1602,6 +1620,9 @@ fun ThreadScreen(
                             is ChatRow.Tools -> ToolCallsBlock(
                                 tools = row.tools,
                                 onCopy = { text -> copyMessage(context, text) },
+                            )
+                            is ChatRow.Day -> DayDivider(
+                                dayLabel(LocalDate.ofEpochDay(row.epochDay), LocalDate.now(zone), Locale.getDefault()),
                             )
                         }
                     }
@@ -1852,16 +1873,19 @@ internal fun <T> Flow<T>.coalesced(windowMs: Long): Flow<T> = flow {
 internal sealed class ChatRow {
     data class Message(val line: TranscriptLine) : ChatRow()
     data class Tools(val id: String, val tools: List<TranscriptLine>) : ChatRow()
+    data class Day(val epochDay: Long) : ChatRow()
 }
 
 internal fun chatRowKey(row: ChatRow): String = when (row) {
     is ChatRow.Message -> "m-${row.line.id}"
     is ChatRow.Tools -> "tools-${row.id}"
+    is ChatRow.Day -> "day-${row.epochDay}"
 }
 
 internal fun chatRowType(row: ChatRow): String = when (row) {
     is ChatRow.Message -> "m-${row.line.kind}"
     is ChatRow.Tools -> "tools"
+    is ChatRow.Day -> "day"
 }
 
 internal fun threadScrollKey(
@@ -1872,6 +1896,7 @@ internal fun threadScrollKey(
     val last = when (val row = rows.lastOrNull()) {
         is ChatRow.Message -> "${row.line.id}:${row.line.text.length}"
         is ChatRow.Tools -> "tools-${row.id}-${row.tools.size}-${row.tools.lastOrNull()?.text?.length ?: 0}"
+        is ChatRow.Day -> "day-${row.epochDay}"
         null -> "empty"
     }
     val think = liveThink?.let { "${it.id}:${it.text.length}" }.orEmpty()
@@ -1933,13 +1958,16 @@ internal fun groupChatRows(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TranscriptBubble(
+internal fun TranscriptBubble(
     line: TranscriptLine,
     modelText: String? = null,
     onCopy: (String) -> Unit = {},
     onQuote: (String) -> Unit = {},
     onEditQueued: (() -> Unit)? = null,
     onCancelQueued: (() -> Unit)? = null,
+    timeMs: Long? = null,
+    zone: ZoneId = ZoneId.systemDefault(),
+    use24h: Boolean = false,
 ) {
     if (line.kind == "thinking") {
         ThinkingBlock(line, onCopy = onCopy)
@@ -1968,6 +1996,9 @@ private fun TranscriptBubble(
     val haptics = LocalHapticFeedback.current
     val copyText = line.text.trim()
     val quotable = line.kind == "user" || line.kind == "assistant"
+    val locale = Locale.getDefault()
+    val clock = timeMs?.takeIf { !lineShowsQueued(line) }?.let { formatClock(it, zone, use24h, locale) }
+    val fullTime = timeMs?.let { formatFullTime(it, zone, use24h, locale) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align,
@@ -1991,7 +2022,7 @@ private fun TranscriptBubble(
                     .combinedClickable(
                         onClick = {},
                         onLongClick = {
-                            if (copyText.isBlank() && onEditQueued == null && onCancelQueued == null) {
+                            if (copyText.isBlank() && onEditQueued == null && onCancelQueued == null && timeMs == null) {
                                 return@combinedClickable
                             }
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2030,6 +2061,25 @@ private fun TranscriptBubble(
                 onQuote = onQuote,
                 onEdit = onEditQueued,
                 onCancel = onCancelQueued,
+                timeText = fullTime,
+            )
+        }
+        if (clock != null) {
+            Text(
+                clock,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+                modifier = Modifier
+                    .testTag("message-time")
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu = true
+                        },
+                    ),
             )
         }
         if (onEditQueued != null || onCancelQueued != null) {
@@ -2045,6 +2095,22 @@ private fun TranscriptBubble(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun DayDivider(label: String) {
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .testTag("day-divider")
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -2331,8 +2397,22 @@ private fun MessageClipMenu(
     onQuote: (String) -> Unit,
     onEdit: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
+    timeText: String? = null,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (timeText != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        timeText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                enabled = false,
+                onClick = {},
+            )
+        }
         DropdownMenuItem(
             text = { Text("Copy") },
             leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
