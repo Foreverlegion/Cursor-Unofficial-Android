@@ -47,6 +47,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -339,38 +341,34 @@ class AgentRepository(
         }
     }
 
-    suspend fun models(): List<ModelItem> = wrap { api.models().items }
+    @Volatile
+    private var modelCache: Pair<Long, List<ModelItem>>? = null
 
+    suspend fun models(): List<ModelItem> {
+        val now = System.currentTimeMillis()
+        modelCache?.let { (at, items) -> if (now - at < MODELS_TTL_MS && items.isNotEmpty()) return items }
+        val items = wrap { api.models().items }
+        if (items.isNotEmpty()) modelCache = now to items
+        return items
+    }
+
+    private val repoGate = Mutex()
+
+    @Volatile
+    private var reposAttemptAt = 0L
+
+    // GET /v1/repositories: 1 / user / minute, 30 / user / hour. GitHub only.
     suspend fun repositories(force: Boolean = false): List<RepositoryItem> {
         if (!force && catalog.reposFresh()) return catalog.repos()
-        val found = coroutineScope {
-            val first = listOf(null, "github", "gitlab", "bitbucket", "azure", "origin").map { provider ->
-                async {
-                    runCatching {
-                        if (provider == null) wrap { api.repositories().items }
-                        else wrap { api.repositories(provider = provider).items }
-                    }.getOrDefault(emptyList())
-                }
-            }.flatMap { it.await() }
-            val seen = first.mapNotNull { it.provider?.trim()?.lowercase()?.takeIf { id -> id.isNotEmpty() } }.toHashSet()
-            val extraIds = seen.filterNot { it in KNOWN_REPO_PROVIDERS }
-            if (extraIds.isEmpty()) {
-                first
-            } else {
-                val more = extraIds.map { provider ->
-                    async {
-                        runCatching { wrap { api.repositories(provider = provider).items } }
-                            .getOrDefault(emptyList())
-                    }
-                }.flatMap { it.await() }
-                first + more
-            }
+        return repoGate.withLock {
+            if (!force && catalog.reposFresh()) return@withLock catalog.repos()
+            if (!RepoRateGate.mayCall(reposAttemptAt, System.currentTimeMillis())) return@withLock catalog.repos()
+            reposAttemptAt = System.currentTimeMillis()
+            val found = runCatching { wrap { api.repositories().items } }.getOrDefault(emptyList())
+            val merged = mergeListedRepos(found, catalog.repos())
+            if (found.isNotEmpty()) catalog.saveRepos(merged)
+            merged
         }
-        val merged = found
-            .distinctBy { it.url.trim().lowercase().removeSuffix(".git") }
-            .sortedBy { it.displayName().lowercase() }
-        if (merged.isNotEmpty()) catalog.saveRepos(merged)
-        return merged.ifEmpty { catalog.repos() }
     }
 
     suspend fun createGithubRepo(
@@ -705,11 +703,27 @@ class AgentRepository(
 
     companion object {
         private val DEFAULT_BRANCHES = listOf("main", "master", "develop")
-        private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
+        private const val MODELS_TTL_MS = 10L * 60L * 1000L
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
         private const val STATS_BUDGET_MS = 60_000L
         private const val USAGE_BUDGET_MS = 45_000L
         private const val USAGE_CALL_MS = 20_000L
     }
+}
+
+internal object RepoRateGate {
+    const val MIN_GAP_MS = 65_000L
+
+    fun mayCall(lastAt: Long, now: Long, minGapMs: Long = MIN_GAP_MS): Boolean =
+        lastAt == 0L || now < lastAt || now - lastAt >= minGapMs
+}
+
+/** The API lists GitHub repos only; cached repos from other hosts (forges, created repos) are kept. */
+internal fun mergeListedRepos(found: List<RepositoryItem>, cached: List<RepositoryItem>): List<RepositoryItem> {
+    if (found.isEmpty()) return cached
+    val others = cached.filterNot { it.host().equals("github.com", ignoreCase = true) }
+    return (found + others)
+        .distinctBy { com.cursorandroid.app.data.api.repoKey(it.url) }
+        .sortedBy { it.displayName().lowercase() }
 }
