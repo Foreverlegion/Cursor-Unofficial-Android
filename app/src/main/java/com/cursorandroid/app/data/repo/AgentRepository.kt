@@ -181,6 +181,10 @@ class AgentRepository(
 
     suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
 
+    /** Agent that opened [prUrl], via GET /v1/agents?prUrl=. */
+    suspend fun agentForPr(prUrl: String): AgentSummary? =
+        wrap { api.listAgents(limit = 5, includeArchived = true, prUrl = prUrl) }.entries().firstOrNull()
+
     suspend fun getRun(agentId: String, runId: String): Run = wrap { api.getRun(agentId, runId) }
 
     suspend fun conversation(agentId: String): AgentConversation = wrap { api.getConversation(agentId) }

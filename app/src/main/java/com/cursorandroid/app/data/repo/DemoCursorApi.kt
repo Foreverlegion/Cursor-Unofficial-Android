@@ -65,8 +65,14 @@ class DemoCursorApi(
         return BranchListResponse(branches = listOf("main", "develop"))
     }
 
-    override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): AgentListResponse {
-        if (!demo()) return live.listAgents(limit, cursor, includeArchived)
+    override suspend fun listAgents(
+        limit: Int,
+        cursor: String?,
+        includeArchived: Boolean,
+        prUrl: String?,
+    ): AgentListResponse {
+        if (!demo()) return live.listAgents(limit, cursor, includeArchived, prUrl)
+        if (prUrl != null) return AgentListResponse()
         return AgentListResponse(items = session.summaries(includeArchived))
     }
 

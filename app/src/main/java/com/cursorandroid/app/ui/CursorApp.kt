@@ -44,6 +44,7 @@ import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
+import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
@@ -142,6 +143,16 @@ private fun CursorAppContent(
             selectedId = null
             pane = Pane.Inbox
             linkNote = LaunchRequest.INVALID_AGENT_LINK
+        }
+        val sharedPr = SafeLinks.pullRequestUrl(launch.shareText)
+        if (sharedPr != null && launch.shareUris.isEmpty() && signedIn) {
+            val found = runCatching { container.repo.agentForPr(sharedPr) }.getOrNull()
+            if (found != null) {
+                selectedId = found.id
+                pane = Pane.Inbox
+                linkNote = null
+                return@LaunchedEffect
+            }
         }
         val hasShare = !launch.shareText.isNullOrBlank() || launch.shareUris.isNotEmpty()
         if (hasShare) {
