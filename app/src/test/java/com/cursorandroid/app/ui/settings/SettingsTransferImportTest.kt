@@ -214,4 +214,57 @@ class SettingsTransferImportTest {
         compose.waitUntil(5_000) { container.store.defaultModel == "opus" }
         assertEquals("key_CURRENT_SESSION", container.store.apiKey)
     }
+
+    /** Sanitized copies of two real exports (structure only). Their sealed block is rebuilt here with a test passphrase. */
+    private fun fixtureSealedFile(name: String): Pair<File, SettingsSnapshot> {
+        val text = checkNotNull(javaClass.classLoader?.getResource("fixtures/$name")) { "missing fixture $name" }.readText()
+        val shape = checkNotNull(SettingsBackup.parse(text)) { "fixture $name does not parse" }
+        val forgeTokens = shape.forges.associate { it.id to "forge_token_${it.provider}" }
+        val mcp = shape.mcpServers.filter { it.headers.isNotEmpty() }
+            .joinToString(",") { """"${it.id}":{"headers":{"Authorization":"Bearer mcp_fixture"},"env":{},"clientSecret":""}""" }
+        val body = """{"apiKey":"key_OLD_REVOKED","githubToken":null,"forgeTokens":{${
+            forgeTokens.entries.joinToString(",") { """"${it.key}":"${it.value}"""" }
+        }},"mcp":{$mcp}}"""
+        val sealed = SecretsVault.seal(body.toByteArray(Charsets.UTF_8), pass.toCharArray())
+        val file = File.createTempFile("fixture", ".json").apply { writeText(SettingsBackup.encode(shape.copy(secrets = sealed))) }
+        return file to shape
+    }
+
+    private fun assertFixtureRestored(shape: SettingsSnapshot) {
+        compose.waitUntil(60_000) { container.store.forges().all { it.token.isNotBlank() } && container.store.forges().size == shape.forges.size }
+        container.store.forges().forEach { assertEquals("forge_token_${it.provider}", it.token) }
+        val withHeader = shape.mcpServers.first { it.headers.isNotEmpty() }.id
+        assertEquals("Bearer mcp_fixture", container.store.storedMcps().first { it.id == withHeader }.headers["Authorization"])
+        assertEquals(shape.mcpServers.size, container.store.storedMcps().size)
+        assertEquals("key_CURRENT_SESSION", container.store.apiKey)
+        assertEquals(shape.conversations.isNotEmpty(), container.conversations.exportAll().isNotEmpty())
+    }
+
+    @Test
+    fun smallOlderExportShapeRestoresForgeTokens() {
+        val (file, shape) = fixtureSealedFile("op-backup-small.json")
+        importThroughDialog(file, pass)
+        assertFixtureRestored(shape)
+    }
+
+    @Test
+    fun largeOlderExportShapeWithChatsRestoresForgeTokens() {
+        val (file, shape) = fixtureSealedFile("op-backup-large.json")
+        assertTrue(shape.conversations.values.sumOf { it.size } > 1000)
+        importThroughDialog(file, pass)
+        assertFixtureRestored(shape)
+    }
+
+    @Test
+    fun fixtureShapesImportWithoutSecretsAndKeepTokensBlank() {
+        val (file, shape) = fixtureSealedFile("op-backup-large.json")
+        backup = file
+        show(stageOnly = false)
+        compose.onNodeWithTag("restore-settings").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Without secrets").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Without secrets").performClick()
+        compose.waitUntil(60_000) { container.store.storedMcps().size == shape.mcpServers.size }
+        assertTrue(container.store.forges().all { it.token.isBlank() })
+        assertEquals("key_CURRENT_SESSION", container.store.apiKey)
+    }
 }
