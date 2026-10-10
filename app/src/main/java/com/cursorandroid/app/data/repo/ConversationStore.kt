@@ -114,12 +114,12 @@ class ConversationStore(context: Context) {
 
     fun settle(agentId: String, runId: String, status: String) {
         rememberLive(agentId, status)
-        val pendingSnap = synchronized(pending) { pending[agentId] }
-        val snap = pendingSnap ?: loadSnap(agentId)
+        val pendingItem = synchronized(pending) { pending[agentId] }
+        val snap = pendingItem?.snap ?: loadSnap(agentId)
         if (snap.runId != runId || snap.runStatus.equals(status, ignoreCase = true)) return
         val next = snap.copy(runStatus = status)
-        if (pendingSnap != null) {
-            synchronized(pending) { pending[agentId] = next }
+        if (pendingItem != null) {
+            synchronized(pending) { pending[agentId] = Versioned(++version, next) }
         } else {
             writeFile(agentId, next)
         }
