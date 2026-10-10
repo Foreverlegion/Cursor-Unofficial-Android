@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -53,7 +51,7 @@ fun ForgesPage(
         status = ""
     }
 
-    Column(modifier.verticalScroll(rememberScrollState())) {
+    Column(modifier) {
         Text(
             "Tokens stay encrypted on this phone. Branch lists and new repos use the matching forge.",
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
