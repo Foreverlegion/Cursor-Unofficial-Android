@@ -237,7 +237,10 @@ class SettingsTransferImportTest {
         assertEquals("Bearer mcp_fixture", container.store.storedMcps().first { it.id == withHeader }.headers["Authorization"])
         assertEquals(shape.mcpServers.size, container.store.storedMcps().size)
         assertEquals("key_CURRENT_SESSION", container.store.apiKey)
-        assertEquals(shape.conversations.isNotEmpty(), container.conversations.exportAll().isNotEmpty())
+        if (shape.conversations.isNotEmpty()) {
+            compose.waitUntil(30_000) { container.conversations.exportAll().size == shape.conversations.size }
+        }
+        assertEquals(shape.conversations.size, container.conversations.exportAll().size)
     }
 
     @Test
