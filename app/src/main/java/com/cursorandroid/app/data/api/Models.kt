@@ -263,6 +263,7 @@ data class ConversationMessage(
     val id: String? = null,
     val type: String? = null,
     val text: String? = null,
+    val createdAt: String? = null,
 ) {
     fun transcriptKind(): String? {
         val key = type?.trim()?.lowercase().orEmpty()
