@@ -1,6 +1,7 @@
 package com.cursorandroid.app.data.api
 
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
@@ -100,6 +101,13 @@ data class ModelSelection(
 )
 
 @Serializable
+data class McpAuth(
+    @SerialName("CLIENT_ID") val clientId: String,
+    @SerialName("CLIENT_SECRET") val clientSecret: String? = null,
+    val scopes: List<String>? = null,
+)
+
+@Serializable
 data class McpServer(
     val name: String,
     val type: String? = null,
@@ -108,6 +116,7 @@ data class McpServer(
     val args: List<String>? = null,
     val headers: Map<String, String>? = null,
     val env: Map<String, String>? = null,
+    val auth: McpAuth? = null,
 )
 
 @Serializable

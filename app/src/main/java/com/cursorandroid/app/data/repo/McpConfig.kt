@@ -1,5 +1,6 @@
 package com.cursorandroid.app.data.repo
 
+import com.cursorandroid.app.data.api.McpAuth
 import com.cursorandroid.app.data.api.McpServer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -20,6 +21,23 @@ fun decodeStoredMcps(raw: String?): List<StoredMcpServer> {
 }
 
 @Serializable
+data class StoredMcpAuth(
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val scopes: List<String> = emptyList(),
+) {
+    fun toApi(): McpAuth? {
+        val id = clientId.trim()
+        if (id.isEmpty()) return null
+        return McpAuth(
+            clientId = id,
+            clientSecret = clientSecret.trim().ifEmpty { null },
+            scopes = scopes.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { null },
+        )
+    }
+}
+
+@Serializable
 data class StoredMcpServer(
     val id: String = UUID.randomUUID().toString(),
     val enabled: Boolean = true,
@@ -30,10 +48,17 @@ data class StoredMcpServer(
     val command: String? = null,
     val args: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
+    val auth: StoredMcpAuth? = null,
 ) {
-    fun kindLabel(): String = if (isStdio()) "Stdio" else "HTTP"
+    fun kindLabel(): String = when {
+        isStdio() -> "Stdio"
+        isSse() -> "SSE"
+        else -> "HTTP"
+    }
 
     fun isStdio(): Boolean = type.equals(TYPE_STDIO, ignoreCase = true)
+
+    fun isSse(): Boolean = type.equals(TYPE_SSE, ignoreCase = true)
 
     fun toApi(): McpServer? {
         val label = name.trim()
@@ -46,20 +71,54 @@ data class StoredMcpServer(
                 type = TYPE_STDIO,
                 command = cmd,
                 args = args.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { null },
-                env = env.filterKeys { it.isNotBlank() }.ifEmpty { null },
+                env = env.filterKeys { it.isNotBlank() }.filterValues { it.isNotBlank() }.ifEmpty { null },
             )
         } else {
             val href = url?.trim().orEmpty()
             if (!SafeLinks.isHttps(href)) return null
             McpServer(
                 name = label,
-                type = TYPE_HTTP,
+                type = if (isSse()) TYPE_SSE else TYPE_HTTP,
                 url = href,
-                headers = headers.filterKeys { it.isNotBlank() }.filterValues { it.isNotBlank() }.ifEmpty { null },
+                headers = headers.filterKeys { it.isNotBlank() }
+                    .filterValues { it.isNotBlank() && !isBareScheme(it) }
+                    .ifEmpty { null },
+                auth = auth?.toApi(),
             )
         }
     }
+
+    /** Header and env values and the OAuth secret are blanked; keys stay so a file shows what to fill in. */
+    fun withoutSecrets(): StoredMcpServer = copy(
+        headers = headers.mapValues { "" },
+        env = env.mapValues { "" },
+        auth = auth?.copy(clientSecret = ""),
+    )
+
+    /** Blank values (from a file without secrets) keep what this phone already has for the same server. */
+    fun fillSecretsFrom(old: StoredMcpServer?): StoredMcpServer {
+        if (old == null) return this
+        return copy(
+            headers = headers.mapValues { (k, v) -> v.ifBlank { old.headers[k].orEmpty() } },
+            env = env.mapValues { (k, v) -> v.ifBlank { old.env[k].orEmpty() } },
+            auth = auth?.let { a ->
+                if (a.clientSecret.isBlank() && old.auth?.clientId == a.clientId) {
+                    a.copy(clientSecret = old.auth?.clientSecret.orEmpty())
+                } else {
+                    a
+                }
+            },
+        )
+    }
+
+    fun hasSecrets(): Boolean =
+        headers.values.any { it.isNotBlank() } || env.values.any { it.isNotBlank() } || !auth?.clientSecret.isNullOrBlank()
 }
+
+/** `Bearer` with no token after it, as a preset leaves it. */
+fun isBareScheme(value: String): Boolean = value.trim().lowercase() in BARE_SCHEMES
+
+private val BARE_SCHEMES = setOf("bearer", "basic", "token")
 
 fun storedMcpsToApi(items: List<StoredMcpServer>, max: Int = 50): List<McpServer>? {
     val out = LinkedHashMap<String, McpServer>()
@@ -123,3 +182,4 @@ fun argLines(args: List<String>): String = args.joinToString("\n")
 
 const val TYPE_HTTP = "http"
 const val TYPE_STDIO = "stdio"
+const val TYPE_SSE = "sse"
