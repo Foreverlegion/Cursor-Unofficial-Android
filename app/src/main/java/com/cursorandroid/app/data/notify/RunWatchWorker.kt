@@ -24,6 +24,10 @@ class RunWatchWorker(
         val agentId = inputData.getString(KEY_AGENT_ID) ?: return Result.failure()
         val runId = inputData.getString(KEY_RUN_ID) ?: return Result.failure()
         val agentName = inputData.getString(KEY_AGENT_NAME)
+        if (VisibleAgent.isOpenInForeground(agentId)) {
+            RunWatchScheduler.chainNextPoll(applicationContext, agentId, runId, agentName)
+            return Result.success()
+        }
         return try {
             val run = app.container.repo.getRun(agentId, runId)
             when {
@@ -37,7 +41,7 @@ class RunWatchWorker(
                 run.isActive() -> {
                     RunWatchStore.add(applicationContext, WatchItem(agentId, run.id, agentName))
                     ApprovalStreamHub.attach(applicationContext, agentId, run.id, agentName)
-                    RunWatchScheduler.enqueuePoll(applicationContext, agentId, run.id, agentName)
+                    RunWatchScheduler.chainNextPoll(applicationContext, agentId, run.id, agentName)
                     Result.success()
                 }
                 else -> {
@@ -46,7 +50,7 @@ class RunWatchWorker(
                 }
             }
         } catch (_: Exception) {
-            RunWatchScheduler.enqueuePoll(applicationContext, agentId, runId, agentName)
+            RunWatchScheduler.chainNextPoll(applicationContext, agentId, runId, agentName)
             Result.success()
         }
     }

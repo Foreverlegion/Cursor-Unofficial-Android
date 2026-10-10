@@ -64,7 +64,25 @@ object RunWatchScheduler {
         }
     }
 
+    fun watchWorkName(runId: String) = "watch-$runId"
+
+    /** Leaves a pending or running poll for the run alone. Only the worker itself chains the next one. */
     fun enqueuePoll(context: Context, agentId: String, runId: String, agentName: String?) {
+        enqueue(context, agentId, runId, agentName, ExistingWorkPolicy.KEEP)
+    }
+
+    /** Called from inside the running worker: queues the next poll behind it instead of cancelling it. */
+    fun chainNextPoll(context: Context, agentId: String, runId: String, agentName: String?) {
+        enqueue(context, agentId, runId, agentName, ExistingWorkPolicy.APPEND_OR_REPLACE)
+    }
+
+    private fun enqueue(
+        context: Context,
+        agentId: String,
+        runId: String,
+        agentName: String?,
+        policy: ExistingWorkPolicy,
+    ) {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -80,8 +98,8 @@ object RunWatchScheduler {
             )
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            "watch-$runId",
-            ExistingWorkPolicy.REPLACE,
+            watchWorkName(runId),
+            policy,
             request,
         )
     }
@@ -90,7 +108,7 @@ object RunWatchScheduler {
         val app = context.applicationContext
         val wm = WorkManager.getInstance(app)
         wm.cancelUniqueWork("inbox-sweep")
-        RunWatchStore.all(app).forEach { wm.cancelUniqueWork("watch-${it.runId}") }
+        RunWatchStore.all(app).forEach { wm.cancelUniqueWork(watchWorkName(it.runId)) }
         ApprovalStreamHub.stop(app)
         RunWatchStore.clear(app)
     }
