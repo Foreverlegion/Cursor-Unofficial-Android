@@ -3,7 +3,7 @@ name: signed-apk
 # Builds an APK (not an AAB) signed with the release keystore, checks it against the cert of the published
 # release APK, and uploads it as a workflow artifact. Never tags, releases, or publishes anything.
 # Runs on manual dispatch, or on a push to a Backend/** branch that touches this file (bump the build note below).
-# Build note: fix settings import StackOverflowError (commit self-call).
+# Build note: settings import fix, sanitized backup fixtures.
 on:
   workflow_dispatch:
     inputs:
