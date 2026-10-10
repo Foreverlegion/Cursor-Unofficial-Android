@@ -747,13 +747,29 @@ class ThreadViewModel(
                         }
                         is StreamEvent.Result -> {
                             clearApprovals()
-                            run = run?.copy(status = event.status, result = event.text)
+                            run = run?.copy(
+                                status = event.status,
+                                result = event.text,
+                                durationMs = event.durationMs ?: run?.durationMs,
+                                git = event.git ?: run?.git,
+                            )
+                            event.git?.branches?.firstOrNull()?.let { git ->
+                                container.catalog.saveGit(GitSnap(agentId, git.branch, git.prUrl, git.repoUrl))
+                                container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
+                            }
                             if (!event.text.isNullOrBlank()) {
                                 upsert("assistant-$runId", "assistant", event.text, runId)
                             }
                             streaming = false
                             receiving = false
-                            container.notifier.notifyIfNeeded(agentId, agent?.name, runId, event.status, event.text)
+                            container.notifier.notifyIfNeeded(
+                                agentId,
+                                agent?.name,
+                                runId,
+                                event.status,
+                                event.text,
+                                event.git?.branches?.firstOrNull()?.prUrl,
+                            )
                             refreshArtifacts()
                             flushOutbound()
                         }
@@ -824,7 +840,14 @@ class ThreadViewModel(
             refreshArtifacts()
         }
         if (latest.isTerminal()) {
-            container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
+            container.notifier.notifyIfNeeded(
+                agentId,
+                agent?.name,
+                latest.id,
+                latest.status,
+                latest.result,
+                latest.git?.branches?.firstOrNull()?.prUrl,
+            )
         }
     }
 
@@ -1567,6 +1590,10 @@ fun ThreadScreen(
             repoUrl = git?.repoUrl ?: cached?.repoUrl,
             prUrl = git?.prUrl ?: cached?.prUrl,
             tokens = vm.usage?.totalUsage?.totalTokens,
+            lastRun = lastRunLine(
+                vm.run?.durationMs,
+                vm.usage?.runs?.firstOrNull { it.id == vm.run?.id }?.usage?.totalTokens,
+            ),
             onOpenUrl = { url ->
                 SafeLinks.open(context, url)
             },

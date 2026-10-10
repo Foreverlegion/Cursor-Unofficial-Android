@@ -30,7 +30,14 @@ class RunWatchWorker(
             val run = app.container.repo.getRun(agentId, runId)
             when {
                 run.isTerminal() -> {
-                    app.container.notifier.notifyIfNeeded(agentId, agentName, run.id, run.status, run.result)
+                    app.container.notifier.notifyIfNeeded(
+                        agentId,
+                        agentName,
+                        run.id,
+                        run.status,
+                        run.result,
+                        run.git?.branches?.firstOrNull()?.prUrl,
+                    )
                     RunWatchStore.remove(applicationContext, run.id)
                     ApprovalStreamHub.close(run.id)
                     ApprovalStreamHub.detach(applicationContext, run.id)

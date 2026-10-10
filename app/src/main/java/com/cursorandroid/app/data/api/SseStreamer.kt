@@ -32,6 +32,8 @@ sealed class StreamEvent {
         val status: String?,
         val text: String?,
         override val eventId: String? = null,
+        val durationMs: Long? = null,
+        val git: GitState? = null,
     ) : StreamEvent()
     data class StreamError(val message: String, val recoverable: Boolean = false) : StreamEvent()
     data object Done : StreamEvent()
@@ -122,10 +124,14 @@ class SseStreamer(
                 status = obj.string("status"),
                 text = obj.string("text"),
                 eventId = id,
+                durationMs = obj.string("durationMs")?.toLongOrNull(),
+                git = obj?.get("git")?.let { runCatching { json.decodeFromJsonElement(GitState.serializer(), it) }.getOrNull() },
             )
             "error" -> {
-                val message = obj.string("message") ?: "stream error"
-                val recoverable = message.contains("no longer available", ignoreCase = true) ||
+                val code = obj.string("code")
+                val message = obj.string("message") ?: code ?: "stream error"
+                val recoverable = code == "stream_expired" ||
+                    message.contains("no longer available", ignoreCase = true) ||
                     message.contains("stream_expired", ignoreCase = true)
                 StreamEvent.StreamError(message, recoverable)
             }
