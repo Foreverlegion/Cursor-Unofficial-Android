@@ -152,6 +152,12 @@ data class CloudEnvironment(
 )
 
 @Serializable
+data class EnvironmentListResponse(
+    val items: List<CloudEnvironment> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
 data class EnvironmentBuildFailure(
     val type: String? = null,
     val code: String? = null,

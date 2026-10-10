@@ -4,6 +4,7 @@ import com.cursorandroid.app.data.api.AgentConversation
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentListResponse
 import com.cursorandroid.app.data.api.AgentSummary
+import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.McpServer
 import com.cursorandroid.app.data.api.TokenUsage
@@ -43,6 +44,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -260,6 +264,14 @@ class AgentRepository(
 
     suspend fun usage(agentId: String) = runCatching { wrap { api.agentUsage(agentId) } }.getOrNull()
 
+    /** Usage for a finished latest run is final, so it is served from disk once read. */
+    suspend fun settledUsage(agentId: String, runId: String, terminal: Boolean): AgentUsageResponse? {
+        if (terminal) catalog.usage(agentId)?.let { (at, cached) -> if (at == runId) return cached }
+        val fresh = usage(agentId) ?: return catalog.usage(agentId)?.second
+        if (terminal) catalog.saveUsage(agentId, runId, fresh)
+        return fresh
+    }
+
     suspend fun recentUsage(
         days: Int = USAGE_WINDOW_DAYS,
         limit: Int = USAGE_CHAT_CAP,
@@ -357,16 +369,96 @@ class AgentRepository(
         }
     }
 
-    @Volatile
-    private var modelCache: Pair<Long, List<ModelItem>>? = null
+    private val bg = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val revalidating = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    suspend fun models(): List<ModelItem> {
-        val now = System.currentTimeMillis()
-        modelCache?.let { (at, items) -> if (now - at < MODELS_TTL_MS && items.isNotEmpty()) return items }
-        val items = wrap { api.models().items }
-        if (items.isNotEmpty()) modelCache = now to items
-        return items
+    /**
+     * Stale-while-revalidate over [CatalogCache]: cached rows are returned at once;
+     * past [ttlMs] one background refresh per key updates the cache for next read.
+     * With nothing cached the call waits on the network.
+     */
+    private suspend fun <T> cachedList(
+        key: String,
+        ttlMs: Long,
+        force: Boolean,
+        read: () -> List<T>,
+        save: (List<T>) -> Unit,
+        fetch: suspend () -> List<T>,
+    ): List<T> {
+        val have = read()
+        if (!force && have.isNotEmpty()) {
+            if (!catalog.fresh(key, ttlMs)) revalidate(key) { fetch().takeIf { it.isNotEmpty() }?.let(save) }
+            return have
+        }
+        val got = try {
+            fetch()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (have.isNotEmpty()) return have
+            throw e
+        }
+        if (got.isNotEmpty()) save(got)
+        return got.ifEmpty { have }
     }
+
+    private fun revalidate(key: String, block: suspend () -> Unit) {
+        if (!revalidating.add(key)) return
+        bg.launch {
+            try {
+                runCatching { block() }
+            } finally {
+                revalidating.remove(key)
+            }
+        }
+    }
+
+    fun cachedModels(): List<ModelItem> = catalog.models()
+
+    fun cachedGithubLogin(): String? = store.githubToken?.let { catalog.forgeLogin(tokenFingerprint(it)) }
+
+    /** GitHub login for the saved token; cached a day under a one-way token fingerprint. */
+    suspend fun githubLogin(): String? {
+        val token = store.githubToken?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val print = tokenFingerprint(token)
+        catalog.forgeLogin(print)?.let { return it }
+        val login = withContext(Dispatchers.IO) { runCatching { GithubRepos.authenticatedLogin(token) }.getOrNull() }
+        if (!login.isNullOrBlank()) catalog.saveForgeLogin(print, login)
+        return login
+    }
+
+    private fun tokenFingerprint(token: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(token.trim().toByteArray())
+        return digest.take(8).joinToString("") { "%02x".format(it) }
+    }
+
+    suspend fun models(force: Boolean = false): List<ModelItem> =
+        cachedList("models", CatalogCache.MODELS_TTL, force, catalog::models, catalog::saveModels) {
+            wrap { api.models().items }
+        }
+
+    fun cachedEnvironments(): List<CloudEnvironment> = catalog.listedEnvironments()
+
+    /** GET /v1/environments, all pages. Team environments can lag on access checks, so a page may be short. */
+    suspend fun environments(force: Boolean = false): List<CloudEnvironment> =
+        cachedList(
+            "listed_environments",
+            CatalogCache.ENVIRONMENTS_TTL,
+            force,
+            catalog::listedEnvironments,
+            catalog::saveListedEnvironments,
+        ) {
+            val out = ArrayList<CloudEnvironment>()
+            var cursor: String? = null
+            var pages = 0
+            do {
+                val page = wrap { api.listEnvironments(limit = 100, cursor = cursor) }
+                out += page.items
+                cursor = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+                pages += 1
+            } while (cursor != null && pages < ENV_PAGES)
+            out.distinctBy { it.id }.sortedBy { it.name.lowercase() }
+        }
 
     private val repoGate = Mutex()
 
@@ -376,6 +468,15 @@ class AgentRepository(
     // GET /v1/repositories: 1 / user / minute, 30 / user / hour. GitHub only.
     suspend fun repositories(force: Boolean = false): List<RepositoryItem> {
         if (!force && catalog.reposFresh()) return catalog.repos()
+        val cached = catalog.repos()
+        if (!force && cached.isNotEmpty()) {
+            revalidate("repos") { repositoriesLocked(force = false) }
+            return cached
+        }
+        return repositoriesLocked(force)
+    }
+
+    private suspend fun repositoriesLocked(force: Boolean): List<RepositoryItem> {
         return repoGate.withLock {
             if (!force && catalog.reposFresh()) return@withLock catalog.repos()
             if (!RepoRateGate.mayCall(reposAttemptAt, System.currentTimeMillis())) return@withLock catalog.repos()
@@ -444,6 +545,15 @@ class AgentRepository(
         if (catalog.branchesFresh(repoUrl)) {
             return catalog.branches(repoUrl)
         }
+        val cached = catalog.branches(repoUrl)
+        if (cached.isNotEmpty()) {
+            revalidate("branches:$repoUrl") { fetchBranches(repoUrl, defaultBranch) }
+            return cached
+        }
+        return fetchBranches(repoUrl, defaultBranch)
+    }
+
+    private suspend fun fetchBranches(repoUrl: String, defaultBranch: String?): List<String> {
         val fromApi = runCatching { wrap { api.repositoryBranches(repoUrl).names() } }.getOrDefault(emptyList())
         val fromForge = store.forgeForRepo(repoUrl)?.let { forge ->
             runCatching { ForgeClient.listBranches(forge, repoUrl) }.getOrDefault(emptyList())
@@ -556,16 +666,17 @@ class AgentRepository(
         }.getOrDefault(live)
     }
 
-    suspend fun listPools(): List<WorkerPool> {
+    suspend fun listPools(force: Boolean = false): List<WorkerPool> =
+        cachedList("pools", CatalogCache.POOLS_TTL, force, catalog::pools, { catalog.savePools(it) }) { fetchPools() }
+
+    private suspend fun fetchPools(): List<WorkerPool> {
         val listed = runCatching {
             wrap { api.listPools(scope = "all", includeStale = false) }.pools
         }.getOrElse {
             runCatching { wrap { api.listPools(includeStale = false) }.pools }.getOrDefault(emptyList())
         }
-        val named = listed.filter { it.poolName.isNotBlank() }
+        return listed.filter { it.poolName.isNotBlank() }
             .distinctBy { "${it.scope}:${it.poolName.lowercase()}" }
-        if (named.isNotEmpty()) catalog.savePools(named)
-        return named
     }
 
     suspend fun workersSummary(): WorkersSummaryResponse? {
@@ -744,7 +855,7 @@ class AgentRepository(
 
     companion object {
         private val DEFAULT_BRANCHES = listOf("main", "master", "develop")
-        private const val MODELS_TTL_MS = 10L * 60L * 1000L
+        private const val ENV_PAGES = 10
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
         private const val WORKER_PAGE_SIZE = 50
