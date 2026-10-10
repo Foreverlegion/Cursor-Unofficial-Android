@@ -1,5 +1,9 @@
 package com.cursorandroid.app.ui.settings
 
+import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -20,6 +24,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +44,10 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import com.cursorandroid.app.data.repo.CURSOR_MCP_SETTINGS_URL
 import com.cursorandroid.app.data.repo.MCP_PRESETS
+import com.cursorandroid.app.data.repo.MCP_TEMPLATE_NAME
 import com.cursorandroid.app.data.repo.McpPreset
+import com.cursorandroid.app.data.repo.McpTemplateFile
+import com.cursorandroid.app.data.repo.mcpTemplateJson
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.StoredMcpAuth
 import com.cursorandroid.app.data.repo.TYPE_SSE
@@ -52,10 +63,15 @@ import com.cursorandroid.app.data.repo.parseArgLines
 import com.cursorandroid.app.data.repo.parseEnvLines
 import com.cursorandroid.app.data.repo.parseHeaderLines
 import com.cursorandroid.app.data.repo.storedMcpsToApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun McpListSection(store: ApiKeyStore) {
+fun McpListSection(store: ApiKeyStore, snackbar: SnackbarHostState? = null) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf(store.storedMcps()) }
     var edit by remember { mutableStateOf<StoredMcpServer?>(null) }
     var editOauthHint by remember { mutableStateOf(false) }
@@ -65,6 +81,48 @@ fun McpListSection(store: ApiKeyStore) {
     var exporter by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     val ready = storedMcpsToApi(items).orEmpty()
+
+    fun announce(message: String, open: Uri? = null) {
+        if (snackbar == null) {
+            status = message
+            return
+        }
+        scope.launch {
+            val result = snackbar.showSnackbar(
+                message = message,
+                actionLabel = if (open != null) "Open" else null,
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed && open != null && !McpTemplateFile.open(context, open)) {
+                snackbar.showSnackbar("No app can open it. It is in your Downloads folder.")
+            }
+        }
+    }
+
+    fun createTemplate() {
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    McpTemplateFile.saveToDownloads(context.contentResolver)
+                } else {
+                    null
+                }
+            }
+            if (saved == null) announce("Could not create the template") else announce("Saved ${saved.displayName} to Downloads", saved.uri)
+        }
+    }
+
+    val templateSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(mcpTemplateJson().toByteArray(Charsets.UTF_8)) } ?: error("no stream")
+                }.isSuccess
+            }
+            if (ok) announce("Saved the template", uri) else announce("Could not create the template")
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -130,10 +188,15 @@ fun McpListSection(store: ApiKeyStore) {
                 }
             }
             TextButton(onClick = { exporter = true }, enabled = items.isNotEmpty()) { Text("Export") }
+            TextButton(
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) createTemplate() else templateSaver.launch(MCP_TEMPLATE_NAME)
+                },
+            ) { Text("Create MCP sheet for import") }
         }
         Text(
             "Cursor has no API that lists the MCP servers saved on your account, so they cannot be pulled in. " +
-                "Import a mcp.json instead, such as ~/.cursor/mcp.json on a PC.",
+                "Import a mcp.json instead, such as ~/.cursor/mcp.json on a PC. Create MCP sheet for import saves a template to Downloads.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

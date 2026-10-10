@@ -39,6 +39,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -275,9 +277,11 @@ internal fun SettingsScreenContent(
         )
     }
 
+    val snackbar = remember { SnackbarHostState() }
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text(page.title) },
@@ -494,7 +498,7 @@ internal fun SettingsScreenContent(
                                     Icon(Icons.Outlined.Info, contentDescription = "About MCP")
                                 }
                             }
-                            McpListSection(container.store)
+                            McpListSection(container.store, snackbar)
                         }
                         val forgeCount = container.store.forges().size
                         SettingsLinkRow(
