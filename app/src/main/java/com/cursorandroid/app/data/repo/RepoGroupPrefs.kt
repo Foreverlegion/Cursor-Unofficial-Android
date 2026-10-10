@@ -1,21 +1,22 @@
 package com.cursorandroid.app.data.repo
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** Local look for one repo group in the agent list. Keyed by the group key (the repo path, lowercase). */
 @Serializable
 data class RepoGroupStyle(
-    val name: String? = null,
-    val favorite: Boolean = false,
-    val color: Int = 0,
+    @SerialName("name") val name: String? = null,
+    @SerialName("favorite") val favorite: Boolean = false,
+    @SerialName("color") val color: Int = 0,
 ) {
     val isDefault: Boolean get() = name.isNullOrBlank() && !favorite && color == 0
 }
 
 @Serializable
 data class RepoGroupPrefs(
-    val styles: Map<String, RepoGroupStyle> = emptyMap(),
-    val order: List<String> = emptyList(),
+    @SerialName("styles") val styles: Map<String, RepoGroupStyle> = emptyMap(),
+    @SerialName("order") val order: List<String> = emptyList(),
 ) {
     fun style(key: String): RepoGroupStyle = styles[key] ?: RepoGroupStyle()
 

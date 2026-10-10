@@ -35,6 +35,11 @@ class MainActivity : ComponentActivity() {
         consumeNotice(intent, application as CursorAndroidApp)
     }
 
+    override fun onStop() {
+        (application as CursorAndroidApp).container.ui.flush()
+        super.onStop()
+    }
+
     private fun consumeNotice(intent: Intent?, app: CursorAndroidApp) {
         val id = RunNotifier.noticeIdFrom(intent) ?: return
         app.container.notices.dismiss(id)

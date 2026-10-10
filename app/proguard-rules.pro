@@ -17,3 +17,15 @@
 -dontwarn com.google.errorprone.annotations.CheckReturnValue
 -dontwarn com.google.errorprone.annotations.Immutable
 -dontwarn com.google.errorprone.annotations.RestrictedApi
+
+# Persisted JSON (ChatMeta, RepoGroupPrefs, RepoGroupStyle, SettingsSnapshot and the other stored models)
+# is read back after an update, so its serializers and their @SerialName keys must survive shrinking.
+# DataStore preference keys are string constants and need no rule; its protobuf-lite message fields do.
+-keepclassmembers class com.cursorandroid.app.data.repo.** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,includedescriptorclasses class com.cursorandroid.app.data.repo.**$$serializer { *; }
+-keepclassmembers class * extends androidx.datastore.preferences.protobuf.GeneratedMessageLite {
+    <fields>;
+}

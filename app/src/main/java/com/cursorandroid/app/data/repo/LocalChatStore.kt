@@ -1,22 +1,14 @@
 package com.cursorandroid.app.data.repo
 
-import android.content.Context
-import androidx.core.content.edit
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-class LocalChatStore(context: Context) {
-    private val app = context.applicationContext
-    private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val durable = app.getSharedPreferences(PREFS_DURABLE, Context.MODE_PRIVATE)
+class LocalChatStore(private val ui: UiPrefsStore) {
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
-    }
-
-    init {
-        recover()
     }
 
     fun snapshot(): Map<String, ChatMeta> = loadAll()
@@ -107,59 +99,45 @@ class LocalChatStore(context: Context) {
     }
 
     var inboxWorkingOnly: Boolean
-        get() = durable.getBoolean(INBOX_WORKING, false)
-        set(value) {
-            durable.edit { putBoolean(INBOX_WORKING, value) }
-        }
+        get() = ui[UiKeys.inboxWorkingOnly] ?: false
+        set(value) = ui.put(UiKeys.inboxWorkingOnly, value)
 
     var inboxShowArchived: Boolean
-        get() = durable.getBoolean(INBOX_ARCHIVED, false)
-        set(value) {
-            durable.edit { putBoolean(INBOX_ARCHIVED, value) }
-        }
+        get() = ui[UiKeys.inboxShowArchived] ?: false
+        set(value) = ui.put(UiKeys.inboxShowArchived, value)
 
     var inboxShowHidden: Boolean
-        get() = durable.getBoolean(INBOX_HIDDEN, false)
-        set(value) {
-            durable.edit { putBoolean(INBOX_HIDDEN, value) }
-        }
+        get() = ui[UiKeys.inboxShowHidden] ?: false
+        set(value) = ui.put(UiKeys.inboxShowHidden, value)
 
     var groupByRepo: Boolean
-        get() = durable.getBoolean(GROUP_BY_REPO, true)
-        set(value) {
-            durable.edit { putBoolean(GROUP_BY_REPO, value) }
-        }
+        get() = ui[UiKeys.groupByRepo] ?: true
+        set(value) = ui.put(UiKeys.groupByRepo, value)
 
     var compactCards: Boolean
-        get() = durable.getBoolean(COMPACT_CARDS, true)
-        set(value) {
-            durable.edit { putBoolean(COMPACT_CARDS, value) }
-        }
+        get() = ui[UiKeys.compactCards] ?: true
+        set(value) = ui.put(UiKeys.compactCards, value)
 
     var hideFinishedDays: Int
         get() {
-            val days = durable.getInt(HIDE_FINISHED, 0)
+            val days = ui[UiKeys.hideFinishedDays] ?: 0
             return if (days == 1 || days == 3 || days == 7) days else 0
         }
         set(value) {
             val days = if (value == 1 || value == 3 || value == 7) value else 0
-            durable.edit { putInt(HIDE_FINISHED, days) }
+            ui.put(UiKeys.hideFinishedDays, days)
         }
 
     var collapsedRepos: Set<String>
-        get() = durable.getStringSet(COLLAPSED_REPOS, emptySet())?.toSet() ?: emptySet()
-        set(value) {
-            durable.edit { putStringSet(COLLAPSED_REPOS, value.toHashSet()) }
-        }
+        get() = ui[UiKeys.collapsedRepos]?.toSet() ?: emptySet()
+        set(value) = ui.put(UiKeys.collapsedRepos, value.toSet())
 
     var repoGroupPrefs: RepoGroupPrefs
         get() {
-            val raw = durable.getString(REPO_GROUP_PREFS, null) ?: return RepoGroupPrefs()
+            val raw = ui[UiKeys.repoGroupPrefs] ?: return RepoGroupPrefs()
             return runCatching { json.decodeFromString<RepoGroupPrefs>(raw) }.getOrDefault(RepoGroupPrefs())
         }
-        set(value) {
-            durable.edit { putString(REPO_GROUP_PREFS, json.encodeToString(value)) }
-        }
+        set(value) = ui.put(UiKeys.repoGroupPrefs, json.encodeToString(value))
 
     fun setOpenFinishedPr(agentId: String, open: Boolean) {
         update(agentId) { it.copy(openFinishedPr = open) }
@@ -192,52 +170,30 @@ class LocalChatStore(context: Context) {
     }
 
     private fun persist(all: Map<String, ChatMeta>) {
-        val encoded = json.encodeToString(all)
-        prefs.edit { putString(ALL, encoded) }
-        durable.edit { putString(MIRROR, encoded) }
+        ui.put(UiKeys.chatMeta, json.encodeToString(all))
     }
 
     private fun loadAll(): Map<String, ChatMeta> {
-        val raw = prefs.getString(ALL, null)
-            ?: durable.getString(MIRROR, null)
-            ?: return emptyMap()
-        return runCatching { json.decodeFromString<Map<String, ChatMeta>>(raw) }
-            .getOrDefault(emptyMap())
-    }
-
-    private fun recover() {
-        val found = loadAll()
-        if (found.isNotEmpty()) persist(found)
-    }
-
-    companion object {
-        private const val PREFS = "local_chats"
-        private const val PREFS_DURABLE = "cursor_prefs"
-        private const val ALL = "meta"
-        private const val MIRROR = "chat_meta"
-        private const val INBOX_WORKING = "inbox_working_only"
-        private const val INBOX_ARCHIVED = "inbox_archived_view"
-        private const val INBOX_HIDDEN = "inbox_show_hidden"
-        private const val GROUP_BY_REPO = "agent_group_by_repo"
-        private const val COMPACT_CARDS = "agent_compact_cards"
-        private const val HIDE_FINISHED = "agent_hide_finished_days"
-        private const val COLLAPSED_REPOS = "agent_collapsed_repos"
-        private const val REPO_GROUP_PREFS = "agent_repo_group_prefs"
+        val raw = ui[UiKeys.chatMeta] ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, ChatMeta>>(raw) }.getOrElse {
+            if (ui[UiKeys.chatMetaUnreadable] == null) ui.put(UiKeys.chatMetaUnreadable, raw)
+            emptyMap()
+        }
     }
 }
 
 @Serializable
 data class ChatMeta(
-    val title: String? = null,
-    val favorite: Boolean = false,
-    val favoritedAt: Long = 0L,
-    val hidden: Boolean = false,
-    val muted: Boolean = false,
-    val repoUrl: String? = null,
-    val baseBranch: String? = null,
-    val startSha: String? = null,
-    val ignoredRemoteSha: String? = null,
-    val pinned: Boolean = false,
-    val pinnedAt: Long = 0L,
-    val openFinishedPr: Boolean = false,
+    @SerialName("title") val title: String? = null,
+    @SerialName("favorite") val favorite: Boolean = false,
+    @SerialName("favoritedAt") val favoritedAt: Long = 0L,
+    @SerialName("hidden") val hidden: Boolean = false,
+    @SerialName("muted") val muted: Boolean = false,
+    @SerialName("repoUrl") val repoUrl: String? = null,
+    @SerialName("baseBranch") val baseBranch: String? = null,
+    @SerialName("startSha") val startSha: String? = null,
+    @SerialName("ignoredRemoteSha") val ignoredRemoteSha: String? = null,
+    @SerialName("pinned") val pinned: Boolean = false,
+    @SerialName("pinnedAt") val pinnedAt: Long = 0L,
+    @SerialName("openFinishedPr") val openFinishedPr: Boolean = false,
 )

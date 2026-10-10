@@ -18,6 +18,7 @@ import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
+import com.cursorandroid.app.data.repo.UiPrefsStore
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -28,9 +29,10 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
 
 class AppContainer(context: Context) {
-    val store = ApiKeyStore(context)
+    val ui = UiPrefsStore.open(context)
+    val store = ApiKeyStore(context, ui)
     val conversations = ConversationStore(context)
-    val chats = LocalChatStore(context)
+    val chats = LocalChatStore(ui)
     val drafts = DraftStore(context)
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)

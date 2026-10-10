@@ -41,7 +41,12 @@ worker = re.compile(
     r"void <init>\(android\.content\.Context,androidx\.work\.WorkerParameters\)(?::[\d:]+)? -> <init>"
 )
 
+anymember = re.compile(r".")
+
 required = {
+    "com.cursorandroid.app.data.repo.ChatMeta$$serializer": anymember,
+    "com.cursorandroid.app.data.repo.RepoGroupPrefs$$serializer": anymember,
+    "com.cursorandroid.app.data.repo.RepoGroupStyle$$serializer": anymember,
     "androidx.work.impl.WorkDatabase_Impl": noarg,
     "androidx.work.WorkManagerInitializer": noarg,
     "androidx.emoji2.text.EmojiCompatInitializer": noarg,
@@ -57,7 +62,7 @@ missing = []
 for cls, pattern in required.items():
     found = blocks.get(cls)
     if found is None:
-        missing.append(f"{cls} was renamed or removed")
+        missing.append(f"{cls} was renamed or removed (stored JSON keys depend on it)")
         continue
     if not any(pattern.search(member) for member in found):
         missing.append(f"{cls} has no matching <init> in the minified mapping")

@@ -22,9 +22,11 @@ import com.cursorandroid.app.data.repo.migrateForges
 import com.cursorandroid.app.data.repo.migrateLegacyMcp
 import com.cursorandroid.app.data.repo.storedMcpsToApi
 import com.cursorandroid.app.data.repo.upsertPublicGithub
+import com.cursorandroid.app.data.repo.UiKeys
+import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.upsertRepoDefault
 
-class ApiKeyStore(context: Context) {
+class ApiKeyStore(context: Context, private val ui: UiPrefsStore) {
     private val app = context.applicationContext
     private val primary = openEncrypted(app, PREFS)
     private val backup = openEncrypted(app, PREFS_BAK)
@@ -94,49 +96,37 @@ class ApiKeyStore(context: Context) {
 
     var themeColor: Int
         get() {
-            val stored = notifyPrefs.getInt(THEME_COLOR, DEFAULT_THEME_COLOR)
+            val stored = ui[UiKeys.themeColor] ?: DEFAULT_THEME_COLOR
             return if ((stored ushr 24) == 0) DEFAULT_THEME_COLOR else stored
         }
         set(value) {
             val packed = if ((value ushr 24) == 0) DEFAULT_THEME_COLOR else value
-            notifyPrefs.edit { putInt(THEME_COLOR, packed) }
+            ui.put(UiKeys.themeColor, packed)
         }
 
     var uiFont: String
-        get() = notifyPrefs.getString(UI_FONT, "system").orEmpty()
-        set(value) {
-            notifyPrefs.edit { putString(UI_FONT, value) }
-        }
+        get() = ui[UiKeys.uiFont] ?: "system"
+        set(value) = ui.put(UiKeys.uiFont, value)
 
     var codeFont: String
-        get() = notifyPrefs.getString(CODE_FONT, "system_mono").orEmpty()
-        set(value) {
-            notifyPrefs.edit { putString(CODE_FONT, value) }
-        }
+        get() = ui[UiKeys.codeFont] ?: "system_mono"
+        set(value) = ui.put(UiKeys.codeFont, value)
 
     var textScalePct: Int
-        get() = notifyPrefs.getInt(TEXT_SCALE, 100)
-        set(value) {
-            notifyPrefs.edit { putInt(TEXT_SCALE, value) }
-        }
+        get() = ui[UiKeys.textScalePct] ?: 100
+        set(value) = ui.put(UiKeys.textScalePct, value)
 
     var chatDensity: String
-        get() = notifyPrefs.getString(CHAT_DENSITY, "comfortable").orEmpty()
-        set(value) {
-            notifyPrefs.edit { putString(CHAT_DENSITY, value) }
-        }
+        get() = ui[UiKeys.chatDensity] ?: "comfortable"
+        set(value) = ui.put(UiKeys.chatDensity, value)
 
     var showInboxEnvs: Boolean
-        get() = notifyPrefs.getBoolean(SHOW_INBOX_ENVS, true)
-        set(value) {
-            notifyPrefs.edit { putBoolean(SHOW_INBOX_ENVS, value) }
-        }
+        get() = ui[UiKeys.showInboxEnvs] ?: true
+        set(value) = ui.put(UiKeys.showInboxEnvs, value)
 
     var showInboxRemote: Boolean
-        get() = notifyPrefs.getBoolean(SHOW_INBOX_REMOTE, true)
-        set(value) {
-            notifyPrefs.edit { putBoolean(SHOW_INBOX_REMOTE, value) }
-        }
+        get() = ui[UiKeys.showInboxRemote] ?: true
+        set(value) = ui.put(UiKeys.showInboxRemote, value)
 
     var batteryAsked: Boolean
         get() = notifyPrefs.getBoolean(BATTERY_ASKED, false)
@@ -333,13 +323,6 @@ class ApiKeyStore(context: Context) {
         private const val MCP_LIST = "mcp_list"
         private const val DEFAULT_MODEL = "default_model"
         private const val SHOW_MIC = "show_microphone"
-        private const val THEME_COLOR = "theme_color"
-        private const val UI_FONT = "ui_font"
-        private const val CODE_FONT = "code_font"
-        private const val TEXT_SCALE = "text_scale_pct"
-        private const val CHAT_DENSITY = "chat_density"
-        private const val SHOW_INBOX_ENVS = "show_inbox_envs"
-        private const val SHOW_INBOX_REMOTE = "show_inbox_remote"
         private const val BATTERY_ASKED = "battery_asked"
         private const val BATTERY_KNOWN_EXEMPT = "battery_known_exempt"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
