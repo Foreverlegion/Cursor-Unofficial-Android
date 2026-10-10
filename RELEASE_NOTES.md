@@ -18,6 +18,7 @@
 - Fixed Running staying on a finished agent in the list and thread.
 - Faster polling right after a send and steadier background run watching.
 - The Inbox now shows an agent as Running when a run starts on another device, without pulling to refresh. It checks every few seconds while something runs and less often when all is idle, refreshes at once when you return to the app or a run notification arrives, and stops in the background.
+- Notifications moved off the Inbox page into a popup behind a bell next to New. The bell shows an unread count, opening it marks them read, and each item can be opened or dismissed, with Clear all. Read and dismissed state is kept across restarts and updates.
 
 ---
 

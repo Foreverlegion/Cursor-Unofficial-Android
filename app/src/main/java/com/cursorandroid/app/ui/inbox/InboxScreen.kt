@@ -99,7 +99,7 @@ import com.cursorandroid.app.data.api.markCloudArchived
 import com.cursorandroid.app.data.api.mergeInboxAgents
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.visibleInbox
-import com.cursorandroid.app.data.notify.Notice
+import com.cursorandroid.app.data.notify.unreadCount
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.notify.VisibleAgent
 import com.cursorandroid.app.data.repo.InboxPollPolicy
@@ -364,6 +364,11 @@ fun InboxScreen(
         }
     }
 
+    var noticesOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(noticesOpen, notices) {
+        if (noticesOpen) container.notices.markAllRead()
+    }
+
     val approvalIds = notices.mapNotNull { notice ->
         notice.agentId.takeIf { notice.kind == "approval" }
     }.toSet()
@@ -399,6 +404,28 @@ fun InboxScreen(
         }
     }
 
+    if (noticesOpen) {
+        NoticePopup(
+            notices = notices,
+            onOpen = { notice ->
+                container.notices.dismiss(notice.id)
+                container.notifier.rememberDismissed(notice.id)
+                noticesOpen = false
+                onSelect(notice.agentId)
+            },
+            onDismiss = { id ->
+                container.notices.dismiss(id)
+                container.notifier.rememberDismissed(id)
+            },
+            onClearAll = {
+                val ids = notices.map { it.id }
+                container.notices.dismissAll()
+                ids.forEach { container.notifier.rememberDismissed(it) }
+            },
+            onClose = { noticesOpen = false },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
@@ -414,6 +441,10 @@ fun InboxScreen(
                     Text("Agents", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 },
                 actions = {
+                    NoticeBell(
+                        unread = unreadCount(notices),
+                        onClick = { noticesOpen = true },
+                    )
                     Button(
                         onClick = { onCompose(tab.composeTarget(), null) },
                         shape = RoundedCornerShape(50),
@@ -458,23 +489,6 @@ fun InboxScreen(
                     }
                 }
             }
-            NoticeTray(
-                notices = notices,
-                onOpen = { notice ->
-                    container.notices.dismiss(notice.id)
-                    container.notifier.rememberDismissed(notice.id)
-                    onSelect(notice.agentId)
-                },
-                onDismiss = { id ->
-                    container.notices.dismiss(id)
-                    container.notifier.rememberDismissed(id)
-                },
-                onClear = {
-                    val ids = notices.map { it.id }
-                    container.notices.dismissAll()
-                    ids.forEach { container.notifier.rememberDismissed(it) }
-                },
-            )
             InboxTabStrip(
                 tabs = tabs,
                 selected = tab,
@@ -649,60 +663,6 @@ fun InboxScreen(
                 TextButton(onClick = { deleteIds = emptyList() }) { Text("Cancel") }
             },
         )
-    }
-}
-
-@Composable
-private fun NoticeTray(
-    notices: List<Notice>,
-    onOpen: (Notice) -> Unit,
-    onDismiss: (String) -> Unit,
-    onClear: () -> Unit,
-) {
-    if (notices.isEmpty()) return
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .heightIn(max = 220.dp)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Notifications", style = MaterialTheme.typography.labelLarge)
-            TextButton(onClick = onClear) { Text("Clear") }
-        }
-        notices.forEach { notice ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpen(notice) }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(notice.title, style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        notice.body,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when (notice.kind) {
-                            "working", "approval" -> MaterialTheme.colorScheme.primary
-                            "error" -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-                IconButton(onClick = { onDismiss(notice.id) }) {
-                    Icon(Icons.Outlined.Close, contentDescription = "Dismiss")
-                }
-            }
-        }
     }
 }
 

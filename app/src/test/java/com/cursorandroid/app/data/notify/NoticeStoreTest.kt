@@ -74,6 +74,39 @@ class NoticeStoreTest {
         assertNull(RunNotifier.noticeIdFrom(" ", null))
     }
 
+    @Test
+    fun newNoticeIsUnreadAndMarkReadClearsTheCount() {
+        val (items, _) = applyUpsert(emptyList(), notice("run-1", kind = "finished", body = "Finished"), emptyList())
+        assertEquals(1, unreadCount(items))
+        assertEquals(0, unreadCount(markRead(items)))
+    }
+
+    @Test
+    fun changedNoticeBecomesUnreadAgainButRepeatStaysRead() {
+        val read = listOf(notice("run-1", kind = "working", body = "Working").copy(read = true))
+        val (same, _) = applyUpsert(read, notice("run-1", kind = "working", body = "Working"), emptyList())
+        assertTrue(same.single().read)
+
+        val (changed, _) = applyUpsert(read, notice("run-1", kind = "finished", body = "Finished"), emptyList())
+        assertFalse(changed.single().read)
+    }
+
+    @Test
+    fun dismissedNoticesDoNotCountAsUnread() {
+        val items = listOf(
+            notice("a", kind = "finished", body = "Finished"),
+            notice("b", kind = "finished", body = "Finished", dismissed = true),
+        )
+        assertEquals(1, unreadCount(items))
+    }
+
+    @Test
+    fun badgeTextCapsLargeCounts() {
+        assertEquals("1", badgeText(1))
+        assertEquals("99", badgeText(99))
+        assertEquals("99+", badgeText(100))
+    }
+
     private fun notice(
         id: String,
         kind: String,

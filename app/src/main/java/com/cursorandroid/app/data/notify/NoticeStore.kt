@@ -24,7 +24,25 @@ class NoticeStore(context: Context) {
 
     init {
         synchronized(lock) {
-            visibleFlow.value = visibleOf(loadItems())
+            val items = loadItems()
+            if (!prefs.getBoolean(READ_MIGRATED, false)) {
+                val seen = items.map { it.copy(read = true) }
+                prefs.edit {
+                    putString(ALL, json.encodeToString(seen))
+                    putBoolean(READ_MIGRATED, true)
+                }
+                visibleFlow.value = visibleOf(seen)
+            } else {
+                visibleFlow.value = visibleOf(items)
+            }
+        }
+    }
+
+    fun markAllRead() {
+        synchronized(lock) {
+            val items = loadItems()
+            if (items.none { !it.read && !it.dismissed }) return
+            save(markRead(items), loadDismissed())
         }
     }
 
@@ -182,6 +200,7 @@ class NoticeStore(context: Context) {
         private const val PREFS = "notice_feed"
         private const val ALL = "items"
         private const val DISMISSED = "dismissed_ids"
+        private const val READ_MIGRATED = "read_migrated"
         private const val MAX_STORED = 40
         private const val MAX_VISIBLE = 6
         private const val MAX_DISMISSED = 200
@@ -244,8 +263,10 @@ internal fun applyUpsert(
     val idx = next.indexOfFirst { it.id == incoming.id }
     if (idx >= 0) {
         val prev = next[idx]
+        val unchanged = prev.kind == incoming.kind && prev.body == incoming.body
         next[idx] = incoming.copy(
             dismissed = wasDismissed,
+            read = prev.read && unchanged,
             at = if (wasDismissed) prev.at else incoming.at,
         )
     } else if (!wasDismissed) {
@@ -253,6 +274,14 @@ internal fun applyUpsert(
     }
     return next.take(maxStored) to nextDismissed
 }
+
+internal fun markRead(items: List<Notice>): List<Notice> {
+    return items.map { if (it.read) it else it.copy(read = true) }
+}
+
+internal fun unreadCount(visible: List<Notice>): Int = visible.count { !it.read && !it.dismissed }
+
+internal fun badgeText(count: Int): String = if (count > 99) "99+" else count.toString()
 
 internal fun applyRelabel(items: List<Notice>, agentId: String, title: String): List<Notice> {
     val next = title.trim()
@@ -291,4 +320,5 @@ data class Notice(
     val kind: String,
     val at: Long,
     val dismissed: Boolean = false,
+    val read: Boolean = false,
 )
