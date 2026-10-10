@@ -73,6 +73,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1180,6 +1181,7 @@ fun ThreadScreen(
         snapshotFlow { listState.layoutInfo.viewportEndOffset }
             .drop(1)
             .collect {
+                withFrameNanos { }
                 if (stickToBottom && !listState.isScrollInProgress) snapToBottom()
             }
     }
