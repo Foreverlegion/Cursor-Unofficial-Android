@@ -1188,7 +1188,7 @@ private fun ComputerRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AgentRow(
+internal fun AgentRow(
     agent: AgentSummary,
     title: String?,
     git: GitSnap?,
