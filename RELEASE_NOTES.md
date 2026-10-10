@@ -15,6 +15,9 @@
 - Fixed old messages showing as Queued, old messages jumping to the bottom of a thread, and the chat list flashing while a run streams.
 - Fixed the crash when opening Settings, Forges.
 - Artifacts show their date and time, and long file names are no longer cut off.
+- Messages show code blocks in a scrollable box using the code font you pick in Appearance.
+- Settings, About shows saved numbers at once and fills each row as it loads. Usage covers chats active in the last 30 days.
+- The battery and first-run notice screens are readable after signing in with the browser.
 - Fixed Running staying on a finished agent in the list and thread.
 - Faster polling right after a send and steadier background run watching.
 - The Inbox now shows an agent as Running when a run starts on another device, without pulling to refresh. It checks every few seconds while something runs and less often when all is idle, refreshes at once when you return to the app or a run notification arrives, and stops in the background.
