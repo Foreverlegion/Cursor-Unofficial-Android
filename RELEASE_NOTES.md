@@ -1,16 +1,28 @@
+# 1.0.28
+
+- The app download is much smaller. Release builds are shrunk and optimized.
+- Cursor agent links (cursor.com/agents/...) open in the app. Other cursor.com links stay in your browser.
+- Fixed a blank screen after signing in with the browser.
+- Agent list: grouped by repo, compact cards, filter chips, swipe to archive with Undo, pin a chat. Long-press a repo group to rename it, favorite it, color it, or move it.
+- Settings is now a list of pages instead of tabs. New pages: Appearance (accent color, fonts, text size, chat density), Agent list, Repo defaults, Forges, Machines.
+- Repo defaults: set a model, branch, MCP servers, environment, and a prompt prefix per repo, and New agent fills them in.
+- Forges: save tokens for GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Origin and custom hosts. Every saved forge is a Source in New agent, and GitLab projects are listed with your token.
+- Machines: long-press a machine to hide or delete it, with a Machines page and auto-hide for machines not seen for 7 to 90 days. Machines you have seen stay listed as offline until you hide them. Cursor's API cannot remove a worker, so Delete forgets it on this phone only.
+- MCP: follow-ups keep the servers the agent was created with. OAuth client, SSE type, presets, and mcp.json import and export.
+- Settings export leaves out secrets unless you seal them with a passphrase. Saved settings and tokens are kept across the update.
+- Agent messages show the model that produced the run, including a `Model:` first line from other clients.
+- Threads: one status for the header, work bar and list card, a Stop button on the working bar, and Kill process now works when the run id was missing.
+- Fixed old messages showing as Queued, old messages jumping to the bottom of a thread, and the chat list flashing while a run streams.
+- Fixed the crash when opening Settings, Forges.
+- Artifacts show their date and time, and long file names are no longer cut off.
+- Fixed Running staying on a finished agent in the list and thread.
+- Faster polling right after a send and steadier background run watching.
+
+---
+
 # 1.0.27
 
 Owner tools in Settings match the public GitHub login Foreverlegion. The in-app Ban button is shown only for that login. The privacy policy contact is that GitHub profile and this project's issues.
-
-Chats started in the app show the model on each agent message. Cursor's API does not report which model a run used, so chats started on another device show plain "Agent". To get a label there, start the prompt with a first line like `Model: Opus 5.5`. The line stays in the message. Ids such as `claude-opus-5-5` show as Opus 5.5, and other text is shown as written.
-
-MCP: a follow-up no longer replaces the servers an agent was created with. The app now omits the list on follow-ups so the agent keeps its set. HTTP servers take an OAuth client (client ID, optional secret, scopes), and the type SSE is available with a note that Cursor does not support it for cloud agents. Settings, Connections, MCP has presets, import from a pasted or chosen `mcp.json` (preview, pick servers, ask before replacing), and export to `mcp.json`.
-
-Settings export leaves out the API key, forge tokens, and MCP header, env, and OAuth values unless you turn on Include secrets, which seals them with a passphrase you choose. Import asks for that passphrase. If the phone's secure storage cannot be opened, secrets stay in memory only and a warning shows. The old plain `mcp_name` and `mcp_url` copy is moved into the encrypted list and deleted. Saved settings are kept across the update.
-
-New agent: the Source list now includes every forge saved in Settings, Connections, Forges (GitHub, GitLab, Bitbucket, Azure DevOps, Origin, self-hosted and custom HTTPS hosts), for Cloud, Machine, and Pool. Picking GitLab lists your projects with the saved GitLab token (membership projects, searchable, load more) and sends the HTTPS clone URL as the repo. Saved forges and tokens are only read, never changed.
-
-Machines: long-press a machine in New agent, Machine, Remote or in the Remote list (or tap its menu) to Hide it or Delete it. Settings, Connections, Machines lists every machine and worker this phone has seen, whether it is online, when it was last seen, and has Hide, Unhide, Delete, Restore, and an option to auto-hide offline machines not seen for 7 to 90 days. Cursor's API can deregister a pool but not a single worker, so Delete forgets the machine on this phone only; it shows again if it comes back under a new id. Hidden state is kept across restarts and updates. Machines are no longer dropped when a worker disconnects, the worker list returns empty, or a restart gives the worker a new id: every machine seen stays listed as offline until you hide it, and the list cached by earlier builds is merged in on update. The worker list now reads every page instead of the first 50.
 
 ---
 
