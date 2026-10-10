@@ -48,7 +48,12 @@ class AgentCardRenderTest {
         updatedAt = "2026-10-10T09:00:00Z",
     )
 
-    private fun setRow(compact: Boolean, selected: Boolean = false, pinned: Boolean = false) {
+    private fun setRow(
+        compact: Boolean,
+        selected: Boolean = false,
+        pinned: Boolean = false,
+        shown: AgentSummary = agent,
+    ) {
         compose.setContent {
             MaterialTheme {
                 Box(
@@ -59,7 +64,7 @@ class AgentCardRenderTest {
                 ) {
                     SwipeArchiveRow(enabled = true, onArchive = {}) {
                         AgentRow(
-                            agent = agent,
+                            agent = shown,
                             title = null,
                             git = null,
                             needsApproval = false,
@@ -177,14 +182,70 @@ class AgentCardRenderTest {
         compose.onNodeWithTag("row").performTouchInput { up() }
     }
 
+    private val longTitle = "Tesla home-screen widget with the resize handle and release build"
+
+    private fun running(name: String) = agent.copy(name = name, status = "RUNNING", updatedAt = java.time.Instant.now().minusSeconds(35 * 60L).toString())
+
+    private fun textOverflowed(text: String): Boolean {
+        val node = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
+        val results = ArrayList<androidx.compose.ui.text.TextLayoutResult>()
+        node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+        return results.first().hasVisualOverflow
+    }
+
     @Test
-    fun overflowButtonIsOnTheTitleRowAndTheCardStaysShort() {
+    fun overflowButtonEndsTheTitleRow() {
         setRow(compact = true)
         val title = compose.onNodeWithText("Tesla home-screen widget", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val more = compose.onNodeWithContentDescription("More", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val root = compose.onNodeWithTag("row").fetchSemanticsNode().boundsInRoot
         assertTrue("overflow starts to the right of the title", more.left >= title.right - 1f)
         assertTrue("overflow center is inside the title row", more.center.y in title.top..title.bottom + 8f)
-        assertTrue("compact card under 72dp, was ${root.height}", root.height <= 72f)
+        assertTrue("overflow is the last thing on the line, ${more.right} of ${root.right}", more.right >= root.right - 24f)
+    }
+
+    @Test
+    fun statusChipAndTimeSitOnASecondLineUnderTheTitle() {
+        setRow(compact = true, shown = running("Tesla home-screen widget"))
+        val title = compose.onNodeWithText("Tesla home-screen widget", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val chip = compose.onNodeWithText("Running", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val more = compose.onNodeWithContentDescription("More", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val time = compose.onNodeWithText("35m ago", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("chip is below the title (chip top ${chip.top}, title bottom ${title.bottom})", chip.top >= title.bottom - 1f)
+        assertTrue("chip is below the overflow button", chip.top >= more.bottom - 4f)
+        assertEquals("chip lines up with the title's left edge", title.left, chip.left - 10f, 2f)
+        assertTrue("time follows the chip on the same line", time.left >= chip.right && time.center.y in chip.top..chip.bottom)
+    }
+
+    @Test
+    fun theTitleKeepsEveryPixelUpToTheOverflowButton() {
+        setRow(compact = true, shown = running(longTitle))
+        val more = compose.onNodeWithContentDescription("More", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText(longTitle, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("title width ${title.width} reaches the button at ${more.left}", title.right >= more.left - 8f)
+        assertTrue("a long title is the only thing ellipsized on its line", textOverflowed(longTitle))
+        val chip = compose.onNodeWithText("Running", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("the chip is whole", chip.width >= 40f)
+    }
+
+    @Test
+    fun aTitleThatFitsTheOldNarrowSlotIsNotCutOffAnymore() {
+        setRow(compact = true, shown = running("Tesla home-screen widget"))
+        assertFalse("title fits on one line with the chip below it", textOverflowed("Tesla home-screen widget"))
+    }
+
+    @Test
+    fun compactCardStaysCompactWithTwoLines() {
+        setRow(compact = true, shown = running("Tesla home-screen widget"))
+        val root = compose.onNodeWithTag("row").fetchSemanticsNode().boundsInRoot
+        assertTrue("compact card at most 82dp including its 10dp gutters, was ${root.height}", root.height <= 82f)
+    }
+
+    @Test
+    fun fullCardKeepsTheSameTwoLineHeader() {
+        setRow(compact = false, shown = running("Tesla home-screen widget"))
+        val title = compose.onNodeWithText("Tesla home-screen widget", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val chip = compose.onNodeWithText("Running", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("chip below title", chip.top >= title.bottom - 1f)
     }
 }

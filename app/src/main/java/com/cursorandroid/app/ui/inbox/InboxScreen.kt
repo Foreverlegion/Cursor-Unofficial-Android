@@ -1262,7 +1262,7 @@ internal fun AgentRow(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
                         name,
@@ -1273,18 +1273,25 @@ internal fun AgentRow(
                         maxLines = if (compact) 1 else 3,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (compact && compactTime.isNotBlank()) {
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StatusPill(indicator)
+                    val lineTime = if (compact) compactTime else whenLabel
+                    if (lineTime.isNotBlank()) {
                         Text(
-                            compactTime,
+                            lineTime,
                             style = MaterialTheme.typography.labelMedium,
                             color = PlayColors.Muted,
                             maxLines = 1,
-                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    StatusPill(indicator)
-                    IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = PlayColors.Muted)
                     }
                 }
                 if (!compact && subtitle.isNotBlank()) {
@@ -1293,13 +1300,6 @@ internal fun AgentRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = PlayColors.Muted,
                         modifier = Modifier.padding(end = 8.dp),
-                    )
-                }
-                if (!compact && whenLabel.isNotBlank()) {
-                    Text(
-                        whenLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PlayColors.Muted,
                     )
                 }
                 val prUrl = git?.prUrl
