@@ -267,6 +267,7 @@ class ThreadViewModel(
     private val settledRuns = HashSet<String>()
     private val hydratedRuns = HashSet<String>()
     private var runOrder: List<String> = emptyList()
+    private var lastConversationMergeMs = 0L
     internal var runSpans by mutableStateOf<Map<String, RunSpan>>(emptyMap())
         private set
     private var settledKey: String? = null
@@ -853,7 +854,18 @@ class ThreadViewModel(
         if (convo.messages.isEmpty()) return null
         synchronized(lineGate) {
             val liveRun = (runOrder + listOfNotNull(run?.id)).distinct().lastOrNull()
-            val merged = mergeConversationTranscript(lines, convo.messages, settledRuns.toSet(), runOrder, liveRun)
+            val now = System.currentTimeMillis()
+            val watching = (streaming || run?.isActive() == true) &&
+                lastConversationMergeMs != 0L && now - lastConversationMergeMs <= SEEN_WINDOW_MS
+            lastConversationMergeMs = now
+            val merged = mergeConversationTranscript(
+                lines,
+                convo.messages,
+                settledRuns.toSet(),
+                runOrder,
+                liveRun,
+                seenAtMs = now.takeIf { watching },
+            )
             if (merged != lines) {
                 lines = merged
                 persist()
@@ -1312,10 +1324,11 @@ fun ThreadScreen(
     val zone = remember { ZoneId.systemDefault() }
     val use24h = remember(context) { DateFormat.is24HourFormat(context) }
     val runSpans = vm.runSpans
-    val rows = remember(shownLines, showTools, showThinking, runSpans, zone) {
+    val lineTimes = remember(shownLines, runSpans) { resolveLineTimes(shownLines, runSpans) }
+    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone) {
         withDaySeparators(
             groupChatRows(shownLines, showTools, showThinking),
-            timeOf = { lineTimeMs(it, runSpans) },
+            timeOf = { lineTimes[it.id] },
             zone = zone,
         )
     }
@@ -1588,7 +1601,7 @@ fun ThreadScreen(
                         when (row) {
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
-                                timeMs = lineTimeMs(row.line, runSpans),
+                                timeMs = lineTimes[row.line.id],
                                 zone = zone,
                                 use24h = use24h,
                                 modelText = if (row.line.kind == "assistant") {
@@ -1845,6 +1858,8 @@ internal const val STREAM_COALESCE_MS = 120L
 
 internal const val LIVE_TAIL_KEY = "live-tail"
 
+/** A message first seen while the thread was being watched gets that moment as its time. After a longer gap it is left for interpolation. */
+private const val SEEN_WINDOW_MS = 60_000L
 private const val SETTLE_FETCHES = 3
 private const val SETTLE_RETRY_MS = 1_500L
 

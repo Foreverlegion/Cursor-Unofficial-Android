@@ -198,4 +198,119 @@ class MessageTimesTest {
         assertEquals(ms("2026-10-09T22:01:30Z"), spans.getValue("r2").finishMs)
         assertNull(spans.getValue("r3").finishMs)
     }
+
+    private fun convo(id: String, kind: String, text: String, at: Long? = null) =
+        TranscriptLine("$kind-$id", kind, text, atMs = at)
+
+    private fun span(start: Long, finish: Long?, prompt: String? = null, result: String? = null) =
+        RunSpan(start, finish, prompt, result)
+
+    @Test
+    fun everyMessageOfARunGetsATimeFromTheRunAndItsTextMatches() {
+        val lines = listOf(
+            convo("m1", "user", "fix the grid"),
+            convo("m2", "assistant", "Now Grid.kt model functions."),
+            convo("m3", "assistant", "Update these two to the new rule."),
+            convo("m4", "assistant", "All tests pass."),
+        )
+        val spans = mapOf("r1" to span(1_000, 5_000, prompt = "fix the grid", result = "All tests pass."))
+
+        val times = resolveLineTimes(lines, spans)
+
+        assertEquals(1_000L, times["user-m1"])
+        assertEquals(5_000L, times["assistant-m4"])
+        assertEquals(4, times.size)
+        assertEquals(2_333L, times["assistant-m2"])
+        assertEquals(3_666L, times["assistant-m3"])
+    }
+
+    @Test
+    fun interpolatedTimesNeverGoBackwards() {
+        val lines = listOf(
+            convo("a", "user", "one", 9_000),
+            convo("b", "assistant", "two"),
+            convo("c", "assistant", "three", 4_000),
+        )
+
+        val times = resolveLineTimes(lines, emptyMap())
+
+        assertEquals(9_000L, times["assistant-b"])
+        assertEquals(4_000L, times["assistant-c"])
+    }
+
+    @Test
+    fun aMessageSeenWhileLiveKeepsItsOwnTimeBetweenAnchors() {
+        val lines = listOf(
+            convo("a", "user", "go", 1_000),
+            convo("b", "assistant", "step", 2_500),
+            convo("c", "assistant", "step 2"),
+            convo("d", "assistant", "done", 9_000),
+        )
+
+        val times = resolveLineTimes(lines, emptyMap())
+
+        assertEquals(2_500L, times["assistant-b"])
+        assertEquals(5_750L, times["assistant-c"])
+    }
+
+    @Test
+    fun messagesAfterTheLastKnownTimeTakeIt() {
+        val lines = listOf(convo("a", "user", "go", 1_000), convo("b", "assistant", "working"))
+
+        assertEquals(1_000L, resolveLineTimes(lines, emptyMap())["assistant-b"])
+    }
+
+    @Test
+    fun messagesBeforeTheFirstKnownTimeTakeIt() {
+        val lines = listOf(convo("a", "user", "old"), convo("b", "assistant", "older", 7_000))
+
+        assertEquals(7_000L, resolveLineTimes(lines, emptyMap())["user-a"])
+    }
+
+    @Test
+    fun noKnownTimeMeansNoTimes() {
+        assertEquals(emptyMap<String, Long>(), resolveLineTimes(listOf(convo("a", "user", "x")), emptyMap()))
+    }
+
+    @Test
+    fun twoRunsWithTheSamePromptMatchInOrder() {
+        val lines = listOf(convo("m1", "user", "continue"), convo("m2", "user", "continue"))
+        val spans = linkedMapOf(
+            "r1" to span(1_000, 2_000, prompt = "continue"),
+            "r2" to span(8_000, 9_000, prompt = "continue"),
+        )
+
+        val times = resolveLineTimes(lines, spans)
+
+        assertEquals(1_000L, times["user-m1"])
+        assertEquals(8_000L, times["user-m2"])
+    }
+
+    @Test
+    fun anOverlappingFollowUpKeepsItsOwnStart() {
+        val lines = listOf(
+            convo("m1", "user", "first"),
+            convo("m2", "assistant", "first done"),
+            convo("m3", "user", "second"),
+        )
+        val spans = linkedMapOf(
+            "r1" to span(1_000, 9_000, prompt = "first", result = "first done"),
+            "r2" to span(5_000, null, prompt = "second"),
+        )
+
+        assertEquals(5_000L, resolveLineTimes(lines, spans)["user-m3"])
+    }
+
+    @Test
+    fun spansCarryPromptAndResultInRunOrder() {
+        val newer = Run("r2", status = "FINISHED", createdAt = "2026-10-09T23:00:00Z", result = " ok ", prompt = Prompt("later"))
+        val older = Run("r1", status = "FINISHED", createdAt = "2026-10-09T22:00:00Z", prompt = Prompt("earlier"))
+
+        val spans = spansOf(listOf(newer, older))
+
+        assertEquals(listOf("r1", "r2"), spans.keys.toList())
+        assertEquals("later", spans.getValue("r2").prompt)
+        assertEquals("ok", spans.getValue("r2").result)
+        assertNull(spans.getValue("r1").result)
+    }
 }
