@@ -1,11 +1,16 @@
 package com.cursorandroid.app.data.api
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -263,6 +268,9 @@ data class ConversationMessage(
     val id: String? = null,
     val type: String? = null,
     val text: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @JsonNames("created_at", "timestamp", "time", "sentAt", "sent_at", "ts")
+    @Serializable(with = FlexibleTimeSerializer::class)
     val createdAt: String? = null,
 ) {
     fun transcriptKind(): String? {
@@ -1019,5 +1027,20 @@ internal object FlexibleModelSerializer : KSerializer<ModelSelection> {
             }
             else -> ModelSelection("")
         }
+    }
+}
+
+/** A message time as text, whether the API sends an ISO string or an epoch number. Anything else reads as missing. */
+internal object FlexibleTimeSerializer : KSerializer<String?> {
+    override val descriptor = PrimitiveSerialDescriptor("FlexibleTime", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeString(value)
+    }
+
+    override fun deserialize(decoder: Decoder): String? {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeString()
+        val el = json.decodeJsonElement()
+        return (el as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.trim()?.takeIf { it.isNotEmpty() }
     }
 }

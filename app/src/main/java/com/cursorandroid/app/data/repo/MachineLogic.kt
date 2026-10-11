@@ -208,6 +208,14 @@ internal fun parseInstantMs(raw: String?): Long? {
     return runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()
 }
 
+/** ISO instants and epoch numbers (seconds or milliseconds) both read as a time. */
+internal fun parseMessageTimeMs(raw: String?): Long? {
+    val text = raw?.trim().orEmpty()
+    parseInstantMs(text)?.let { return it }
+    val number = text.toDoubleOrNull()?.takeIf { it > 0 } ?: return null
+    return if (number < 100_000_000_000.0) (number * 1000).toLong() else number.toLong()
+}
+
 fun MachinePrefs.withMark(key: String, name: String, state: String, nowMs: Long): MachinePrefs {
     val next = LinkedHashMap(marks)
     next[key] = MachineMark(state = state, atMs = nowMs, name = name)

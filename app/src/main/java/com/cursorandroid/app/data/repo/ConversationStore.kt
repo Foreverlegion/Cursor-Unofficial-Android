@@ -482,6 +482,7 @@ internal fun mergeConversationTranscript(
     settledRuns: Set<String> = emptySet(),
     runOrder: List<String> = emptyList(),
     liveRunId: String? = null,
+    seenAtMs: Long? = null,
 ): List<TranscriptLine> {
     if (messages.isEmpty()) return coalesceTranscript(local)
     val used = BooleanArray(local.size)
@@ -515,12 +516,12 @@ internal fun mergeConversationTranscript(
         } else {
             take(kind, text)
         }
-        val at = parseInstantMs(msg.createdAt)
+        val at = parseMessageTimeMs(msg.createdAt)
         out += taken?.let { if (it.atMs == null && at != null) it.copy(atMs = at) else it } ?: TranscriptLine(
             id = if (remoteId != null) "$kind-$remoteId" else "$kind-conv-$index",
             kind = kind,
             text = text,
-            atMs = at,
+            atMs = at ?: seenAtMs,
         )
     }
 

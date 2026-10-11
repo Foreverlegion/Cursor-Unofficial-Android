@@ -163,4 +163,72 @@ class MessageTimestampTest {
         assertEquals(1, loaded.size)
         assertNull(loaded.single().atMs)
     }
+
+    @Test
+    fun newMessagesSeenWhileWatchingAreStampedWithTheMomentTheyArrived() {
+        val local = TranscriptLine("user-m1", "user", "go", atMs = 1_000)
+        val messages = listOf(
+            ConversationMessage("m1", "user_message", "go"),
+            ConversationMessage("m2", "assistant_message", "Now Grid.kt model functions."),
+        )
+
+        val merged = mergeConversationTranscript(listOf(local), messages, seenAtMs = 5_000)
+
+        assertEquals(listOf<Long?>(1_000, 5_000), merged.map { it.atMs })
+    }
+
+    @Test
+    fun aServerTimeBeatsTheMomentSeen() {
+        val messages = listOf(ConversationMessage("m2", "assistant_message", "hello", "2026-10-09T22:00:09Z"))
+
+        val merged = mergeConversationTranscript(emptyList(), messages, seenAtMs = 5_000)
+
+        assertEquals(ms("2026-10-09T22:00:09Z"), merged.single().atMs)
+    }
+
+    @Test
+    fun withoutAWatchedMomentNewMessagesStayUntimed() {
+        val messages = listOf(ConversationMessage("m2", "assistant_message", "hello"))
+
+        assertNull(mergeConversationTranscript(emptyList(), messages).single().atMs)
+    }
+
+    @Test
+    fun aStampedMessageKeepsItsTimeOnTheNextMerge() {
+        val messages = listOf(ConversationMessage("m2", "assistant_message", "hello"))
+        val first = mergeConversationTranscript(emptyList(), messages, seenAtMs = 5_000)
+
+        val second = mergeConversationTranscript(first, messages, seenAtMs = 9_000)
+
+        assertEquals(5_000L, second.single().atMs)
+    }
+
+    private val wire = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private fun decode(json: String) = wire.decodeFromString<ConversationMessage>(json)
+
+    @Test
+    fun messageTimeReadsFromAnyOfTheLikelyFields() {
+        listOf("createdAt", "created_at", "timestamp", "time", "sentAt").forEach { field ->
+            val msg = decode("""{"id":"m1","type":"assistant_message","text":"hi","$field":"2026-10-09T22:00:09Z"}""")
+            assertEquals(field, ms("2026-10-09T22:00:09Z"), parseMessageTimeMs(msg.createdAt))
+        }
+    }
+
+    @Test
+    fun messageTimeAcceptsEpochSecondsAndMilliseconds() {
+        val seconds = decode("""{"id":"m1","type":"user_message","text":"hi","timestamp":1791583209}""")
+        val millis = decode("""{"id":"m2","type":"user_message","text":"hi","createdAt":1791583209000}""")
+
+        assertEquals(1_791_583_209_000L, parseMessageTimeMs(seconds.createdAt))
+        assertEquals(1_791_583_209_000L, parseMessageTimeMs(millis.createdAt))
+    }
+
+    @Test
+    fun messageWithoutATimeOrWithJunkStillDecodes() {
+        assertNull(decode("""{"id":"m1","type":"user_message","text":"hi"}""").createdAt)
+        assertNull(decode("""{"id":"m1","type":"user_message","text":"hi","createdAt":null}""").createdAt)
+        assertNull(decode("""{"id":"m1","type":"user_message","text":"hi","createdAt":{"a":1}}""").createdAt)
+        assertNull(parseMessageTimeMs(decode("""{"text":"x","createdAt":"soon"}""").createdAt))
+    }
 }
