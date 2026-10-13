@@ -144,6 +144,13 @@ class ApiKeyStore internal constructor(
             notifyPrefs.edit(commit = true) { putBoolean(BATTERY_KNOWN_EXEMPT, value) }
         }
 
+    /** versionCode whose What's new popup was last shown or skipped; -1 when never recorded. */
+    var whatsNewSeenCode: Int
+        get() = notifyPrefs.getInt(WHATS_NEW_SEEN, -1)
+        set(value) {
+            notifyPrefs.edit { putInt(WHATS_NEW_SEEN, value) }
+        }
+
     var feedbackNoticeSeen: Boolean
         get() = notifyPrefs.getBoolean(FEEDBACK_NOTICE, false)
         set(value) {
@@ -398,6 +405,7 @@ class ApiKeyStore internal constructor(
         private const val BATTERY_ASKED = "battery_asked"
         private const val BATTERY_KNOWN_EXEMPT = "battery_known_exempt"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
+        private const val WHATS_NEW_SEEN = "whats_new_seen_code"
         private const val DEMO_MODE = "demo_mode"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()
     }

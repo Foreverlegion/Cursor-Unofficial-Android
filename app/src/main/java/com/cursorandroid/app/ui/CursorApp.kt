@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowSizeClass
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.BuildConfig
 import com.cursorandroid.app.LaunchRequest
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.BatteryPromptPolicy
@@ -214,6 +215,28 @@ private fun CursorAppContent(
             askedFeedback = true
         }
         return
+    }
+    var whatsNew by remember {
+        mutableStateOf(
+            WhatsNewPolicy.shouldShow(
+                seenCode = container.store.whatsNewSeenCode,
+                currentCode = BuildConfig.VERSION_CODE,
+                freshInstall = WhatsNewPolicy.isFreshInstall(context),
+                notes = BuildConfig.WHATS_NEW,
+            ),
+        )
+    }
+    LaunchedEffect(Unit) {
+        // Record a fresh install (or an already seen version) so the popup only follows real updates.
+        if (!whatsNew && container.store.whatsNewSeenCode < BuildConfig.VERSION_CODE) {
+            container.store.whatsNewSeenCode = BuildConfig.VERSION_CODE
+        }
+    }
+    if (whatsNew) {
+        WhatsNewDialog(BuildConfig.VERSION_NAME, BuildConfig.WHATS_NEW) {
+            container.store.whatsNewSeenCode = BuildConfig.VERSION_CODE
+            whatsNew = false
+        }
     }
     val topBars = WindowInsets.statusBars.union(
         WindowInsets.displayCutout.only(WindowInsetsSides.Top),
