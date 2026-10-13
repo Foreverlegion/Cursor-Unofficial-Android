@@ -1,0 +1,93 @@
+name: signed-apk
+
+# Builds an APK (not an AAB) signed with the release keystore, checks it against the cert of the published
+# release APK, and uploads it as a workflow artifact. Never tags, releases, or publishes anything.
+# Runs on manual dispatch, or on a push to a Backend/** branch that touches this file (bump the build note below).
+# Build note: every chat message gets a time, filled in between known times.
+on:
+  workflow_dispatch:
+    inputs:
+      reference_tag:
+        description: Release whose APK cert the new APK must match
+        default: v1.0.28
+        required: false
+  push:
+    branches:
+      - "Backend/**"
+    paths:
+      - .github/workflows/signed-apk.yml
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      REFERENCE_TAG: ${{ inputs.reference_tag || 'v1.0.28' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-android-build
+        with:
+          cache-read-only: "true"
+      - name: Restore keystore
+        env:
+          CURSOR_ANDROID_KEYSTORE_BASE64: ${{ secrets.CURSOR_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$CURSOR_ANDROID_KEYSTORE_BASE64" ]; then
+            echo "Release keystore secret is missing"
+            exit 1
+          fi
+          mkdir -p app/signing
+          printf '%s' "$CURSOR_ANDROID_KEYSTORE_BASE64" | base64 -d > app/signing/stable.p12
+      - name: Assemble release APK
+        env:
+          CURSOR_ANDROID_STORE_PASSWORD: ${{ secrets.CURSOR_ANDROID_STORE_PASSWORD }}
+          CURSOR_ANDROID_KEY_PASSWORD: ${{ secrets.CURSOR_ANDROID_KEY_PASSWORD }}
+          CURSOR_ANDROID_KEY_ALIAS: ${{ secrets.CURSOR_ANDROID_KEY_ALIAS }}
+          CURSOR_ANDROID_ISSUES_TOKEN: ${{ secrets.CURSOR_ANDROID_ISSUES_TOKEN }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 9.3.1
+          fi
+          ./gradlew --no-daemon :app:assembleRelease
+      - id: verify
+        name: Verify signature and compare with the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tools="$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/* | sort -V | tail -1)"
+          apk=app/build/outputs/apk/release/app-release.apk
+          test -f "$apk"
+          name=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          code=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -1)
+          out="cursor-android-${name}-vc${code}-release-signed.apk"
+          cp "$apk" "$out"
+
+          "$tools/apksigner" verify --verbose --print-certs "$out" | tee new-certs.txt
+          new=$(grep -m1 'certificate SHA-256 digest' new-certs.txt | grep -oE '[0-9a-f]{64}' || true)
+
+          mkdir -p reference
+          gh release download "$REFERENCE_TAG" --pattern app-release.apk --dir reference
+          "$tools/apksigner" verify --print-certs reference/app-release.apk | tee ref-certs.txt
+          ref=$(grep -m1 'certificate SHA-256 digest' ref-certs.txt | grep -oE '[0-9a-f]{64}' || true)
+
+          badge=$("$tools/aapt2" dump badging "$out" | head -1)
+          {
+            echo "### Release-signed APK"
+            echo "- file: \`$out\`"
+            echo "- $badge"
+            echo "- cert SHA-256: \`$new\`"
+            echo "- $REFERENCE_TAG release APK cert SHA-256: \`$ref\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$new" ] || [ "$new" != "$ref" ]; then
+            echo "Signing cert does not match $REFERENCE_TAG"
+            exit 1
+          fi
+          echo "file=$out" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cursor-android-release-signed-apk
+          path: ${{ steps.verify.outputs.file }}
+          if-no-files-found: error

@@ -2,22 +2,29 @@ package com.cursorandroid.app
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.util.Log
 import com.cursorandroid.app.data.api.ApiShape
 import com.cursorandroid.app.data.api.CancelLog
 import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.auth.SessionGuard
 import com.cursorandroid.app.data.auth.CursorBrowserLogin
 import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
+import com.cursorandroid.app.data.repo.StagedRestore
+import com.cursorandroid.app.data.repo.StatusCallMeter
+import com.cursorandroid.app.data.repo.StatusGate
 import com.cursorandroid.app.data.repo.CatalogCache
 import com.cursorandroid.app.data.repo.ConversationStore
 import com.cursorandroid.app.data.repo.DemoCursorApi
 import com.cursorandroid.app.data.repo.DemoSession
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
+import com.cursorandroid.app.data.repo.ForgeSyncStore
+import com.cursorandroid.app.data.repo.ForgeSyncer
 import com.cursorandroid.app.data.repo.InboxRefreshHub
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
@@ -25,7 +32,11 @@ import com.cursorandroid.app.data.repo.RunSettleHub
 import com.cursorandroid.app.data.repo.MachineStore
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.settleAgents
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
+import java.io.File
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -54,6 +65,14 @@ class AppContainer(context: Context) {
     }
     val notifier = RunNotifier(context.applicationContext, store, notices, chats, runSettle, inboxRefresh)
     val feedback = FeedbackStore(context)
+    val stagedRestore = StagedRestore(File(context.applicationContext.filesDir, "staged-restore.json"))
+    val session = SessionGuard { store.apiKey }
+    val forgeSync = ForgeSyncer(
+        store = ForgeSyncStore(File(context.applicationContext.filesDir, "forge-sync")),
+        forges = { store.forges() },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        enabled = { !store.demoMode },
+    )
 
     fun renameChat(agentId: String, name: String) {
         val title = name.trim()
@@ -133,13 +152,27 @@ class AppContainer(context: Context) {
 
     val login = CursorBrowserLogin(publicHttp, json)
 
+    val statusGate = StatusGate(
+        meter = StatusCallMeter(sink = if (debug) { line -> Log.d("StatusCalls", line) } else null),
+    )
+
     val repo = AgentRepository(
         api = api,
-        sse = SseStreamer(http, json, probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null),
+        sse = SseStreamer(
+            http,
+            json,
+            probe = if (debug) { type, data -> ApiShape.log("SSE $type", data, json) } else null,
+            onUnauthorized = { key -> session.markExpired(key) },
+        ),
         store = store,
         catalog = catalog,
         publicHttp = publicHttp,
         json = json,
         machines = machines,
+        statusGate = statusGate,
+        session = session,
     )
+
+    /** Debug builds only: how many status calls went out in the last minute, for the About page. */
+    val statusCallsPerMinute: Int? get() = if (debug) statusGate.meter.lastMinute() else null
 }

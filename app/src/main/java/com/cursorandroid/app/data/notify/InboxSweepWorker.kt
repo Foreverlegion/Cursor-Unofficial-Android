@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.cursorandroid.app.CursorAndroidApp
+import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.isActive
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isTerminal
@@ -18,10 +19,18 @@ class InboxSweepWorker(
         if (app.container.store.demoMode || !app.container.store.hasKey()) return Result.success()
         val seen = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return try {
-            val agents = app.container.repo.listAgents()
+            if (app.container.repo.statusGate.isPaused || app.container.session.expired()) return Result.success()
+            val agents = sweepTargets(app.container.repo.listAgents(), seenStatus = { runId -> seen.getString(runId, null) })
             for (agent in agents) {
                 val runId = agent.latestRunId ?: continue
-                val run = runCatching { app.container.repo.getRun(agent.id, runId) }.getOrNull() ?: continue
+                val run = try {
+                    app.container.repo.getRun(agent.id, runId)
+                } catch (e: ApiException) {
+                    if (e.isRateLimited || e.isInvalidKey) return Result.success()
+                    continue
+                } catch (_: Exception) {
+                    continue
+                }
                 val status = run.status?.uppercase()
                 val previous = seen.getString(runId, null)?.uppercase()
                 if (run.isTerminal()) {
@@ -46,6 +55,8 @@ class InboxSweepWorker(
                 }
             }
             Result.success()
+        } catch (e: ApiException) {
+            if (e.isRateLimited || e.isInvalidKey) Result.success() else Result.retry()
         } catch (_: Exception) {
             Result.retry()
         }

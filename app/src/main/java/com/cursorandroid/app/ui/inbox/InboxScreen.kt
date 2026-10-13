@@ -87,6 +87,8 @@ import com.cursorandroid.app.data.repo.RepoGroupPrefs
 import com.cursorandroid.app.data.repo.markLocalActive
 import com.cursorandroid.app.data.repo.settleAgents
 import com.cursorandroid.app.data.api.Computer
+import com.cursorandroid.app.data.repo.SEEN_ON_AGENT
+import com.cursorandroid.app.data.repo.STATUS_UNKNOWN_LINE
 import com.cursorandroid.app.data.repo.machineKey
 import com.cursorandroid.app.data.repo.visibleMachines
 import com.cursorandroid.app.ui.MachineActionsDialog
@@ -228,10 +230,12 @@ fun InboxScreen(
                     val url = container.chats.claimFinishedPr(git)
                     if (!url.isNullOrBlank()) SafeLinks.open(context, url)
                 }
-                val next = runCatching { container.repo.listComputers(latest) }.getOrDefault(computers)
-                computers = next
-                machinePrefs = container.machines.prefs()
-                container.catalog.saveComputers(next)
+                val listing = runCatching { container.repo.listMachines(latest) }.getOrNull()
+                if (listing != null) {
+                    computers = listing.computers
+                    machinePrefs = container.machines.prefs()
+                    if (listing.known) container.catalog.saveComputers(listing.computers)
+                }
                 var cursor = page.nextCursor
                 while (!cursor.isNullOrBlank()) {
                     ensureActive()
@@ -303,26 +307,27 @@ fun InboxScreen(
         hub.drain()
         VisibleAgent.inboxPolling(true)
         var machinesAt = 0L
+        var machinesFailed = false
         try {
             inboxRefreshLoop(
                 first = RefreshReason.Resume,
                 intervalMs = { failures ->
-                    InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures)
+                    maxOf(
+                        InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures),
+                        container.repo.statusGate.remainingMs(),
+                    )
                 },
                 now = System::currentTimeMillis,
                 awaitTrigger = { hub.await(it) },
                 pause = { delay(it) },
                 poll = poll@{ reason, tick ->
                     if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
+                    if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
                     val page = container.repo.listAgentsPage(includeArchived = true)
                     val fresh = page.entries()
                     val checks = runCheckTargets(items, fresh, container.runSettle.settled.value)
-                    val full = InboxPollPolicy.fullHydrate(reason, tick)
-                    val only = if (full) null else {
-                        (fresh.filter { isLiveStatus(it.status) } + checks).map { it.id }.toSet()
-                    }
-                    val incoming = container.repo.hydrateStatuses(fresh, only = only)
+                    val incoming = container.repo.hydrateStatuses(fresh)
                     if (checks.isNotEmpty()) {
                         val runs = coroutineScope {
                             checks.map { agent ->
@@ -340,20 +345,22 @@ fun InboxScreen(
                                 container.notifier.notifyIfNeeded(agent.id, agent.name, run.id, run.status, run.result)
                             },
                         ) { agentId, runId ->
-                            runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
+                            if (VisibleAgent.isOpenInForeground(agentId)) null
+                            else runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
                         }
                     }
                     metas = container.chats.snapshot()
                     runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
                     git = loadGit()
                     val clock = System.currentTimeMillis()
-                    if (InboxPollPolicy.machinesDue(reason, machinesAt, clock)) {
+                    if (InboxPollPolicy.machinesDue(reason, machinesAt, clock, machinesFailed)) {
                         machinesAt = clock
-                        val next = runCatching { container.repo.listComputers(agents) }.getOrNull()
-                        if (next != null) {
-                            computers = next
+                        val listing = runCatching { container.repo.listMachines(agents) }.getOrNull()
+                        machinesFailed = listing == null || !listing.known
+                        if (listing != null) {
+                            computers = listing.computers
                             machinePrefs = container.machines.prefs()
-                            container.catalog.saveComputers(next)
+                            if (listing.known) container.catalog.saveComputers(listing.computers)
                         }
                     }
                     true
@@ -1183,7 +1190,8 @@ private fun RemotePane(
 ) {
     val envNames = envs.map { it.name.lowercase() }.toHashSet()
     val extraOnline = computers.filter { it.online && it.name.lowercase() !in envNames }
-    val extraOffline = computers.filter { !it.online && it.name.lowercase() !in envNames }
+    val extraUnknown = computers.filter { !it.online && it.statusUnknown && it.name.lowercase() !in envNames }
+    val extraOffline = computers.filter { !it.online && !it.statusUnknown && it.name.lowercase() !in envNames }
     when {
         computers.isEmpty() && envs.isEmpty() && !refreshing -> {
             Text(
@@ -1211,6 +1219,13 @@ private fun RemotePane(
                         HorizontalDivider()
                     }
                 }
+                if (extraUnknown.isNotEmpty()) {
+                    item(key = "unknown") { SectionLabel("Status unknown") }
+                    items(extraUnknown, key = { "unk:${it.workerId ?: it.name}" }) { computer ->
+                        ComputerRow(computer = computer, onClick = { onSelectComputer(computer) })
+                        HorizontalDivider()
+                    }
+                }
                 if (extraOffline.isNotEmpty()) {
                     item(key = "offline") { SectionLabel("Offline") }
                     items(extraOffline, key = { "off:${it.workerId ?: it.name}" }) { computer ->
@@ -1233,18 +1248,26 @@ private fun ComputerRow(
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(computer.name, style = MaterialTheme.typography.titleSmall)
             Text(
-                buildString {
-                    append(if (computer.online) "Online" else "Offline")
-                    if (computer.online) append(if (computer.inUse) " · busy" else " · idle")
-                    computer.detail?.let {
-                        append(" · ")
-                        append(it)
-                    }
-                },
+                computerStatusLine(computer),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (computer.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+internal fun computerStatusLine(computer: Computer): String = buildString {
+    append(
+        when {
+            computer.online -> "Online"
+            computer.statusUnknown -> STATUS_UNKNOWN_LINE
+            else -> "Offline"
+        },
+    )
+    if (computer.online) append(if (computer.inUse) " · busy" else " · idle")
+    computer.detail?.takeIf { !(computer.statusUnknown && !computer.online) || it != SEEN_ON_AGENT }?.let {
+        append(" · ")
+        append(it)
     }
 }
 

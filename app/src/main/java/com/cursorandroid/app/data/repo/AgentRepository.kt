@@ -42,6 +42,7 @@ import com.cursorandroid.app.data.api.withDetail
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.auth.SessionGuard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -71,7 +72,11 @@ class AgentRepository(
     private val publicHttp: OkHttpClient,
     private val json: Json,
     private val machines: MachineStore? = null,
+    val statusGate: StatusGate = StatusGate(),
+    val session: SessionGuard = SessionGuard { store.apiKey },
 ) {
+    private val statusCache = StatusCache()
+
     fun apiKey(): String = store.apiKey.orEmpty()
 
     suspend fun me(): MeResponse = wrap { api.me() }
@@ -182,7 +187,8 @@ class AgentRepository(
         limit: Int = 15,
         only: Set<String>? = null,
     ): List<AgentSummary> {
-        val targets = agents.take(limit).filter { only == null || it.id in only }
+        if (statusGate.isPaused) return agents
+        val targets = hydrateTargets(agents, limit, only)
         if (targets.isEmpty()) return agents
         val foundRepos = HashMap<String, String>()
         val fresh = coroutineScope {
@@ -201,7 +207,8 @@ class AgentRepository(
         return agents.map { byId[it.id] ?: it }
     }
 
-    suspend fun resolveAgentRepos(agents: List<AgentSummary>, budget: Int = 40) {
+    suspend fun resolveAgentRepos(agents: List<AgentSummary>, budget: Int = 15) {
+        if (statusGate.isPaused) return
         val known = catalog.agentRepos()
         val snaps = catalog.gitSnaps()
         val missing = agents
@@ -211,7 +218,7 @@ class AgentRepository(
             .sortedByDescending { it.sortKey() }
             .take(budget)
         if (missing.isEmpty()) return
-        val gate = Semaphore(4)
+        val gate = Semaphore(2)
         val found = coroutineScope {
             missing.map { agent ->
                 async {
@@ -225,9 +232,17 @@ class AgentRepository(
         catalog.saveAgentRepos(found)
     }
 
-    suspend fun getAgent(id: String): AgentDetail = wrap { api.getAgent(id) }
+    suspend fun getAgent(id: String): AgentDetail =
+        statusCache.get("agent:$id", AGENT_TTL_MS) { statusGate.call("agent") { wrap { api.getAgent(id) } } }
 
-    suspend fun getRun(agentId: String, runId: String): Run = wrap { api.getRun(agentId, runId) }
+    suspend fun getRun(agentId: String, runId: String): Run =
+        statusCache.get("run:$agentId:$runId", RUN_TTL_MS) { statusGate.call("run") { wrap { api.getRun(agentId, runId) } } }
+
+    /** Forget cached status for an agent after something we did changes it (a send, a stop). */
+    fun statusChanged(agentId: String) {
+        statusCache.invalidate("agent:$agentId")
+        statusCache.invalidate("run:$agentId:")
+    }
 
     suspend fun conversation(agentId: String): AgentConversation = wrap { api.getConversation(agentId) }
 
@@ -300,10 +315,10 @@ class AgentRepository(
     }
 
     suspend fun refreshComputers(agents: List<AgentSummary>): List<Computer> {
-        val listed = runCatching { listComputers(agents) }.getOrNull() ?: return catalog.computers()
-        if (listed.isEmpty()) return catalog.computers()
-        catalog.saveComputers(listed)
-        return listed
+        val listing = listMachines(agents)
+        if (!listing.known || listing.computers.isEmpty()) return catalog.computers()
+        catalog.saveComputers(listing.computers)
+        return listing.computers
     }
 
     suspend fun refreshPools(): List<WorkerPool> {
@@ -324,7 +339,9 @@ class AgentRepository(
     }
 
     suspend fun refreshGitSnaps(agents: List<AgentSummary>) {
-        val targets = agents.take(15)
+        if (statusGate.isPaused) return
+        val targets = gitSnapTargets(agents, catalog.gitSnaps().keys)
+        if (targets.isEmpty()) return
         coroutineScope {
             targets.map { agent ->
                 async {
@@ -479,7 +496,7 @@ class AgentRepository(
     ): Run {
         // Create Run replaces the servers the agent was created with, so they are left out unless this chat's
         // selection was changed on purpose; the agent then keeps the set it started with.
-        return wrap {
+        val created = wrap {
             api.createRun(
                 agentId,
                 CreateRunRequest(
@@ -490,10 +507,13 @@ class AgentRepository(
                 ),
             ).run
         }
+        statusChanged(agentId)
+        return created
     }
 
     suspend fun cancel(agentId: String, runId: String) {
         wrap { api.cancelRun(agentId, runId) }
+        statusChanged(agentId)
     }
 
     suspend fun steer(agentId: String, runId: String, prompt: Prompt): Boolean {
@@ -506,26 +526,47 @@ class AgentRepository(
         if (store.demoMode) {
             return flow { emit(StreamEvent.Done) }
         }
+        if (session.expired()) return flow { throw ApiException.sessionExpired() }
         return sse.stream(agentId, runId, apiKey(), lastEventId)
     }
 
-    private suspend fun listWorkerPages(scope: String): List<Worker> {
+    private class WorkerPages(val workers: List<Worker>, val complete: Boolean, val failure: Throwable?)
+
+    /** Pages gathered so far survive a later failure; [WorkerPages.complete] says whether the whole list was read. */
+    private suspend fun listWorkerPages(scope: String): WorkerPages {
         val out = ArrayList<Worker>()
         var token: String? = null
         repeat(WORKER_PAGES) {
-            val page = wrap { api.listWorkers(status = "all", scope = scope, limit = WORKER_PAGE_SIZE, pageToken = token) }
+            val page = try {
+                wrap { api.listWorkers(status = "all", scope = scope, limit = WORKER_PAGE_SIZE, pageToken = token) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return WorkerPages(out, complete = false, failure = e)
+            }
             out += page.workers
             token = page.nextPageToken?.takeIf { it.isNotBlank() && it != token }
-            if (token == null) return out
+            if (token == null) return WorkerPages(out, complete = true, failure = null)
         }
-        return out
+        return WorkerPages(out, complete = true, failure = null)
     }
 
-    suspend fun listComputers(knownAgents: List<AgentSummary> = emptyList()): List<Computer> {
-        val online = runCatching { listWorkerPages("personal") }.getOrElse {
-            runCatching { listWorkerPages("all") }.getOrDefault(emptyList())
+    suspend fun listComputers(knownAgents: List<AgentSummary> = emptyList()): List<Computer> =
+        listMachines(knownAgents).computers
+
+    /**
+     * Online state comes only from a fresh workers call. When that call fails (rate limit, expired sign-in, network),
+     * machines that were not listed are returned as [Computer.statusUnknown] instead of offline, and nothing is
+     * learned from the listing.
+     */
+    suspend fun listMachines(knownAgents: List<AgentSummary> = emptyList()): MachineListing {
+        var pages = listWorkerPages("personal")
+        if (pages.workers.isEmpty() && pages.failure != null) {
+            val all = listWorkerPages("all")
+            if (all.workers.isNotEmpty() || all.failure == null) pages = all
         }
-        val fromWorkers = online
+        val known = pages.complete
+        val fromWorkers = pages.workers
             .map { worker ->
                 Computer(
                     name = worker.displayName(),
@@ -550,12 +591,24 @@ class AgentRepository(
             }
             .distinctBy { it.name.lowercase() }
         val live = fromWorkers + fromAgents
-        val book = machines?.takeIf { !store.demoMode } ?: return live
-        return runCatching {
-            book.seed(catalog.computers())
-            book.observe(live, agents)
-            live + book.remembered(live)
-        }.getOrDefault(live)
+        val book = machines?.takeIf { !store.demoMode }
+        val all = if (book == null) {
+            live
+        } else {
+            runCatching {
+                book.seed(catalog.computers().filter { !it.statusUnknown })
+                if (known) book.observe(live, agents)
+                live + book.remembered(live)
+            }.getOrDefault(live)
+        }
+        val computers = if (known) all else all.map { if (it.online) it else it.copy(statusUnknown = true) }
+        return MachineListing(computers, known, if (known) null else pages.failure?.let(::machineFailureReason))
+    }
+
+    private fun machineFailureReason(e: Throwable): String = when {
+        e is ApiException && e.isInvalidKey -> "sign-in expired"
+        e is ApiException && e.isRateLimited -> "rate limited"
+        else -> "no response"
     }
 
     suspend fun listPools(): List<WorkerPool> {
@@ -726,13 +779,22 @@ class AgentRepository(
     }
 
     private suspend fun <T> wrap(block: suspend () -> T): T {
+        val key = if (store.demoMode) null else store.apiKey
+        if (session.expiredFor(key)) throw ApiException.sessionExpired()
         return try {
             block()
         } catch (e: ApiException) {
+            if (e.isInvalidKey) session.markExpired(key)
             throw e
         } catch (e: HttpException) {
             val body = e.response()?.errorBody()?.string().orEmpty()
-            throw ApiException.fromBody(e.code(), body.ifBlank { e.message() })
+            val api = ApiException.fromBody(
+                e.code(),
+                body.ifBlank { e.message() },
+                e.response()?.headers()?.get("Retry-After"),
+            )
+            if (api.isInvalidKey) session.markExpired(key)
+            throw api
         }
     }
 
@@ -741,6 +803,8 @@ class AgentRepository(
         private val KNOWN_REPO_PROVIDERS = setOf("github", "gitlab", "bitbucket", "azure", "origin")
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
+        private const val AGENT_TTL_MS = 1_500L
+        private const val RUN_TTL_MS = 1_000L
         private const val WORKER_PAGE_SIZE = 50
         private const val WORKER_PAGES = 10
         private const val USAGE_BUDGET_MS = 25_000L

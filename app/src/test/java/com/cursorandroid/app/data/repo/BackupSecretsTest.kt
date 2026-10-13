@@ -59,7 +59,7 @@ class BackupSecretsTest {
         val opened = openBackup(loaded, pass)
         assertEquals(BackupOpen.Ok, opened.result)
         val snap = opened.snapshot
-        assertEquals("key_SECRET_API", snap.apiKey)
+        assertNull("the sign-in key is never exported, even sealed", snap.apiKey)
         assertEquals("ghp_SECRET_LEGACY", snap.githubToken)
         assertEquals("ghp_SECRET_FORGE", snap.forges.single().token)
         assertEquals("Bearer ghp_SECRET_HEADER", snap.mcpServers.first { it.id == "m1" }.headers["Authorization"])
@@ -109,10 +109,10 @@ class BackupSecretsTest {
     }
 
     @Test
-    fun anOldPlainFileStillImportsItsSecrets() {
+    fun anOldPlainFileStillImportsItsForgeSecretsButNotTheSignInKey() {
         val old = SettingsBackup.parse(file(full))!!
         val opened = openBackup(old, null)
-        assertEquals("key_SECRET_API", opened.snapshot.apiKey)
+        assertNull("an old file's sign-in key is dropped on read", opened.snapshot.apiKey)
         assertEquals("ghp_SECRET_FORGE", opened.snapshot.forges.single().token)
     }
 

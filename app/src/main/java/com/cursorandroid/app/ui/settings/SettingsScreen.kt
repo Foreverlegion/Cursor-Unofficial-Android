@@ -48,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -75,6 +77,7 @@ import com.cursorandroid.app.ui.inbox.HideFinishedAge
 import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
@@ -162,6 +165,25 @@ internal fun SettingsScreenContent(
         }
     }
     var info by remember { mutableStateOf<String?>(null) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+    val appContext = LocalContext.current.applicationContext
+    if (confirmSignOut) {
+        SignOutDialog(
+            demo = container.store.demoMode,
+            onDismiss = { confirmSignOut = false },
+            onConfirm = {
+                confirmSignOut = false
+                RunWatchScheduler.stop(appContext)
+                if (container.store.demoMode) {
+                    container.store.demoMode = false
+                    if (container.store.hasKey()) onSessionChanged() else onSignedOut()
+                } else {
+                    container.store.clear()
+                    onSignedOut()
+                }
+            },
+        )
+    }
     val overview = remember(container) { OverviewModel(container.repo, container.catalog) }
     val overviewScope = rememberCoroutineScope()
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
@@ -574,6 +596,20 @@ internal fun SettingsScreenContent(
                             onClick = { info = KEY_INFO },
                         )
                         OverviewSection(model = overview, scope = overviewScope)
+                        if (container.statusCallsPerMinute != null) {
+                            val calls by produceState(0, container) {
+                                while (true) {
+                                    value = container.statusCallsPerMinute ?: 0
+                                    delay(2_000)
+                                }
+                            }
+                            val paused = container.statusGate.remainingMs()
+                            SettingsLinkRow(
+                                title = "Status calls (debug)",
+                                summary = "$calls in the last minute" + if (paused > 0) ", paused ${paused / 1000}s" else "",
+                                onClick = {},
+                            )
+                        }
                         val sample = overview.usage
                         val used = sample?.usage
                         val usageBusy = OverviewRow.Usage in overview.refreshing
@@ -636,17 +672,9 @@ internal fun SettingsScreenContent(
                             "Sign out",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    RunWatchScheduler.stop(context.applicationContext)
-                                    if (container.store.demoMode) {
-                                        container.store.demoMode = false
-                                        if (container.store.hasKey()) onSessionChanged() else onSignedOut()
-                                    } else {
-                                        container.store.clear()
-                                        onSignedOut()
-                                    }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 18.dp),
+                                .clickable { confirmSignOut = true }
+                                .padding(horizontal = 16.dp, vertical = 18.dp)
+                                .testTag("sign-out-row"),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyLarge,
                         )

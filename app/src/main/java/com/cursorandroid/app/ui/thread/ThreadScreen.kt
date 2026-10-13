@@ -66,10 +66,12 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -119,6 +121,7 @@ import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.repo.ConversationSnap
 import com.cursorandroid.app.data.repo.coalesceTranscript
 import com.cursorandroid.app.data.repo.RunSettled
+import com.cursorandroid.app.data.repo.StatusGate
 import com.cursorandroid.app.data.repo.mergeConversationTranscript
 import com.cursorandroid.app.data.repo.runsOldestFirst
 import com.cursorandroid.app.data.repo.settledAgentStatus
@@ -171,10 +174,15 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Locale
 import java.util.UUID
 
 private const val STOPPING = "Stopping..."
@@ -236,9 +244,16 @@ class ThreadViewModel(
     var approvalPending by mutableStateOf(false)
         private set
 
+    /** Epoch millis until which status calls are paused by a rate limit; shown as a quiet note, never as an error. */
+    var pausedUntilMs by mutableLongStateOf(0L)
+        private set
+
     private var streamJob: Job? = null
     private var pollJob: Job? = null
     private var watchJob: Job? = null
+    private var retryJob: Job? = null
+    private var retryStrikes = 0
+    private val wake = Channel<Unit>(Channel.CONFLATED)
     private var assistantBuf = StringBuilder()
     private var thinkingBuf = StringBuilder()
     private var lastEventId: String? = null
@@ -250,7 +265,11 @@ class ThreadViewModel(
     private val refreshLock = Mutex()
     private val settleLock = Mutex()
     private val settledRuns = HashSet<String>()
+    private val hydratedRuns = HashSet<String>()
     private var runOrder: List<String> = emptyList()
+    private var lastConversationMergeMs = 0L
+    internal var runSpans by mutableStateOf<Map<String, RunSpan>>(emptyMap())
+        private set
     private var settledKey: String? = null
     private var afterNonAssistant = false
     private val lineGate = Any()
@@ -261,6 +280,67 @@ class ThreadViewModel(
         viewModelScope.launch {
             container.runSettle.settled.collect { map -> map[agentId]?.let { onSettled(it) } }
         }
+        viewModelScope.launch {
+            container.repo.statusGate.pausedUntil.collect { pausedUntilMs = it }
+        }
+        viewModelScope.launch {
+            container.runSettle.liveRuns.collect { map -> if (map[agentId] != null) wake.trySend(Unit) }
+        }
+    }
+
+    /** Asks the watch for one look now, e.g. when the screen comes back or another surface saw this agent run. */
+    fun nudge() {
+        wake.trySend(Unit)
+    }
+
+    private fun fail(e: Throwable) {
+        if (e is ApiException && e.isInvalidKey) {
+            // The app-wide "sign-in expired" banner owns this; a raw red line here would just repeat it.
+            error = null
+            return
+        }
+        if (e is ApiException && e.isRateLimited) {
+            error = null
+            retryRefreshLater()
+            return
+        }
+        error = displayError(e)
+    }
+
+    private fun retryRefreshLater() {
+        retryJob?.cancel()
+        retryStrikes++
+        val wait = maxOf(container.repo.statusGate.remainingMs(), StatusGate.backoffMs(retryStrikes)) + 500
+        retryJob = viewModelScope.launch {
+            delay(wait)
+            if (VisibleAgent.isOpenInForeground(agentId)) refresh()
+        }
+    }
+
+    private suspend fun <T : Any> quiet(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun watchState(failures: Int): WatchState {
+        val streamLive = streaming || streamJob?.isActive == true
+        return WatchState(
+            foreground = VisibleAgent.isOpenInForeground(agentId),
+            finished = ThreadWatchPolicy.finished(
+                agentWorking = agent?.isWorking(),
+                runActive = run?.isActive() == true,
+                streaming = streamLive,
+                outboundPending = outbound.isNotEmpty(),
+            ),
+            streamLive = streamLive,
+            busy = busy,
+            failures = failures,
+            pausedForMs = container.repo.statusGate.remainingMs(),
+            sessionExpired = container.session.expired(),
+        )
     }
 
     private suspend fun onSettled(ended: RunSettled) {
@@ -354,10 +434,11 @@ class ThreadViewModel(
                     if (!detail.isWorking() && run?.isActive() != true) {
                         checkBehind(detail)
                     }
+                    retryStrikes = 0
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    error = displayError(e)
+                    fail(e)
                 }
             }
         }
@@ -440,7 +521,7 @@ class ThreadViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = displayError(e)
+                fail(e)
             }
         }
     }
@@ -454,7 +535,7 @@ class ThreadViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = displayError(e)
+                fail(e)
             }
         }
     }
@@ -614,7 +695,7 @@ class ThreadViewModel(
                     if (line.id == next.id) line.copy(queued = true) else line
                 }
                 persist()
-                error = displayError(e)
+                fail(e)
             }
         } finally {
             sendingId = null
@@ -737,6 +818,7 @@ class ThreadViewModel(
             .take(PROMPT_LOOKUPS)
             .forEach { ensureRunHint(it.id) }
         var filled = runs.map { item -> hydrateRun(item, force = false) }
+        if (runs.isNotEmpty()) runSpans = spansOf(filled)
         filled.filter { it.isTerminal() }.forEach { settledRuns += it.id }
         var merged = mergeRunTranscript(lines, filled)
         val hasUser = merged.any { it.kind == "user" }
@@ -772,7 +854,18 @@ class ThreadViewModel(
         if (convo.messages.isEmpty()) return null
         synchronized(lineGate) {
             val liveRun = (runOrder + listOfNotNull(run?.id)).distinct().lastOrNull()
-            val merged = mergeConversationTranscript(lines, convo.messages, settledRuns.toSet(), runOrder, liveRun)
+            val now = System.currentTimeMillis()
+            val watching = (streaming || run?.isActive() == true) &&
+                lastConversationMergeMs != 0L && now - lastConversationMergeMs <= SEEN_WINDOW_MS
+            lastConversationMergeMs = now
+            val merged = mergeConversationTranscript(
+                lines,
+                convo.messages,
+                settledRuns.toSet(),
+                runOrder,
+                liveRun,
+                seenAtMs = now.takeIf { watching },
+            )
             if (merged != lines) {
                 lines = merged
                 persist()
@@ -783,8 +876,10 @@ class ThreadViewModel(
 
     private suspend fun hydrateRun(item: Run, force: Boolean): Run {
         val needResult = item.isTerminal() && item.result.isNullOrBlank()
-        if (!force && !needResult) return item
-        val full = runCatching { container.repo.getRun(agentId, item.id) }.getOrDefault(item)
+        if (!force && (!needResult || item.id in hydratedRuns)) return item
+        val fetched = runCatching { container.repo.getRun(agentId, item.id) }.getOrNull()
+        if (fetched != null) hydratedRuns += item.id
+        val full = fetched ?: item
         return item.copy(
             result = full.result ?: item.result,
             prompt = full.prompt ?: item.prompt,
@@ -860,7 +955,7 @@ class ThreadViewModel(
                     if (api?.isStreamGone == true || e.message?.contains("no longer available", true) == true) {
                         handleStreamGone(runId)
                     } else if (!isCancelMessage(e.message)) {
-                        error = displayError(e)
+                        fail(e)
                         streaming = false
                         receiving = false
                     }
@@ -920,7 +1015,7 @@ class ThreadViewModel(
                             if (event.recoverable || event.message == "stream_expired") {
                                 handleStreamGone(runId)
                             } else if (event.message != "stream_canceled") {
-                                error = event.message
+                                error = if (container.session.expired()) null else event.message
                                 streaming = false
                                 receiving = false
                             }
@@ -948,29 +1043,31 @@ class ThreadViewModel(
     private fun startWatch() {
         watchJob?.cancel()
         watchJob = viewModelScope.launch {
-            while (isActive) {
-                delay(2_000)
-                if (!busy) attachLatestRun()
-            }
+            threadWatchLoop(
+                state = { failures -> watchState(failures) },
+                awaitKick = { ms -> withTimeoutOrNull(ms) { wake.receive(); true } == true },
+                attach = { attachLatestRun() },
+            )
         }
     }
 
-    private suspend fun attachLatestRun() {
-        val detail = runCatching { container.repo.getAgent(agentId) }.getOrNull() ?: return
+    /** One look at the agent. Returns false when the call failed, so the watch backs off. */
+    private suspend fun attachLatestRun(): Boolean {
+        val detail = quiet { container.repo.getAgent(agentId) } ?: return false
         agent = detail
         noteApiModels(detail = detail)
-        val runId = detail.latestRunId ?: return
+        val runId = detail.latestRunId ?: return true
         val live = runId == streamedRunId && (streaming || streamJob?.isActive == true)
         if (live) {
-            if (isLiveStatus(detail.status) || run?.isActive() != true) return
-            val ended = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
-            if (ended.isActive()) return
+            if (isLiveStatus(detail.status) || run?.isActive() != true) return true
+            val ended = quiet { container.repo.getRun(agentId, runId) } ?: return false
+            if (ended.isActive()) return true
             settleRun(ended)
             container.notifier.notifyIfNeeded(agentId, agent?.name, ended.id, ended.status, ended.result)
-            return
+            return true
         }
-        if (runId == run?.id && run?.isActive() != true && !streaming) return
-        val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: return
+        if (runId == run?.id && run?.isActive() != true && !streaming) return true
+        val latest = quiet { container.repo.getRun(agentId, runId) } ?: return false
         noteApiModels(runs = listOf(latest))
         run = latest
         latest.git?.branches?.firstOrNull()?.let { git ->
@@ -980,7 +1077,7 @@ class ThreadViewModel(
         }
         if (latest.isActive()) {
             adoptRun(latest)
-            return
+            return true
         }
         receiving = false
         if (!latest.result.isNullOrBlank() && !coversAssistant(lines, runId, latest.result)) {
@@ -991,6 +1088,7 @@ class ThreadViewModel(
             settleRun(latest)
             container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
         }
+        return true
     }
 
     private fun startPoll(runId: String) {
@@ -1000,8 +1098,19 @@ class ThreadViewModel(
             while (isActive && run?.id == runId && run?.isActive() == true) {
                 val step = tick++
                 delay(runPollDelayMs(receiving, step))
+                if (container.session.expired()) break
+                if (!VisibleAgent.isOpenInForeground(agentId)) {
+                    // The background run watch covers an active run while the app is away.
+                    delay(ThreadWatchPolicy.IDLE_RECHECK_MS)
+                    continue
+                }
                 if (pullConversationOnTick(receiving, step)) mergeConversationHistory()
-                val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull() ?: continue
+                val latest = quiet { container.repo.getRun(agentId, runId) }
+                if (latest == null) {
+                    val paused = container.repo.statusGate.remainingMs()
+                    delay(if (paused > 0) paused else StatusGate.BASE_MS)
+                    continue
+                }
                 run = latest
                 if (!latest.isActive()) {
                     settleRun(latest)
@@ -1052,7 +1161,8 @@ class ThreadViewModel(
                     (kind == "assistant" && runId != null && existing.kind == "assistant" && existing.runId == runId)
             }
             val existingThumbs = next.getOrNull(idx)?.thumbs.orEmpty()
-            val line = TranscriptLine(id, kind, text, runId, queued, thumbs.ifEmpty { existingThumbs })
+            val sentAt = next.getOrNull(idx)?.atMs ?: System.currentTimeMillis().takeIf { kind == "user" }
+            val line = TranscriptLine(id, kind, text, runId, queued, thumbs.ifEmpty { existingThumbs }, sentAt)
             if (idx >= 0) next[idx] = line else next.add(line)
             lines = coalesceTranscript(next)
         }
@@ -1211,8 +1321,16 @@ fun ThreadScreen(
     val shownLines by produceState(vm.lines, vm) {
         snapshotFlow { vm.lines }.coalesced(STREAM_COALESCE_MS).collect { value = it }
     }
-    val rows = remember(shownLines, showTools, showThinking) {
-        groupChatRows(shownLines, showTools, showThinking)
+    val zone = remember { ZoneId.systemDefault() }
+    val use24h = remember(context) { DateFormat.is24HourFormat(context) }
+    val runSpans = vm.runSpans
+    val lineTimes = remember(shownLines, runSpans) { resolveLineTimes(shownLines, runSpans) }
+    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone) {
+        withDaySeparators(
+            groupChatRows(shownLines, showTools, showThinking),
+            timeOf = { lineTimes[it.id] },
+            zone = zone,
+        )
     }
     val runHints = vm.runHints
     val lineHints = remember(shownLines, runHints) { lineModelHints(shownLines, runHints) }
@@ -1306,35 +1424,9 @@ fun ThreadScreen(
         )
     }
 
-    var stickToBottom by remember(agentId) { mutableStateOf(true) }
-    var programmaticScroll by remember(agentId) { mutableStateOf(false) }
+    val follow = rememberBottomFollow(agentId, listState)
     val growKey = threadScrollKey(rows, liveThink, showTyping)
-
-    suspend fun snapToBottom() {
-        programmaticScroll = true
-        stickToBottom = true
-        try {
-            listState.scrollToBottom()
-        } finally {
-            programmaticScroll = false
-        }
-    }
-
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            listState.isScrollInProgress to listState.isPinnedToBottom()
-        }.collect { (scrolling, pinned) ->
-            if (programmaticScroll) return@collect
-            if (scrolling && !pinned) stickToBottom = false
-            else if (!scrolling && pinned) stickToBottom = true
-        }
-    }
-
-    LaunchedEffect(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey, stickToBottom) {
-        if (stickToBottom && !listState.isScrollInProgress) {
-            snapToBottom()
-        }
-    }
+    BottomFollowEffects(follow, listOf(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey))
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.snack) {
@@ -1463,6 +1555,7 @@ fun ThreadScreen(
             if (working) {
                 WorkingBar(activity, workingModel, onStop = if (canKill) ({ vm.cancel() }) else null)
             }
+            RefreshPausedNote(vm.pausedUntilMs)
             if (vm.error != null) {
                 Text(
                     vm.error!!,
@@ -1508,6 +1601,9 @@ fun ThreadScreen(
                         when (row) {
                             is ChatRow.Message -> TranscriptBubble(
                                 line = row.line,
+                                timeMs = lineTimes[row.line.id],
+                                zone = zone,
+                                use24h = use24h,
                                 modelText = if (row.line.kind == "assistant") {
                                     runModelLabel(vm.modelBook, lineRunId(row.line), lineHints[row.line.id], models)
                                 } else {
@@ -1538,11 +1634,14 @@ fun ThreadScreen(
                                 tools = row.tools,
                                 onCopy = { text -> copyMessage(context, text) },
                             )
+                            is ChatRow.Day -> DayDivider(
+                                dayLabel(LocalDate.ofEpochDay(row.epochDay), LocalDate.now(zone), Locale.getDefault()),
+                            )
                         }
                     }
                 }
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = !stickToBottom,
+                    visible = !follow.stickToBottom,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 12.dp, bottom = 8.dp),
@@ -1551,7 +1650,7 @@ fun ThreadScreen(
                 ) {
                     SmallFloatingActionButton(
                         onClick = {
-                            scope.launch { snapToBottom() }
+                            scope.launch { follow.snapToBottom() }
                         },
                         containerColor = MaterialTheme.colorScheme.surface,
                         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -1669,7 +1768,7 @@ fun ThreadScreen(
                             draft = ""
                             attaches = emptyList()
                             container.drafts.clear(agentId)
-                            scope.launch { snapToBottom() }
+                            scope.launch { follow.snapToBottom() }
                         }
                     },
                     enabled = draft.isNotBlank() || attaches.any { it.ok },
@@ -1759,6 +1858,8 @@ internal const val STREAM_COALESCE_MS = 120L
 
 internal const val LIVE_TAIL_KEY = "live-tail"
 
+/** A message first seen while the thread was being watched gets that moment as its time. After a longer gap it is left for interpolation. */
+private const val SEEN_WINDOW_MS = 60_000L
 private const val SETTLE_FETCHES = 3
 private const val SETTLE_RETRY_MS = 1_500L
 
@@ -1787,16 +1888,19 @@ internal fun <T> Flow<T>.coalesced(windowMs: Long): Flow<T> = flow {
 internal sealed class ChatRow {
     data class Message(val line: TranscriptLine) : ChatRow()
     data class Tools(val id: String, val tools: List<TranscriptLine>) : ChatRow()
+    data class Day(val epochDay: Long) : ChatRow()
 }
 
 internal fun chatRowKey(row: ChatRow): String = when (row) {
     is ChatRow.Message -> "m-${row.line.id}"
     is ChatRow.Tools -> "tools-${row.id}"
+    is ChatRow.Day -> "day-${row.epochDay}"
 }
 
 internal fun chatRowType(row: ChatRow): String = when (row) {
     is ChatRow.Message -> "m-${row.line.kind}"
     is ChatRow.Tools -> "tools"
+    is ChatRow.Day -> "day"
 }
 
 internal fun threadScrollKey(
@@ -1807,6 +1911,7 @@ internal fun threadScrollKey(
     val last = when (val row = rows.lastOrNull()) {
         is ChatRow.Message -> "${row.line.id}:${row.line.text.length}"
         is ChatRow.Tools -> "tools-${row.id}-${row.tools.size}-${row.tools.lastOrNull()?.text?.length ?: 0}"
+        is ChatRow.Day -> "day-${row.epochDay}"
         null -> "empty"
     }
     val think = liveThink?.let { "${it.id}:${it.text.length}" }.orEmpty()
@@ -1868,13 +1973,16 @@ internal fun groupChatRows(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TranscriptBubble(
+internal fun TranscriptBubble(
     line: TranscriptLine,
     modelText: String? = null,
     onCopy: (String) -> Unit = {},
     onQuote: (String) -> Unit = {},
     onEditQueued: (() -> Unit)? = null,
     onCancelQueued: (() -> Unit)? = null,
+    timeMs: Long? = null,
+    zone: ZoneId = ZoneId.systemDefault(),
+    use24h: Boolean = false,
 ) {
     if (line.kind == "thinking") {
         ThinkingBlock(line, onCopy = onCopy)
@@ -1903,6 +2011,9 @@ private fun TranscriptBubble(
     val haptics = LocalHapticFeedback.current
     val copyText = line.text.trim()
     val quotable = line.kind == "user" || line.kind == "assistant"
+    val locale = Locale.getDefault()
+    val clock = timeMs?.takeIf { !lineShowsQueued(line) }?.let { formatClock(it, zone, use24h, locale) }
+    val fullTime = timeMs?.let { formatFullTime(it, zone, use24h, locale) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align,
@@ -1926,7 +2037,7 @@ private fun TranscriptBubble(
                     .combinedClickable(
                         onClick = {},
                         onLongClick = {
-                            if (copyText.isBlank() && onEditQueued == null && onCancelQueued == null) {
+                            if (copyText.isBlank() && onEditQueued == null && onCancelQueued == null && timeMs == null) {
                                 return@combinedClickable
                             }
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1965,6 +2076,25 @@ private fun TranscriptBubble(
                 onQuote = onQuote,
                 onEdit = onEditQueued,
                 onCancel = onCancelQueued,
+                timeText = fullTime,
+            )
+        }
+        if (clock != null) {
+            Text(
+                clock,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+                modifier = Modifier
+                    .testTag("message-time")
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu = true
+                        },
+                    ),
             )
         }
         if (onEditQueued != null || onCancelQueued != null) {
@@ -1980,6 +2110,22 @@ private fun TranscriptBubble(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun DayDivider(label: String) {
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .testTag("day-divider")
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -2266,8 +2412,22 @@ private fun MessageClipMenu(
     onQuote: (String) -> Unit,
     onEdit: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
+    timeText: String? = null,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (timeText != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        timeText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                enabled = false,
+                onClick = {},
+            )
+        }
         DropdownMenuItem(
             text = { Text("Copy") },
             leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
@@ -2320,15 +2480,22 @@ internal fun quoteBlock(text: String): String {
     }
 }
 
-/**
- * The chat list is laid out bottom-up, so index 0 is the newest row and growth of any row near the
- * bottom extends upward without a scroll call. This only re-anchors after rows are added or removed
- * at the bottom, where the list would otherwise keep the previous first row in place.
- */
-internal suspend fun LazyListState.scrollToBottom() {
-    if (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0) scrollToItem(0)
+@Composable
+private fun RefreshPausedNote(untilMs: Long) {
+    if (untilMs <= 0) return
+    var remaining by remember(untilMs) { mutableLongStateOf((untilMs - System.currentTimeMillis()).coerceAtLeast(0)) }
+    LaunchedEffect(untilMs) {
+        while (true) {
+            remaining = (untilMs - System.currentTimeMillis()).coerceAtLeast(0)
+            if (remaining <= 0) break
+            delay(500)
+        }
+    }
+    val note = refreshPausedNote(remaining) ?: return
+    Text(
+        note,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("refresh-paused-note"),
+    )
 }
-
-/** True while the newest row's bottom is near the viewport bottom. */
-private fun LazyListState.isPinnedToBottom(thresholdPx: Int = 80): Boolean =
-    firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset <= thresholdPx

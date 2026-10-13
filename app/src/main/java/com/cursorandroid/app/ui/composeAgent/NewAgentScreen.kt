@@ -26,11 +26,13 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,7 +91,7 @@ import com.cursorandroid.app.ui.MachineActionsDialog
 import com.cursorandroid.app.ui.MachineMenuRow
 import com.cursorandroid.app.data.repo.filterRepos
 import com.cursorandroid.app.data.repo.forgeForLabel
-import com.cursorandroid.app.data.repo.forgeSupportsRepoList
+import com.cursorandroid.app.data.repo.groupReposByForge
 import com.cursorandroid.app.data.repo.mergeRepos
 import com.cursorandroid.app.data.repo.sourceLabels
 import kotlinx.coroutines.delay
@@ -114,10 +116,8 @@ fun NewAgentScreen(
     var repos by remember { mutableStateOf(container.catalog.repos()) }
     var provider by remember { mutableStateOf("") }
     var forges by remember { mutableStateOf(container.store.forges()) }
-    var forgeRepos by remember { mutableStateOf<List<RepositoryItem>>(emptyList()) }
-    var forgePage by remember { mutableStateOf(1) }
-    var forgeMore by remember { mutableStateOf(false) }
-    var forgeLoading by remember { mutableStateOf(false) }
+    val sync by container.forgeSync.state.collectAsState()
+    var refreshingSources by remember { mutableStateOf(false) }
     var repoUrl by remember { mutableStateOf("") }
     var startingRef by remember { mutableStateOf("") }
     var branches by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -178,10 +178,10 @@ fun NewAgentScreen(
     val shownComputers = remember(computers, machinePrefs) {
         visibleMachines(computers, machinePrefs, container.machines.now())
     }
+    val forgeRepos = remember(sync.reposByForge) { sync.repos() }
     val allRepos = remember(repos, forgeRepos) { mergeRepos(repos, forgeRepos) }
     val providers = remember(repos, forges) { sourceLabels(repos, forges) }
     val createForge = remember(forges, provider) { forgeForLabel(forges, provider) }
-    val listsRepos = createForge != null && forgeSupportsRepoList(createForge)
     val providerRepos = remember(allRepos, provider) {
         allRepos.filter { provider.isBlank() || it.providerLabel() == provider }
     }
@@ -191,18 +191,6 @@ fun NewAgentScreen(
         val item = matchRepo(allRepos, url)
         val label = item?.providerLabel() ?: prettyProvider(gitHost(url))
         if (label.isNotBlank()) provider = label
-    }
-    fun loadMoreForgeRepos() {
-        val forge = createForge ?: return
-        scope.launch {
-            forgeLoading = true
-            val next = forgePage + 1
-            val page = ForgeClient.listRepos(forge, repoQuery, next)
-            forgePage = next
-            forgeRepos = mergeRepos(forgeRepos, page.repos)
-            forgeMore = page.hasMore
-            forgeLoading = false
-        }
     }
     val cloudChoices = environmentChoices(
         savedEnvs,
@@ -405,22 +393,6 @@ fun NewAgentScreen(
         }
     }
 
-    LaunchedEffect(provider, forges, repoQuery) {
-        val forge = createForge
-        forgePage = 1
-        if (forge == null || !listsRepos) {
-            forgeMore = false
-            forgeLoading = false
-            return@LaunchedEffect
-        }
-        if (repoQuery.isNotBlank()) delay(350)
-        forgeLoading = true
-        val page = ForgeClient.listRepos(forge, repoQuery, 1)
-        forgeRepos = mergeRepos(forgeRepos, page.repos)
-        forgeMore = page.hasMore
-        forgeLoading = false
-    }
-
     LaunchedEffect(resetTick, envType) {
         forges = container.store.forges()
     }
@@ -487,10 +459,23 @@ fun NewAgentScreen(
             )
         },
     ) { padding ->
+        PullToRefreshBox(
+            isRefreshing = refreshingSources,
+            onRefresh = {
+                scope.launch {
+                    refreshingSources = true
+                    repos = runCatching { container.repo.repositories(force = true) }.getOrDefault(repos)
+                    runCatching { container.forgeSync.syncAll() }
+                    refreshingSources = false
+                }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .scaffoldBars(padding),
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .scaffoldBars(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -618,15 +603,8 @@ fun NewAgentScreen(
                         emptyLabel = "No source connected",
                         onPick = { provider = it },
                     )
-                    if (listsRepos) {
-                        ForgeRepoSearch(
-                            query = repoQuery,
-                            onQuery = { repoQuery = it },
-                            loading = forgeLoading,
-                            hasMore = forgeMore,
-                            onMore = { loadMoreForgeRepos() },
-                        )
-                    } else if (providerRepos.size > 12) {
+                    ForgeSyncNotes(forges = forges, provider = provider, sync = sync)
+                    if (providerRepos.size > 12) {
                         OutlinedTextField(
                             value = repoQuery,
                             onValueChange = { repoQuery = it },
@@ -675,17 +653,33 @@ fun NewAgentScreen(
                                     enabled = false,
                                 )
                             }
-                            visibleRepos.forEach { repo ->
-                                DropdownMenuItem(
-                                    text = { Text(repo.displayName()) },
-                                    onClick = {
-                                        createRepo = false
-                                        newRepoName = ""
-                                        repoUrl = repo.url
-                                        extraRepos = extraRepos.filterNot { it.equals(repo.url, ignoreCase = true) }
-                                        repoMenu = false
-                                    },
-                                )
+                            val groups = groupReposByForge(visibleRepos, forges, sync.reposByForge)
+                            groups.forEach { group ->
+                                if (groups.size > 1) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                group.name,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        },
+                                        onClick = {},
+                                        enabled = false,
+                                    )
+                                }
+                                group.repos.forEach { repo ->
+                                    DropdownMenuItem(
+                                        text = { Text(repo.displayName()) },
+                                        onClick = {
+                                            createRepo = false
+                                            newRepoName = ""
+                                            repoUrl = repo.url
+                                            extraRepos = extraRepos.filterNot { it.equals(repo.url, ignoreCase = true) }
+                                            repoMenu = false
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -904,15 +898,7 @@ fun NewAgentScreen(
                         emptyLabel = "Any source",
                         onPick = { provider = it },
                     )
-                    if (listsRepos) {
-                        ForgeRepoSearch(
-                            query = repoQuery,
-                            onQuery = { repoQuery = it },
-                            loading = forgeLoading,
-                            hasMore = forgeMore,
-                            onMore = { loadMoreForgeRepos() },
-                        )
-                    }
+                    ForgeSyncNotes(forges = forges, provider = provider, sync = sync)
                     OutlinedTextField(
                         value = repoUrl,
                         onValueChange = { repoUrl = it },
@@ -1044,15 +1030,7 @@ fun NewAgentScreen(
                             emptyLabel = "Any source",
                             onPick = { provider = it },
                         )
-                        if (listsRepos) {
-                            ForgeRepoSearch(
-                                query = repoQuery,
-                                onQuery = { repoQuery = it },
-                                loading = forgeLoading,
-                                hasMore = forgeMore,
-                                onMore = { loadMoreForgeRepos() },
-                            )
-                        }
+                        ForgeSyncNotes(forges = forges, provider = provider, sync = sync)
                         ExtraReposField(
                             repos = filterRepos(providerRepos, repoQuery),
                             selected = extraRepos,
@@ -1391,6 +1369,7 @@ fun NewAgentScreen(
                     Text(if (loading) "Starting…" else "Start agent")
                 }
             }
+        }
         }
     }
 }

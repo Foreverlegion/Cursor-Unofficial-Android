@@ -1,3 +1,17 @@
+# 1.0.29
+
+- Message times: every message in a chat now shows when it was sent, with day separators. Long-press a message to see the full date.
+- Forges: your saved forges sync their repo lists on start, when you save, on pull-to-refresh, and every 6 hours. Sync status shows in Settings and the Source list.
+- Fixed a crash when importing settings from a backup.
+- Your Cursor sign-in key is never included in backups. If your sign-in expires, a banner lets you sign in again.
+- Sign out now asks first and says what is kept and cleared.
+- Fewer status checks, so the app no longer hits Cursor's rate limit.
+- A chat no longer jumps while you are scrolled up and the agent is thinking.
+- Machines show as status unknown, not offline, when their status can't be loaded.
+- A What's new popup shows these notes after each update.
+
+---
+
 # 1.0.28
 
 - The app download is much smaller. Release builds are shrunk and optimized.

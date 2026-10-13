@@ -15,6 +15,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.data.repo.ForgeConnection
+import com.cursorandroid.app.data.repo.ForgeKind
+import com.cursorandroid.app.data.repo.ForgeSyncStatus
+import com.cursorandroid.app.data.repo.ForgeSyncStore
+import com.cursorandroid.app.data.repo.publicGithubForge
+import java.io.File
+import org.junit.Assert.assertEquals
 import com.cursorandroid.app.ui.theme.Appearance
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
@@ -132,6 +139,32 @@ class SettingsPagesRenderTest {
         compose.onNodeWithText("Provider").assertIsDisplayed()
         compose.onNodeWithText("Token / personal access token").assertExists()
         compose.onNodeWithText("Back to forges").assertExists()
+    }
+
+    @Test
+    fun forgesPageShowsEachForgesLastSyncAndASyncNowButton() {
+        val c = container()
+        c.store.saveForges(
+            listOf(
+                publicGithubForge("ghp_x", id = "gh"),
+                ForgeConnection(id = "gl", provider = ForgeKind.GITLAB.id, token = "glpat-x"),
+            ),
+        )
+        val now = System.currentTimeMillis()
+        val cache = ForgeSyncStore(File(ApplicationProvider.getApplicationContext<Context>().filesDir, "forge-sync"))
+        cache.save(ForgeSyncStatus("gh", now, now - 5 * 60_000, repoCount = 42), emptyList())
+        cache.save(
+            ForgeSyncStatus("gl", now, error = "GitLab.com rejected the token (401). Check it in Settings > Forges.", authFailed = true),
+            emptyList(),
+        )
+        c.forgeSync.load()
+        render(SettingsPage.Forges, c)
+
+        compose.onNodeWithText("Last synced 5 min ago · 42 repos").assertIsDisplayed()
+        compose.onNodeWithText("Not synced yet · GitLab.com rejected the token (401). Check it in Settings > Forges.")
+            .assertIsDisplayed()
+        assertEquals(2, compose.onAllNodesWithText("Sync now").fetchSemanticsNodes().size)
+        cache.clear()
     }
 
     @Test

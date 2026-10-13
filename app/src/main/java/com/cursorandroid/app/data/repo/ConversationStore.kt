@@ -21,6 +21,7 @@ data class TranscriptLine(
     val runId: String? = null,
     val queued: Boolean = false,
     val thumbs: List<String> = emptyList(),
+    val atMs: Long? = null,
 )
 
 @Serializable
@@ -282,7 +283,25 @@ internal fun pickLine(left: TranscriptLine, right: TranscriptLine): TranscriptLi
         runId = longer.runId ?: other.runId,
         queued = left.queued && right.queued,
         thumbs = longer.thumbs.ifEmpty { other.thumbs },
+        atMs = mergeStamp(longer.kind, left.atMs, right.atMs),
     )
+}
+
+/** User lines keep the earliest known time; replies keep the latest, so a finished reply shows when it finished. */
+private fun mergeStamp(kind: String, a: Long?, b: Long?): Long? {
+    if (a == null) return b
+    if (b == null) return a
+    return if (kind == "assistant") maxOf(a, b) else minOf(a, b)
+}
+
+internal fun runStartMs(run: Run): Long? = parseInstantMs(run.createdAt)
+
+internal fun runFinishMs(run: Run): Long? {
+    val start = runStartMs(run)
+    val duration = run.durationMs
+    if (start != null && duration != null && duration > 0) return start + duration
+    if (isLiveStatus(run.status)) return null
+    return parseInstantMs(run.updatedAt) ?: start
 }
 
 internal fun coalesceTranscript(lines: List<TranscriptLine>): List<TranscriptLine> {
@@ -447,11 +466,11 @@ internal fun mergeRunTranscript(
     for (run in ordered) {
         val user = visibleUserText(run.prompt?.text.orEmpty())
         if (user.isNotEmpty()) {
-            extra += TranscriptLine("user-${run.id}", "user", user, run.id)
+            extra += TranscriptLine("user-${run.id}", "user", user, run.id, atMs = runStartMs(run))
         }
         val result = run.result?.trim().orEmpty()
         if (result.isNotEmpty()) {
-            extra += TranscriptLine("assistant-${run.id}", "assistant", result, run.id)
+            extra += TranscriptLine("assistant-${run.id}", "assistant", result, run.id, atMs = runFinishMs(run) ?: runStartMs(run))
         }
     }
     return mergeTranscript(lines, extra)
@@ -463,6 +482,7 @@ internal fun mergeConversationTranscript(
     settledRuns: Set<String> = emptySet(),
     runOrder: List<String> = emptyList(),
     liveRunId: String? = null,
+    seenAtMs: Long? = null,
 ): List<TranscriptLine> {
     if (messages.isEmpty()) return coalesceTranscript(local)
     val used = BooleanArray(local.size)
@@ -496,10 +516,12 @@ internal fun mergeConversationTranscript(
         } else {
             take(kind, text)
         }
-        out += taken ?: TranscriptLine(
+        val at = parseMessageTimeMs(msg.createdAt)
+        out += taken?.let { if (it.atMs == null && at != null) it.copy(atMs = at) else it } ?: TranscriptLine(
             id = if (remoteId != null) "$kind-$remoteId" else "$kind-conv-$index",
             kind = kind,
             text = text,
+            atMs = at ?: seenAtMs,
         )
     }
 
@@ -638,6 +660,7 @@ private data class StoredLine(
     val runId: String? = null,
     val queued: Boolean = false,
     val thumbs: List<String> = emptyList(),
+    val atMs: Long? = null,
 ) {
-    fun toLine() = TranscriptLine(id, kind, text, runId, queued, thumbs)
+    fun toLine() = TranscriptLine(id, kind, text, runId, queued, thumbs, atMs)
 }

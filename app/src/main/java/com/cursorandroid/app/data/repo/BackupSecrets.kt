@@ -99,6 +99,7 @@ data class McpSecret(
 
 @Serializable
 data class BackupSecrets(
+    // Read only, for files sealed before the sign-in key was dropped. Never written, never applied.
     val apiKey: String? = null,
     val githubToken: String? = null,
     val forgeTokens: Map<String, String> = emptyMap(),
@@ -111,7 +112,7 @@ private val SECRETS_JSON = Json {
 }
 
 fun SettingsSnapshot.secrets(): BackupSecrets = BackupSecrets(
-    apiKey = apiKey?.takeIf { it.isNotBlank() },
+    apiKey = null,
     githubToken = githubToken?.takeIf { it.isNotBlank() },
     forgeTokens = forges.filter { it.token.isNotBlank() }.associate { it.id to it.token },
     mcp = mcpServers.filter { it.hasSecrets() }.associate {
@@ -132,7 +133,7 @@ fun SettingsSnapshot.withoutSecrets(): SettingsSnapshot = copy(
 )
 
 fun SettingsSnapshot.withSecrets(s: BackupSecrets): SettingsSnapshot = copy(
-    apiKey = s.apiKey ?: apiKey,
+    apiKey = null,
     githubToken = s.githubToken ?: githubToken,
     forges = forges.map { f -> s.forgeTokens[f.id]?.let { f.copy(token = it) } ?: f },
     mcpServers = mcpServers.map { m ->
