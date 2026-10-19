@@ -2,6 +2,15 @@
 
 - MCP: Create MCP sheet for import, next to Import in Settings, Connections, MCP, saves a template `mcp-template.json` to your Downloads folder and offers to open it. The template has an HTTP, an SSE and a stdio example with placeholder values, all switched off, so importing it as it is changes nothing. A second one is saved as `mcp-template (1).json`, never over the first.
 - MCP import reads `"enabled": false` as well as `"disabled": true`.
+- Message times: every message in a chat now shows when it was sent, with day separators. Long-press a message to see the full date.
+- Forges: your saved forges sync their repo lists on start, when you save, on pull-to-refresh, and every 6 hours. Sync status shows in Settings and the Source list.
+- Fixed a crash when importing settings from a backup.
+- Your Cursor sign-in key is never included in backups. If your sign-in expires, a banner lets you sign in again.
+- Sign out now asks first and says what is kept and cleared.
+- Fewer status checks, so the app no longer hits Cursor's rate limit.
+- A chat no longer jumps while you are scrolled up and the agent is thinking.
+- Machines show as status unknown, not offline, when their status can't be loaded.
+- A What's new popup shows these notes after each update.
 
 ## Importing MCP servers
 
@@ -57,6 +66,7 @@ Secrets and headers:
 - The template's three servers are placeholders and are all switched off. Importing it as it is saves three disabled entries and nothing is sent to an agent. Replace the `example.com` URLs and `YOUR_TOKEN_HERE` values, and remove `"enabled": false`, to use one.
 
 ---
+
 
 # 1.0.28
 

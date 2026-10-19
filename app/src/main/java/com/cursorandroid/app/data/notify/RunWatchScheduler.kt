@@ -80,8 +80,15 @@ object RunWatchScheduler {
     }
 
     /** Called from inside the running worker: queues the next poll behind it instead of cancelling it. */
-    fun chainNextPoll(context: Context, agentId: String, runId: String, agentName: String?) {
-        enqueue(context, agentId, runId, agentName, ExistingWorkPolicy.APPEND_OR_REPLACE)
+    fun chainNextPoll(
+        context: Context,
+        agentId: String,
+        runId: String,
+        agentName: String?,
+        delayMs: Long = RunWatchBackoff.NORMAL_MS,
+        failures: Int = 0,
+    ) {
+        enqueue(context, agentId, runId, agentName, ExistingWorkPolicy.APPEND_OR_REPLACE, delayMs, failures)
     }
 
     private fun enqueue(
@@ -90,18 +97,21 @@ object RunWatchScheduler {
         runId: String,
         agentName: String?,
         policy: ExistingWorkPolicy,
+        delayMs: Long = RunWatchBackoff.NORMAL_MS,
+        failures: Int = 0,
     ) {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val request = OneTimeWorkRequestBuilder<RunWatchWorker>()
             .setConstraints(constraints)
-            .setInitialDelay(20, TimeUnit.SECONDS)
+            .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
             .setInputData(
                 workDataOf(
                     RunWatchWorker.KEY_AGENT_ID to agentId,
                     RunWatchWorker.KEY_RUN_ID to runId,
                     RunWatchWorker.KEY_AGENT_NAME to agentName,
+                    RunWatchWorker.KEY_FAILURES to failures,
                 ),
             )
             .build()

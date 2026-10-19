@@ -28,8 +28,9 @@ object SettingsBackup {
         return parse(text)
     }
 
+    /** Files from older builds may carry the Cursor sign-in key. It is dropped here so it can never be applied or staged. */
     fun parse(text: String): SettingsSnapshot? =
-        runCatching { json.decodeFromString<SettingsSnapshot>(text) }.getOrNull()
+        runCatching { json.decodeFromString<SettingsSnapshot>(text) }.getOrNull()?.copy(apiKey = null)
 
     fun encode(snap: SettingsSnapshot): String = json.encodeToString(snap)
 
@@ -41,8 +42,22 @@ object SettingsBackup {
         return BackupOpen.Ok
     }
 
+    /** Settings > Import applies now; the sign-in screen only stages the file until sign-in completes. */
+    fun restoreOrStage(container: AppContainer, loaded: SettingsSnapshot, passphrase: CharArray?, stage: Boolean): BackupOpen {
+        if (!stage) return apply(container, loaded, passphrase)
+        val opened = openBackup(loaded, passphrase)
+        if (opened.result == BackupOpen.Ok) container.stagedRestore.stage(opened.snapshot)
+        return opened.result
+    }
+
+    /** Applies the backup staged on the sign-in screen. Call right after sign-in: it never touches the session key. */
+    fun applyStaged(container: AppContainer): Boolean {
+        val staged = container.stagedRestore.take() ?: return false
+        applySnapshot(container, staged.copy(apiKey = null, secrets = null))
+        return true
+    }
+
     private fun snapshotOf(container: AppContainer) = SettingsSnapshot(
-        apiKey = container.store.apiKey,
         notifyOnComplete = container.store.notifyOnComplete,
         notifyOnApproval = container.store.notifyOnApproval,
         mcpServers = container.store.storedMcps(),
@@ -73,9 +88,6 @@ object SettingsBackup {
     )
 
     private fun applySnapshot(container: AppContainer, snap: SettingsSnapshot) {
-        if (!snap.apiKey.isNullOrBlank()) {
-            container.store.apiKey = snap.apiKey
-        }
         container.store.notifyOnComplete = snap.notifyOnComplete
         container.store.notifyOnApproval = snap.notifyOnApproval
         if (snap.mcpServers.isNotEmpty()) {
@@ -96,6 +108,7 @@ object SettingsBackup {
         }
         if (snap.forges.isNotEmpty()) {
             container.store.saveForges(mergeForgeSecrets(container.store.forges(), snap.forges))
+            container.forgeSync.requestDue(FORGE_SYNC_START_MS)
         }
         if (snap.repoDefaults.isNotEmpty()) {
             container.store.saveRepoDefaults(snap.repoDefaults)
@@ -134,6 +147,7 @@ object SettingsBackup {
 @Serializable
 data class SettingsSnapshot(
     val version: Int = 1,
+    // Read only, for files from before the sign-in key was dropped from backups. Never written, never applied.
     val apiKey: String? = null,
     val notifyOnComplete: Boolean = true,
     val notifyOnApproval: Boolean = true,

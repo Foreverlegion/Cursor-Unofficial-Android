@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.repo.ClientOrigin
@@ -40,6 +41,7 @@ fun SettingsTransfer(
     container: AppContainer,
     onImported: () -> Unit = {},
     allowExport: Boolean = true,
+    stageOnly: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -49,6 +51,10 @@ fun SettingsTransfer(
     var exportOptions by remember { mutableStateOf(false) }
     var exportPassphrase by remember { mutableStateOf<CharArray?>(null) }
     var pendingImport by remember { mutableStateOf<SettingsSnapshot?>(null) }
+    var staged by remember { mutableStateOf(stageOnly && container.stagedRestore.pending()) }
+
+    fun commit(loaded: SettingsSnapshot, passphrase: CharArray?): BackupOpen =
+        SettingsBackup.restoreOrStage(container, loaded, passphrase, stage = stageOnly)
 
     val export = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -77,10 +83,14 @@ fun SettingsTransfer(
         error = result != BackupOpen.Ok
         status = when {
             result == BackupOpen.WrongPassphrase -> "Wrong passphrase. Nothing was imported."
+            stageOnly -> "Backup staged. It will be applied right after you sign in."
             withSecrets -> "Settings imported"
             else -> "Settings imported, secrets skipped"
         }
-        if (!error) onImported()
+        if (!error) {
+            staged = stageOnly
+            onImported()
+        }
     }
 
     val importer = rememberLauncherForActivityResult(
@@ -96,7 +106,7 @@ fun SettingsTransfer(
                 }
                 loaded.secrets != null -> pendingImport = loaded
                 else -> {
-                    val result = withContext(Dispatchers.IO) { SettingsBackup.apply(container, loaded, null) }
+                    val result = withContext(Dispatchers.IO) { commit(loaded, null) }
                     finish(result, withSecrets = true)
                 }
             }
@@ -118,13 +128,30 @@ fun SettingsTransfer(
             )
         }
         Text(
-            "Import settings",
+            if (stageOnly) "Restore settings from backup" else "Import settings",
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { importer.launch(IMPORT_TYPES) }
-                .padding(vertical = 14.dp),
+                .padding(vertical = 14.dp)
+                .testTag("restore-settings"),
             style = MaterialTheme.typography.bodyLarge,
         )
+        if (stageOnly && staged) {
+            Text(
+                "Discard staged backup",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        container.stagedRestore.discard()
+                        staged = false
+                        error = false
+                        status = "Staged backup discarded"
+                    }
+                    .padding(vertical = 8.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         if (status != null) {
             Text(
                 status!!,
@@ -151,12 +178,12 @@ fun SettingsTransfer(
             onWithout = {
                 pendingImport = null
                 scope.launch {
-                    val result = withContext(Dispatchers.IO) { SettingsBackup.apply(container, loaded, null) }
+                    val result = withContext(Dispatchers.IO) { commit(loaded, null) }
                     finish(result, withSecrets = false)
                 }
             },
             tryPassphrase = { passphrase ->
-                val result = withContext(Dispatchers.IO) { SettingsBackup.apply(container, loaded, passphrase) }
+                val result = withContext(Dispatchers.IO) { commit(loaded, passphrase) }
                 if (result == BackupOpen.Ok) {
                     pendingImport = null
                     finish(result, withSecrets = true)
@@ -181,7 +208,7 @@ private fun ExportOptionsDialog(onDismiss: () -> Unit, onChoose: (CharArray?) ->
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "The API key, forge tokens, and MCP header, env, and OAuth values are left out by default.",
+                    "The Cursor sign-in key is never exported. Forge tokens and MCP header, env, and OAuth values are left out by default.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

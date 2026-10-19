@@ -15,10 +15,9 @@ import java.net.URLEncoder
 
 const val FORGE_REPO_PAGE_SIZE = 100
 private const val GITEA_PAGE_SIZE = 50
+private const val GITHUB_AFFILIATION = "owner,collaborator,organization_member"
 
 fun repoPageSize(provider: String): Int = if (provider == ForgeKind.GITEA.id) GITEA_PAGE_SIZE else FORGE_REPO_PAGE_SIZE
-
-data class ForgeRepoPage(val repos: List<RepositoryItem>, val hasMore: Boolean)
 
 private val REPO_JSON = Json { ignoreUnknownKeys = true }
 
@@ -58,7 +57,7 @@ fun repoListCall(forge: ForgeConnection, query: String, page: Int): ForgeCall? {
             if (search.isNotEmpty()) append("&search=$search")
         }
         ForgeKind.GITHUB.id, ForgeKind.GITHUB_ENTERPRISE.id ->
-            "${item.apiUrl}/user/repos?sort=pushed&per_page=$FORGE_REPO_PAGE_SIZE&page=$safePage"
+            "${item.apiUrl}/user/repos?affiliation=$GITHUB_AFFILIATION&sort=pushed&per_page=$FORGE_REPO_PAGE_SIZE&page=$safePage"
         ForgeKind.BITBUCKET.id ->
             "${item.apiUrl}/repositories?role=member&pagelen=$FORGE_REPO_PAGE_SIZE&page=$safePage"
         ForgeKind.GITEA.id -> buildString {

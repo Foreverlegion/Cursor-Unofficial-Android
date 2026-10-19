@@ -3,6 +3,7 @@ package com.cursorandroid.app.data.notify
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import com.cursorandroid.app.CursorAndroidApp
 import com.cursorandroid.app.data.api.isActive
 import com.cursorandroid.app.data.api.isTerminal
@@ -24,6 +25,13 @@ class RunWatchWorker(
         val agentId = inputData.getString(KEY_AGENT_ID) ?: return Result.failure()
         val runId = inputData.getString(KEY_RUN_ID) ?: return Result.failure()
         val agentName = inputData.getString(KEY_AGENT_NAME)
+        if (app.container.session.expired()) {
+            RunWatchStore.remove(applicationContext, runId)
+            ApprovalStreamHub.close(runId)
+            ApprovalStreamHub.detach(applicationContext, runId)
+            return Result.success()
+        }
+        val failures = inputData.getInt(KEY_FAILURES, 0)
         if (VisibleAgent.isOpenInForeground(agentId) || VisibleAgent.inboxCoversRuns()) {
             RunWatchScheduler.chainNextPoll(applicationContext, agentId, runId, agentName)
             return Result.success()
@@ -56,8 +64,23 @@ class RunWatchWorker(
                     Result.success()
                 }
             }
-        } catch (_: Exception) {
-            RunWatchScheduler.chainNextPoll(applicationContext, agentId, runId, agentName)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (RunWatchBackoff.gone(e) || RunWatchBackoff.signedOut(e)) {
+                RunWatchStore.remove(applicationContext, runId)
+                ApprovalStreamHub.close(runId)
+                ApprovalStreamHub.detach(applicationContext, runId)
+                return Result.success()
+            }
+            RunWatchScheduler.chainNextPoll(
+                applicationContext,
+                agentId,
+                runId,
+                agentName,
+                delayMs = RunWatchBackoff.delayMs(failures + 1, e),
+                failures = failures + 1,
+            )
             Result.success()
         }
     }
@@ -66,5 +89,6 @@ class RunWatchWorker(
         const val KEY_AGENT_ID = "agent_id"
         const val KEY_RUN_ID = "run_id"
         const val KEY_AGENT_NAME = "agent_name"
+        const val KEY_FAILURES = "failures"
     }
 }

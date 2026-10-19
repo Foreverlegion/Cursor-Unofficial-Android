@@ -16,7 +16,7 @@ Cursor, the Cursor logo, and related marks are theirs. I use the name here only 
 
 ## What it is
 
-A sideloaded APK that lets you run and follow Cloud Agent work from Android:
+An Android client that lets you run and follow Cloud Agent work from your phone:
 
 - Inbox for cloud, pool, and remote/machine chats
 - Start an agent on a repo, a saved cloud environment, a machine, or a pool
@@ -31,7 +31,7 @@ The phone does **not** run the agent. The work happens on Cursor's cloud VMs or 
 ## What it is not
 
 - Not the official Cursor iOS app, desktop app, or CLI
-- Not a Play Store product
+- Not a public Play Store release
 - Not a local coding environment
 - Not a way to skip a Cursor subscription
 - Not a claim on Cursor's product, brand, or backend
@@ -42,14 +42,7 @@ The phone does **not** run the agent. The work happens on Cursor's cloud VMs or 
 
 ## Install
 
-1. Open the latest [GitHub Release](https://github.com/Foreverlegion/Cursor-Unofficial-Android/releases).
-2. Download `app-release.apk`.
-3. Allow installs from this source if Android asks.
-4. Install the APK.
-
-Play Protect may scan a sideloaded APK. That is Google, not this app. You can install anyway or turn Play Protect off yourself.
-
-Play installs update from the Play Store. This app does not download or install APKs.
+Minimum Android: 8.0 (API 26). Package: `com.cursorandroid.app`.
 
 ## Importing MCP servers
 
@@ -110,9 +103,7 @@ You need a Cursor user API key from [cursor.com/dashboard/api](https://cursor.co
 
 The app can also walk a browser sign-in. The first time, it creates one API key and saves it on the phone. Later sign-ins reuse that key.
 
-Play review uses a local demo sign-in (`demo` / `demo`) with sample chats and no Cursor API. Play testing is an open join, not an email list. Instructions: [docs/play-review.md](docs/play-review.md).
-
-Minimum Android: 8.0 (API 26).
+Play reviewers use a local demo sign-in (`demo` / `demo`) with sample chats and no Cursor API. Testers use their own API key. Review instructions: [docs/play-review.md](docs/play-review.md).
 
 ## Notifications
 
@@ -124,7 +115,7 @@ For alerts to arrive with the screen off, the first-launch battery prompt asks A
 
 Built and maintained in my spare time. Features track what the public Cloud Agents API allows. Things Cursor only exposes in the official web/desktop clients (for example in-app remote desktop control) are not available here unless that API exists.
 
-Issues and APKs live in this repository: [Foreverlegion/Cursor-Unofficial-Android](https://github.com/Foreverlegion/Cursor-Unofficial-Android).
+Issues live in this repository: [Foreverlegion/Cursor-Unofficial-Android](https://github.com/Foreverlegion/Cursor-Unofficial-Android).
 
 If you work at Cursor and want this taken down or renamed, open an issue. I will handle it. I am not trying to pass this off as yours.
 

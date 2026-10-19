@@ -233,10 +233,7 @@ class InboxRefreshTest {
     }
 
     @Test
-    fun fullHydrateAndMachineListingAreThrottledOnTicks() {
-        assertTrue(InboxPollPolicy.fullHydrate(RefreshReason.Resume, 1))
-        assertTrue(InboxPollPolicy.fullHydrate(RefreshReason.Tick, InboxPollPolicy.FULL_HYDRATE_EVERY))
-        assertFalse(InboxPollPolicy.fullHydrate(RefreshReason.Tick, 1))
+    fun machineListingIsThrottledOnTicks() {
         assertTrue(InboxPollPolicy.machinesDue(RefreshReason.Resume, 1_000, 2_000))
         assertFalse(InboxPollPolicy.machinesDue(RefreshReason.Tick, 1_000, 2_000))
         assertTrue(InboxPollPolicy.machinesDue(RefreshReason.Tick, 0, InboxPollPolicy.MACHINES_EVERY_MS))

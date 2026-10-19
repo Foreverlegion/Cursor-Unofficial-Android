@@ -21,6 +21,18 @@ fun escapeBuildConfig(value: String): String {
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
         .replace("$", "\\$")
+        .replace("\r", "")
+        .replace("\n", "\\n")
+}
+
+/** The newest section of RELEASE_NOTES.md (body under the first "# x.y.z" heading), shown in the What's new popup. */
+fun latestReleaseNotes(file: File): String {
+    if (!file.isFile) return ""
+    val lines = file.readLines()
+    val start = lines.indexOfFirst { it.startsWith("# ") }
+    if (start < 0) return ""
+    val body = lines.drop(start + 1).takeWhile { !it.startsWith("# ") && it.trim() != "---" }
+    return body.joinToString("\n").trim()
 }
 
 val stableKeystore = file("signing/stable.p12")
@@ -45,6 +57,11 @@ android {
             "String",
             "APP_ISSUES_TOKEN",
             "\"${escapeBuildConfig(signingProp("CURSOR_ANDROID_ISSUES_TOKEN"))}\"",
+        )
+        buildConfigField(
+            "String",
+            "WHATS_NEW",
+            "\"${escapeBuildConfig(latestReleaseNotes(rootProject.file("RELEASE_NOTES.md")))}\"",
         )
     }
 

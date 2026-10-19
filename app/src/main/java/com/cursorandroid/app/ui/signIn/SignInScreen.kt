@@ -39,7 +39,10 @@ import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.ClientOrigin
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.ui.settings.SettingsTransfer
+import com.cursorandroid.app.data.repo.SettingsBackup
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -57,6 +60,9 @@ fun SignInScreen(
     var browserJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    suspend fun applyStagedRestore() {
+        withContext(Dispatchers.IO) { runCatching { SettingsBackup.applyStaged(container) } }
+    }
     val notifyPerm = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
@@ -98,6 +104,7 @@ fun SignInScreen(
                             try {
                                 container.repo.me()
                                 RunWatchScheduler.ensureSweep(context.applicationContext)
+                                applyStagedRestore()
                                 onSignedIn()
                             } catch (e: CancellationException) {
                                 throw e
@@ -125,6 +132,7 @@ fun SignInScreen(
                             container.login.complete(handshake, container.store)
                             container.repo.me()
                             RunWatchScheduler.ensureSweep(context.applicationContext)
+                            applyStagedRestore()
                             onSignedIn()
                         } catch (e: CancellationException) {
                             throw e
@@ -246,6 +254,7 @@ fun SignInScreen(
                         try {
                             container.repo.me()
                             RunWatchScheduler.ensureSweep(context.applicationContext)
+                            applyStagedRestore()
                             onSignedIn()
                         } catch (e: Exception) {
                             container.store.clear()
@@ -271,23 +280,7 @@ fun SignInScreen(
             SettingsTransfer(
                 container = container,
                 allowExport = false,
-                onImported = {
-                    if (!container.store.hasKey()) return@SettingsTransfer
-                    scope.launch {
-                        loading = true
-                        error = null
-                        try {
-                            container.repo.me()
-                            RunWatchScheduler.ensureSweep(context.applicationContext)
-                            onSignedIn()
-                        } catch (e: Exception) {
-                            container.store.clear()
-                            error = e.message ?: "Imported key failed"
-                        } finally {
-                            loading = false
-                        }
-                    }
-                },
+                stageOnly = true,
             )
         }
     }
