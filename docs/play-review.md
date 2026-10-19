@@ -21,8 +21,11 @@ To leave, open Settings → Account → Sign out.
 
 # Play testing track
 
-Testers join in the open. Do not use an email list.
+Closed testing. Testers join the Google Group, then opt in on Play with the same Google account.
 
-In Play Console, use Open testing, or Closed testing set to open join (anyone with the link). Testers opt in from that public link. No invite list.
+- Group: https://groups.google.com/g/unofficial-cursor-android-testers (`unofficial-cursor-android-testers`)
+- Opt-in: https://play.google.com/apps/testing/com.cursorandroid.app
 
-Upload the signed 1.0.28 (128) app bundle to that track.
+The closed-test build on Play is 1.0.28 (versionCode 128). Upload the signed 1.0.28 (128) app bundle to that closed track.
+
+Reviewers use the demo sign-in above. Testers sign in with their own Cursor API key from cursor.com/dashboard/api.
