@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -25,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
@@ -50,6 +53,7 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
 import com.cursorandroid.app.ui.settings.BatteryPrompt
+import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.CreateAgentResponse
 import com.cursorandroid.app.data.repo.ProfileRule
 import com.cursorandroid.app.data.repo.TranscriptLine
@@ -247,6 +251,9 @@ private fun CursorAppContent(
     )
     val rejectedKey by container.session.rejectedKey.collectAsStateWithLifecycle()
     val sessionExpired = !demo && rejectedKey != null && rejectedKey == container.store.apiKey?.trim()
+    val profileScope = rememberCoroutineScope()
+    val profileSnack = remember { SnackbarHostState() }
+    var profileStarting by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         if (demo) {
             DemoBanner(Modifier.windowInsetsPadding(topBars))
@@ -385,19 +392,37 @@ private fun CursorAppContent(
             }
         }
     }
+            SnackbarHost(
+                profileSnack,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp),
+            )
         }
     }
     var profileSeen by remember { mutableStateOf(container.store.profileRuleSeen) }
     var profileLater by remember { mutableStateOf(false) }
-    if (!demo && profileSeen.not() && !profileLater) {
+    if (!demo && profileSeen.not() && !profileLater && !profileStarting) {
         ProfileRulePrompt(
-            create = { container.repo.createProfileAgent() },
-            onOpen = { created ->
-                openProfileAgent(container, context, created)
-                container.store.profileRuleSeen = true
-                profileSeen = true
-                selectedId = created.agent.id
-                pane = Pane.Inbox
+            onBuild = {
+                profileStarting = true
+                profileScope.launch {
+                    profileScope.launch { profileSnack.showSnackbar("Starting in background") }
+                    try {
+                        val created = container.repo.createProfileAgent()
+                        openProfileAgent(container, context, created)
+                        container.store.profileRuleSeen = true
+                        profileSeen = true
+                        selectedId = created.agent.id
+                        pane = Pane.Inbox
+                    } catch (e: Exception) {
+                        profileStarting = false
+                        val message = (e as? ApiException)?.displayMessage()
+                            ?: e.message?.takeIf { it.isNotBlank() }
+                            ?: "Could not start the agent"
+                        profileSnack.showSnackbar(message)
+                    }
+                }
             },
             onNotNow = {
                 container.store.profileRuleSeen = true
@@ -415,7 +440,7 @@ private fun openProfileAgent(container: AppContainer, context: android.content.C
             TranscriptLine(
                 id = "user-${created.run.id}",
                 kind = "user",
-                text = ProfileRule.TITLE,
+                text = ProfileRule.message(),
                 runId = created.run.id,
             ),
         ),

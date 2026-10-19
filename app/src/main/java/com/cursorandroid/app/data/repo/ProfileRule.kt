@@ -5,11 +5,15 @@ import com.cursorandroid.app.data.api.Prompt
 
 /**
  * One-time no-repo agent that asks Cursor to save an Always Apply user rule.
- * The prompt is sent as prompt.text with both repos and env omitted.
+ * [message] is the only prompt text: it is sent once, and the chat shows that same line.
+ * repos and env are omitted.
  */
 object ProfileRule {
     const val TITLE = "Build profile rule to give all Cursor agents context"
     const val AGENT_NAME = "Cursor Unofficial Android"
+
+    /** Title plus the setup body. One launch sends this once. */
+    fun message(): String = "$TITLE\n\n$TEXT"
 
     val TEXT: String = """
 You are a one-time setup agent. Do not write app code and do not open a PR on any real project. This agent was started with no repository (both `repos` and `env` omitted).
@@ -50,7 +54,7 @@ Always Apply for this account. Only Android-app interaction (artifacts, images, 
 
     fun request(): CreateAgentRequest {
         return CreateAgentRequest(
-            prompt = Prompt(text = TEXT),
+            prompt = Prompt(text = message()),
             name = AGENT_NAME,
         )
     }

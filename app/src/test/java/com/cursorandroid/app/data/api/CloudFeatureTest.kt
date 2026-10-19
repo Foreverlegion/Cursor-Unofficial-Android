@@ -30,12 +30,14 @@ class CloudFeatureTest {
     @Test
     fun profileRequestIsPromptOnlyAndExact() {
         val body = ProfileRule.request()
-        assertEquals(ProfileRule.TEXT, body.prompt.text)
+        assertEquals(ProfileRule.message(), body.prompt.text)
+        assertTrue(body.prompt.text.startsWith(ProfileRule.TITLE))
+        assertTrue(body.prompt.text.contains(ProfileRule.TEXT))
         assertNull(body.repos)
         assertNull(body.env)
         assertNull(body.envVars)
         assertNull(body.agentId)
-        assertTrue(body.prompt.text.startsWith("You are a one-time setup agent."))
+        assertTrue(body.prompt.text.contains("You are a one-time setup agent."))
         assertTrue(body.prompt.text.contains("both `repos` and `env` omitted"))
         assertTrue(body.prompt.text.contains("com.cursorandroid.app"))
         assertFalse(body.prompt.text.contains("Thermal Nexus"))

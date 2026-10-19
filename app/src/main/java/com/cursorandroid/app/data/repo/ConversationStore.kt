@@ -280,11 +280,30 @@ internal fun pickLine(left: TranscriptLine, right: TranscriptLine): TranscriptLi
     }
     return longer.copy(
         id = stableId,
+        text = if (left.kind == "user") combineUserText(left.text, right.text) else longer.text,
         runId = longer.runId ?: other.runId,
         queued = left.queued && right.queued,
         thumbs = longer.thumbs.ifEmpty { other.thumbs },
         atMs = mergeStamp(longer.kind, left.atMs, right.atMs),
     )
+}
+
+/**
+ * One launch has one user line. A short caption and the prompt that was actually sent
+ * become that single line; identical or nested copies stay as the longer text.
+ */
+internal fun combineUserText(a: String, b: String): String {
+    val left = visibleUserText(a)
+    val right = visibleUserText(b)
+    if (left.isEmpty()) return right
+    if (right.isEmpty()) return left
+    val squashLeft = squash(left)
+    val squashRight = squash(right)
+    if (squashLeft == squashRight) return if (left.length >= right.length) left else right
+    if (squashLeft.contains(squashRight)) return left
+    if (squashRight.contains(squashLeft)) return right
+    val (short, long) = if (left.length <= right.length) left to right else right to left
+    return "$short\n\n$long"
 }
 
 /** User lines keep the earliest known time; replies keep the latest, so a finished reply shows when it finished. */
@@ -532,7 +551,11 @@ internal fun mergeConversationTranscript(
         if (used[i]) return@forEachIndexed
         val old = order.isOld(line)
         when (line.kind) {
-            "user" -> if (old) placeOlder(out, prefix, line, order) else out += line
+            "user" -> when {
+                absorbLaunchUser(out, line) -> Unit
+                old -> placeOlder(out, prefix, line, order)
+                else -> out += line
+            }
             "assistant" -> {
                 val text = line.text.trim()
                 val settled = line.runId in settledRuns || order.runOf(line) in settledRuns
@@ -609,6 +632,48 @@ private fun placeOlder(
         }
     }
     prefix += line
+}
+
+/**
+ * A local launch line is the same turn as the prompt already in the transcript.
+ * It is folded into that line. A later run, and a still-queued local line, are left alone.
+ */
+private fun absorbLaunchUser(out: MutableList<TranscriptLine>, line: TranscriptLine): Boolean {
+    if (line.kind != "user" || isLocalQueueId(line.id)) return false
+    val run = line.runId?.takeIf { it.isNotBlank() } ?: linkedRunId(line) ?: return false
+    val same = out.indexOfFirst { existing ->
+        existing.kind == "user" && (linkedRunId(existing) == run || existing.id == "user-$run")
+    }
+    if (same >= 0) {
+        out[same] = pickLine(out[same], line)
+        return true
+    }
+    val loose = out.indices.filter { i ->
+        out[i].kind == "user" && linkedRunId(out[i]) == null
+    }
+    if (loose.size != 1) return false
+    if (out.any { it.kind == "user" && !it.runId.isNullOrBlank() && it.runId != run }) return false
+    val server = visibleUserText(out[loose.first()].text)
+    val localText = visibleUserText(line.text)
+    val overlaps = userTextsOverlap(server, localText)
+    val captionOfLonger = localText.length <= 160 && server.length >= localText.length * 2
+    if (!overlaps && !captionOfLonger) return false
+    out[loose.first()] = pickLine(out[loose.first()], line)
+    return true
+}
+
+/** A conversation row id such as user-conv-0 is not a run id. */
+private fun linkedRunId(line: TranscriptLine): String? {
+    line.runId?.takeIf { it.isNotBlank() }?.let { return it }
+    if (line.id.contains("-conv-")) return null
+    return runIdFromId(line)
+}
+
+private fun userTextsOverlap(a: String, b: String): Boolean {
+    if (a.isEmpty() || b.isEmpty()) return false
+    val left = squash(a)
+    val right = squash(b)
+    return left == right || left.contains(right) || right.contains(left)
 }
 
 private val WHITESPACE = Regex("\\s+")

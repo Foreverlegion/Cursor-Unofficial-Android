@@ -1,3 +1,9 @@
+# 1.0.30
+
+- Tapping Build on the profile-rule prompt closes it at once. The agent starts in the background, with a short "Starting in background" note. The chat gets one user message for that launch.
+- New agent choices for target and subagent model keep each label on one line. On a narrow screen the row wraps instead of squeezing a label into a vertical stack of letters.
+- Tool calls for the run that is still working sit in one Tool Calls list and follow the chat only when you are already at the bottom.
+
 # 1.0.29
 
 - New agent can open the pull request as the Cursor GitHub App. The switch is sent only after you change it. User keys start off. Service account keys start on.

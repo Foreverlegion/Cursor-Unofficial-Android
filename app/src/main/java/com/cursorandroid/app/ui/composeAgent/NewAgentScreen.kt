@@ -3,11 +3,13 @@ package com.cursorandroid.app.ui.composeAgent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.AppInsets
@@ -87,6 +90,7 @@ import com.cursorandroid.app.data.repo.DraftSubagent
 import com.cursorandroid.app.data.repo.GithubRepos
 import com.cursorandroid.app.data.repo.mcpServersFor
 import com.cursorandroid.app.data.repo.prefixPrompt
+import com.cursorandroid.app.data.repo.visibleUserText
 import com.cursorandroid.app.data.repo.toApi
 import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
@@ -524,31 +528,19 @@ fun NewAgentScreen(
                     singleLine = true,
                 )
                 Text("Target", style = MaterialTheme.typography.labelLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = envType == "cloud", onClick = { envType = "cloud" }, label = { Text("Cloud") })
-                    FilterChip(
-                        selected = envType == "machine",
-                        onClick = {
-                            envType = "machine"
-                            workOnBranch = true
-                        },
-                        label = { Text("Machine") },
-                    )
-                    FilterChip(selected = envType == "pool", onClick = { envType = "pool" }, label = { Text("Pool") })
-                    FilterChip(selected = envType == "none", onClick = { envType = "none" }, label = { Text("No repo") })
+                ChoiceRow {
+                    ChoiceChip(envType == "cloud", "Cloud") { envType = "cloud" }
+                    ChoiceChip(envType == "machine", "Machine") {
+                        envType = "machine"
+                        workOnBranch = true
+                    }
+                    ChoiceChip(envType == "pool", "Pool") { envType = "pool" }
+                    ChoiceChip(envType == "none", "No repo") { envType = "none" }
                 }
                 if (envType == "cloud") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = !cloudFromEnv,
-                            onClick = { cloudFromEnv = false },
-                            label = { Text("From repo") },
-                        )
-                        FilterChip(
-                            selected = cloudFromEnv,
-                            onClick = { cloudFromEnv = true },
-                            label = { Text("Cloud computer") },
-                        )
+                    ChoiceRow {
+                        ChoiceChip(!cloudFromEnv, "From repo") { cloudFromEnv = false }
+                        ChoiceChip(cloudFromEnv, "Cloud computer") { cloudFromEnv = true }
                     }
                     if (cloudFromEnv) {
                         SavedEnvironmentPanel(
@@ -1133,9 +1125,9 @@ fun NewAgentScreen(
                     onParams = { modelParams = it },
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = mode == "agent", onClick = { mode = "agent" }, label = { Text("Agent") })
-                    FilterChip(selected = mode == "plan", onClick = { mode = "plan" }, label = { Text("Plan") })
+                ChoiceRow {
+                    ChoiceChip(mode == "agent", "Agent") { mode = "agent" }
+                    ChoiceChip(mode == "plan", "Plan") { mode = "plan" }
                 }
 
                 AttachChips(items = attaches, onItems = { attaches = it })
@@ -1209,18 +1201,10 @@ fun NewAgentScreen(
                         minLines = 2,
                     )
                     Text("Subagent model", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = subModel.isBlank() || subModel == "inherit",
-                            onClick = { subModel = "inherit" },
-                            label = { Text("Inherit") },
-                        )
+                    ChoiceRow {
+                        ChoiceChip(subModel.isBlank() || subModel == "inherit", "Inherit") { subModel = "inherit" }
                         models.take(6).forEach { model ->
-                            FilterChip(
-                                selected = subModel == model.id,
-                                onClick = { subModel = model.id },
-                                label = { Text(model.displayName ?: model.id) },
-                            )
+                            ChoiceChip(subModel == model.id, model.displayName ?: model.id) { subModel = model.id }
                         }
                     }
                     Button(
@@ -1447,7 +1431,9 @@ fun NewAgentScreen(
                                         TranscriptLine(
                                             id = "user-${created.run.id}",
                                             kind = "user",
-                                            text = Attachments.label(prompt, ready),
+                                            text = visibleUserText(body.prompt.text).ifBlank {
+                                                Attachments.label(prompt, ready)
+                                            },
                                             runId = created.run.id,
                                         ),
                                     ).withStartupNotice(if (noRepo) "none" else envType),
@@ -1501,4 +1487,32 @@ fun NewAgentScreen(
         }
         }
     }
+}
+
+@Composable
+private fun ChoiceRow(chips: @Composable () -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        chips()
+    }
+}
+
+@Composable
+private fun ChoiceChip(selected: Boolean, label: String, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.wrapContentWidth(unbounded = true),
+        label = {
+            Text(
+                label,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+    )
 }

@@ -65,6 +65,47 @@ class ThreadScrollTest {
     }
 
     @Test
+    fun liveToolCallsLeaveTheListAndStillMoveTheScrollKey() {
+        val user = TranscriptLine("user-r1", "user", "go", "r1")
+        val tool = TranscriptLine("t1", "tool", "read\nREADME.md", "r1")
+        val think = TranscriptLine("think-r1", "thinking", "plan", "r1")
+        val lines = listOf(user, tool, think)
+        val rows = groupChatRows(
+            lines,
+            showTools = true,
+            showThinking = true,
+            liveThinkId = think.id,
+            liveToolIds = setOf(tool.id),
+        )
+        assertTrue(rows.none { it is ChatRow.Tools })
+        assertTrue(rows.none { it is ChatRow.Message && it.line.id == think.id })
+        val before = threadScrollKey(rows, think, showTyping = false, liveTools = listOf(tool))
+        val after = threadScrollKey(
+            rows,
+            think,
+            showTyping = false,
+            liveTools = listOf(tool.copy(text = "read\nREADME.md\nmore")),
+        )
+        assertNotEquals(before, after)
+        assertEquals(emptyList<TranscriptLine>(), liveToolLines(lines, "r1", working = false))
+        assertEquals(listOf(tool), liveToolLines(lines, "r1", working = true))
+    }
+
+    @Test
+    fun hiddenToolCallsStayHiddenWhileTheRunIsLive() {
+        val rows = groupChatRows(
+            listOf(
+                TranscriptLine("user-r1", "user", "go", "r1"),
+                TranscriptLine("t1", "tool", "read", "r1"),
+            ),
+            showTools = false,
+            showThinking = true,
+            liveToolIds = setOf("t1"),
+        )
+        assertTrue(rows.none { it is ChatRow.Tools })
+    }
+
+    @Test
     fun liveThinkingOnlyForTheWorkingRun() {
         val old = TranscriptLine("think-r1", "thinking", "old plan", "r1")
         val live = TranscriptLine("think-r2", "thinking", "now", "r2")

@@ -1443,15 +1443,25 @@ fun ThreadScreen(
     val liveThink = remember(shownLines, currentRunId, working) {
         liveThinkingLine(shownLines, currentRunId, working)
     }
-    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone, liveThink?.id) {
+    val liveTools = remember(shownLines, currentRunId, working, showTools) {
+        if (showTools) liveToolLines(shownLines, currentRunId, working) else emptyList()
+    }
+    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone, liveThink?.id, liveTools) {
         withDaySeparators(
-            groupChatRows(shownLines, showTools, showThinking, liveThink?.id),
+            groupChatRows(
+                shownLines,
+                showTools,
+                showThinking,
+                liveThink?.id,
+                liveTools.map { it.id }.toSet(),
+            ),
             timeOf = { lineTimes[it.id] },
             zone = zone,
         )
     }
     val showLiveThink = showThinking && liveThink != null
-    val showTyping = working && !showLiveThink
+    val showLiveTools = liveTools.isNotEmpty()
+    val showTyping = working && !showLiveThink && !showLiveTools
     val waitText = if (showTyping) {
         waitCopy(
             receiving = vm.receiving,
@@ -1532,7 +1542,7 @@ fun ThreadScreen(
     }
 
     val follow = rememberBottomFollow(agentId, listState)
-    val growKey = threadScrollKey(rows, liveThink, showTyping)
+    val growKey = threadScrollKey(rows, liveThink, showTyping, liveTools)
     BottomFollowEffects(follow, listOf(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey))
 
     val snackbar = remember { SnackbarHostState() }
@@ -1685,9 +1695,19 @@ fun ThreadScreen(
                         .padding(horizontal = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp, Alignment.Top),
                 ) {
-                    if (liveThink != null && showThinking) {
+                    if (showLiveTools || (liveThink != null && showThinking)) {
                         item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
-                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
+                            Column(verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp)) {
+                                if (showLiveTools) {
+                                    ToolCallsBlock(
+                                        tools = liveTools,
+                                        onCopy = { text -> copyMessage(context, text) },
+                                    )
+                                }
+                                if (liveThink != null && showThinking) {
+                                    ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
+                                }
+                            }
                         }
                     } else if (showTyping) {
                         item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
@@ -2039,6 +2059,7 @@ internal fun threadScrollKey(
     rows: List<ChatRow>,
     liveThink: TranscriptLine? = null,
     showTyping: Boolean = false,
+    liveTools: List<TranscriptLine> = emptyList(),
 ): String {
     val last = when (val row = rows.lastOrNull()) {
         is ChatRow.Message -> "${row.line.id}:${row.line.text.length}"
@@ -2050,7 +2071,8 @@ internal fun threadScrollKey(
     val tools = rows.filterIsInstance<ChatRow.Tools>().lastOrNull()
         ?.let { "${it.id}:${it.tools.size}" }
         .orEmpty()
-    return "$last|$think|$tools|${rows.size}|$showTyping"
+    val live = liveTools.joinToString(",") { "${it.id}:${it.text.length}" }
+    return "$last|$think|$tools|$live|${rows.size}|$showTyping"
 }
 
 internal fun liveThinkingLine(
@@ -2069,11 +2091,22 @@ internal fun liveThinkingLine(
     return think?.takeIf { it.text.isNotBlank() }
 }
 
+/** Tool calls for the run that is still working. They sit in the live tail, with the same follow rules as thinking. */
+internal fun liveToolLines(
+    lines: List<TranscriptLine>,
+    runId: String?,
+    working: Boolean,
+): List<TranscriptLine> {
+    if (!working || runId.isNullOrBlank()) return emptyList()
+    return lines.filter { it.kind == "tool" && it.runId == runId && it.text.isNotBlank() }
+}
+
 internal fun groupChatRows(
     lines: List<TranscriptLine>,
     showTools: Boolean,
     showThinking: Boolean,
     liveThinkId: String? = null,
+    liveToolIds: Set<String> = emptySet(),
 ): List<ChatRow> {
     val source = lines.withoutStaleStartupNotice()
     val rows = ArrayList<ChatRow>(source.size)
@@ -2090,7 +2123,7 @@ internal fun groupChatRows(
 
     for (line in source) {
         when (line.kind) {
-            "tool" -> if (showTools) {
+            "tool" -> if (showTools && line.id !in liveToolIds) {
                 if (turnTools.isEmpty()) toolAt = rows.size
                 turnTools.add(line)
             }
