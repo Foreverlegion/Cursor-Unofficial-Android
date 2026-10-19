@@ -46,6 +46,17 @@ class NoticeStore(context: Context) {
         }
     }
 
+    /** The chat on screen is already visible, so its bell items are not unread. */
+    fun markAgentRead(agentId: String) {
+        if (agentId.isBlank()) return
+        synchronized(lock) {
+            val items = loadItems()
+            val next = markAgentRead(items, agentId)
+            if (next === items) return
+            save(next, loadDismissed())
+        }
+    }
+
     fun visible(): List<Notice> = visibleFlow.value
 
     fun record(
@@ -156,11 +167,17 @@ class NoticeStore(context: Context) {
     private fun upsert(notice: Notice): Boolean {
         val visible: Boolean
         synchronized(lock) {
-            val (items, dismissed) = applyUpsert(loadItems(), notice, loadDismissed())
+            val incoming = stampIfOpen(notice)
+            val (items, dismissed) = applyUpsert(loadItems(), incoming, loadDismissed())
             save(items, dismissed)
             visible = !dismissed.contains(notice.id)
         }
         return visible
+    }
+
+    private fun stampIfOpen(notice: Notice): Notice {
+        if (!VisibleAgent.isOpenInForeground(notice.agentId)) return notice
+        return if (notice.read) notice else notice.copy(read = true)
     }
 
     private fun loadItems(): List<Notice> {
@@ -266,7 +283,7 @@ internal fun applyUpsert(
         val unchanged = prev.kind == incoming.kind && prev.body == incoming.body
         next[idx] = incoming.copy(
             dismissed = wasDismissed,
-            read = prev.read && unchanged,
+            read = incoming.read || (prev.read && unchanged),
             at = if (wasDismissed) prev.at else incoming.at,
         )
     } else if (!wasDismissed) {
@@ -277,6 +294,20 @@ internal fun applyUpsert(
 
 internal fun markRead(items: List<Notice>): List<Notice> {
     return items.map { if (it.read) it else it.copy(read = true) }
+}
+
+internal fun markAgentRead(items: List<Notice>, agentId: String): List<Notice> {
+    if (agentId.isBlank()) return items
+    var changed = false
+    val next = items.map { notice ->
+        if (notice.agentId == agentId && !notice.read && !notice.dismissed) {
+            changed = true
+            notice.copy(read = true)
+        } else {
+            notice
+        }
+    }
+    return if (changed) next else items
 }
 
 internal fun unreadCount(visible: List<Notice>): Int = visible.count { !it.read && !it.dismissed }

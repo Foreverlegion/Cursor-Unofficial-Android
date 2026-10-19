@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.FormatQuote
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -143,6 +142,7 @@ import com.cursorandroid.app.data.repo.AttachItem
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.ChatDraft
+import com.cursorandroid.app.data.repo.withoutStaleStartupNotice
 import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.QueuedItem
 import com.cursorandroid.app.data.repo.QueueProbe
@@ -1339,13 +1339,6 @@ fun ThreadScreen(
     val use24h = remember(context) { DateFormat.is24HourFormat(context) }
     val runSpans = vm.runSpans
     val lineTimes = remember(shownLines, runSpans) { resolveLineTimes(shownLines, runSpans) }
-    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone) {
-        withDaySeparators(
-            groupChatRows(shownLines, showTools, showThinking),
-            timeOf = { lineTimes[it.id] },
-            zone = zone,
-        )
-    }
     val runHints = vm.runHints
     val lineHints = remember(shownLines, runHints) { lineModelHints(shownLines, runHints) }
     val workingModel = runModelLabel(
@@ -1358,6 +1351,13 @@ fun ThreadScreen(
     val currentRunId = vm.run?.id
     val liveThink = remember(shownLines, currentRunId, working) {
         liveThinkingLine(shownLines, currentRunId, working)
+    }
+    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone, liveThink?.id) {
+        withDaySeparators(
+            groupChatRows(shownLines, showTools, showThinking, liveThink?.id),
+            timeOf = { lineTimes[it.id] },
+            zone = zone,
+        )
     }
     val showLiveThink = showThinking && liveThink != null
     val showTyping = working && !showLiveThink
@@ -1400,11 +1400,13 @@ fun ThreadScreen(
         showMicrophone = container.store.showMicrophone
         muted = container.chats.isMuted(agentId)
         favorite = container.chats.isFavorite(agentId)
+        container.notices.markAgentRead(agentId)
         vm.refresh()
     }
 
     DisposableEffect(agentId) {
         VisibleAgent.set(agentId)
+        container.notices.markAgentRead(agentId)
         onDispose { VisibleAgent.set(null) }
     }
 
@@ -1955,33 +1957,40 @@ internal fun groupChatRows(
     lines: List<TranscriptLine>,
     showTools: Boolean,
     showThinking: Boolean,
+    liveThinkId: String? = null,
 ): List<ChatRow> {
-    val rows = ArrayList<ChatRow>(lines.size)
-    val pendingTools = ArrayList<TranscriptLine>()
+    val source = lines.withoutStaleStartupNotice()
+    val rows = ArrayList<ChatRow>(source.size)
+    val turnTools = ArrayList<TranscriptLine>()
+    var toolAt = -1
 
-    fun flushTools() {
-        if (pendingTools.isEmpty()) return
-        if (showTools) {
-            rows += ChatRow.Tools(pendingTools.first().id, pendingTools.toList())
-        }
-        pendingTools.clear()
+    fun placeTools() {
+        if (turnTools.isEmpty()) return
+        val at = toolAt.coerceIn(0, rows.size)
+        rows.add(at, ChatRow.Tools(turnTools.first().id, turnTools.toList()))
+        turnTools.clear()
+        toolAt = -1
     }
 
-    for (line in lines) {
+    for (line in source) {
         when (line.kind) {
-            "tool" -> if (showTools) pendingTools += line
-            "thinking" -> flushTools()
-            "assistant", "user", "notice" -> {
-                flushTools()
-                rows += ChatRow.Message(line)
+            "tool" -> if (showTools) {
+                if (turnTools.isEmpty()) toolAt = rows.size
+                turnTools.add(line)
             }
-            else -> {
-                flushTools()
-                rows += ChatRow.Message(line)
+            "user" -> {
+                placeTools()
+                rows.add(ChatRow.Message(line))
             }
+            "thinking" -> {
+                if (showThinking && line.id != liveThinkId && line.text.isNotBlank()) {
+                    rows.add(ChatRow.Message(line))
+                }
+            }
+            else -> rows.add(ChatRow.Message(line))
         }
     }
-    flushTools()
+    placeTools()
     return rows
 }
 
@@ -2254,63 +2263,81 @@ private fun ThinkingBlock(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ToolCallsBlock(
+internal fun ToolCallsBlock(
     tools: List<TranscriptLine>,
     onCopy: (String) -> Unit = {},
 ) {
-    var menu by remember(tools.firstOrNull()?.id ?: "tools") { mutableStateOf(false) }
+    val anchor = tools.firstOrNull()?.id ?: "tools"
+    var open by remember(anchor) { mutableStateOf(false) }
+    var menu by remember(anchor) { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val copyText = tools.joinToString("\n") { it.text }.trim()
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        tools.forEach { tool ->
-            val (name, path) = toolCallParts(tool.text)
-            Box {
-                Row(
-                    modifier = Modifier
-                        .widthIn(max = 520.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(PlayColors.Card)
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                if (copyText.isBlank()) return@combinedClickable
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                menu = true
-                            },
-                        )
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Settings,
-                        contentDescription = null,
-                        tint = PlayColors.Muted,
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .widthIn(max = 520.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .combinedClickable(
+                        onClick = { open = !open },
+                        onLongClick = {
+                            if (copyText.isBlank()) return@combinedClickable
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu = true
+                        },
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.bodyMedium, color = Color.White)
-                        if (!path.isNullOrBlank()) {
-                            Text(
-                                path,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = PlayColors.Muted,
-                            )
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("tool-calls"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Tool Calls",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (open) {
+                        Column(
+                            modifier = Modifier.padding(top = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            tools.forEach { tool ->
+                                val (name, path) = toolCallParts(tool.text)
+                                Column {
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    if (!path.isNullOrBlank()) {
+                                        Text(
+                                            path,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+                Icon(
+                    imageVector = if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (open) "Collapse tool calls" else "Expand tool calls",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+            MessageClipMenu(
+                expanded = menu,
+                onDismiss = { menu = false },
+                copyText = copyText,
+                quoteText = null,
+                onCopy = onCopy,
+                onQuote = {},
+            )
         }
-        MessageClipMenu(
-            expanded = menu,
-            onDismiss = { menu = false },
-            copyText = copyText,
-            quoteText = null,
-            onCopy = onCopy,
-            onQuote = {},
-        )
     }
 }
 

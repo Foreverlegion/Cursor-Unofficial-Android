@@ -20,7 +20,6 @@ fun escapeBuildConfig(value: String): String {
     return value
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
-        .replace("$", "\\$")
         .replace("\r", "")
         .replace("\n", "\\n")
 }

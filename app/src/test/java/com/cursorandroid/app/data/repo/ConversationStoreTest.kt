@@ -1,6 +1,7 @@
 package com.cursorandroid.app.data.repo
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationStoreTest {
@@ -211,6 +212,46 @@ class ConversationStoreTest {
         assertEquals(listOf("user", "assistant", "thinking", "user"), ordered.map { it.kind })
         assertEquals("r1", ordered[2].runId)
         assertEquals("r2", ordered[3].runId)
+    }
+
+    @Test
+    fun startupNoticeStaysForTheOpeningTurnAndDoesNotDropItsReadouts() {
+        val notice = FirstChatNotice.line("cloud")
+        val user = line("user-r1", "user", "hello", "r1")
+        val think = line("think-r1", "thinking", "plan the env", "r1")
+        val tool = TranscriptLine(id = "tool-1", kind = "tool", text = "read\nREADME.md", runId = "r1")
+        val assistant = line("assistant-r1", "assistant", "done", "r1")
+
+        val ordered = coalesceTranscript(listOf(notice, user, think, tool, assistant))
+
+        assertEquals(FirstChatNotice.ID, ordered.first().id)
+        assertEquals(listOf("plan the env"), ordered.filter { it.kind == "thinking" }.map { it.text })
+        assertEquals(listOf("tool-1"), ordered.filter { it.kind == "tool" }.map { it.id })
+    }
+
+    @Test
+    fun followUpDropsOnlyTheStartupNotice() {
+        val notice = FirstChatNotice.line("cloud")
+        val first = listOf(
+            notice,
+            line("user-r1", "user", "hello", "r1"),
+            line("think-r1", "thinking", "plan the env", "r1"),
+            TranscriptLine(id = "tool-1", kind = "tool", text = "read\nREADME.md", runId = "r1"),
+            line("assistant-r1", "assistant", "done", "r1"),
+        )
+        val followed = first + listOf(
+            line("user-r2", "user", "and then", "r2"),
+            line("think-r2", "thinking", "second plan", "r2"),
+            TranscriptLine(id = "tool-2", kind = "tool", text = "grep\nsrc", runId = "r2"),
+            line("assistant-r2", "assistant", "ok", "r2"),
+        )
+
+        val ordered = coalesceTranscript(followed)
+
+        assertTrue(ordered.none { it.id == FirstChatNotice.ID })
+        assertEquals(listOf("plan the env", "second plan"), ordered.filter { it.kind == "thinking" }.map { it.text })
+        assertEquals(listOf("tool-1", "tool-2"), ordered.filter { it.kind == "tool" }.map { it.id })
+        assertEquals(listOf("r1", "r2"), ordered.filter { it.kind == "user" }.map { it.runId })
     }
 
     @Test

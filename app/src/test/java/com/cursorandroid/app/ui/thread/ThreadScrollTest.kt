@@ -1,5 +1,6 @@
 package com.cursorandroid.app.ui.thread
 
+import com.cursorandroid.app.data.repo.FirstChatNotice
 import com.cursorandroid.app.data.repo.TranscriptLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -20,7 +21,7 @@ class ThreadScrollTest {
     }
 
     @Test
-    fun historyRowsDoNotIncludeThinking() {
+    fun finishedThinkingStaysInTheThread() {
         val user = TranscriptLine("user-r1", "user", "do the work", "r1")
         val think = TranscriptLine("think-r1", "thinking", "plan", "r1")
         val assistant = TranscriptLine("assistant-r1", "assistant", "done", "r1")
@@ -30,8 +31,37 @@ class ThreadScrollTest {
             showTools = true,
             showThinking = true,
         )
-        assertTrue(rows.none { it is ChatRow.Message && it.line.kind == "thinking" })
-        assertEquals(listOf("user", "assistant", "user"), rows.filterIsInstance<ChatRow.Message>().map { it.line.kind })
+        assertEquals(
+            listOf("user", "thinking", "assistant", "user"),
+            rows.filterIsInstance<ChatRow.Message>().map { it.line.kind },
+        )
+        val live = groupChatRows(
+            listOf(user, think, assistant, later),
+            showTools = true,
+            showThinking = true,
+            liveThinkId = think.id,
+        )
+        assertTrue(live.none { it is ChatRow.Message && it.line.id == think.id })
+    }
+
+    @Test
+    fun startupNoticeDoesNotHideTheFirstTurnReadouts() {
+        val lines = listOf(
+            FirstChatNotice.line("cloud"),
+            TranscriptLine("user-r1", "user", "hello", "r1"),
+            TranscriptLine("think-r1", "thinking", "plan the env", "r1"),
+            TranscriptLine("tool-1", "tool", "read\nREADME.md", "r1"),
+            TranscriptLine("assistant-r1", "assistant", "done", "r1"),
+        )
+        val shown = groupChatRows(lines, showTools = true, showThinking = true)
+        assertEquals(FirstChatNotice.ID, (shown.first() as ChatRow.Message).line.id)
+        assertEquals(1, shown.filterIsInstance<ChatRow.Tools>().sumOf { it.tools.size })
+        assertTrue(shown.any { it is ChatRow.Message && it.line.id == "think-r1" })
+
+        val live = groupChatRows(lines, showTools = true, showThinking = true, liveThinkId = "think-r1")
+        assertEquals(1, live.filterIsInstance<ChatRow.Tools>().sumOf { it.tools.size })
+        assertTrue(live.none { it is ChatRow.Message && it.line.id == "think-r1" })
+        assertTrue(live.any { it is ChatRow.Message && it.line.id == FirstChatNotice.ID })
     }
 
     @Test

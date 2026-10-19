@@ -363,15 +363,16 @@ internal fun orderThinkingAfterAssistant(lines: List<TranscriptLine>): List<Tran
                 out += line
                 runOf(line)?.let { pending.remove(it) }?.let { out += it }
             }
-            "user", "notice" -> {
+            "user" -> {
                 flushPending()
                 out += line
             }
+            "notice" -> out += line
             else -> out += line
         }
     }
     flushPending()
-    return out
+    return out.withoutStaleStartupNotice()
 }
 
 internal fun mergeTranscript(
