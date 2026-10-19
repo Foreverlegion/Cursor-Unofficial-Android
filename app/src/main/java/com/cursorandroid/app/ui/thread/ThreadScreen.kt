@@ -911,7 +911,14 @@ class ThreadViewModel(
                             }
                             streaming = false
                             receiving = false
-                            container.notifier.notifyIfNeeded(agentId, agent?.name, runId, event.status, event.text)
+                            container.notifier.notifyIfNeeded(
+                                agentId,
+                                agent?.name,
+                                runId,
+                                event.status,
+                                event.text,
+                                event.git?.branches?.firstOrNull()?.prUrl,
+                            )
                             run?.let { ended -> viewModelScope.launch { settleRun(ended) } }
                             refreshArtifacts()
                             flushOutbound()
@@ -989,7 +996,14 @@ class ThreadViewModel(
         }
         if (latest.isTerminal()) {
             settleRun(latest)
-            container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
+            container.notifier.notifyIfNeeded(
+                agentId,
+                agent?.name,
+                latest.id,
+                latest.status,
+                latest.result,
+                latest.git?.branches?.firstOrNull()?.prUrl,
+            )
         }
     }
 
