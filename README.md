@@ -31,7 +31,7 @@ The phone does **not** run the agent. The work happens on Cursor's cloud VMs or 
 ## What it is not
 
 - Not the official Cursor iOS app, desktop app, or CLI
-- Not a public Play Store release. Closed testing is how you install it (see [Install](#install))
+- Not a public Play Store release
 - Not a local coding environment
 - Not a way to skip a Cursor subscription
 - Not a claim on Cursor's product, brand, or backend
@@ -42,32 +42,7 @@ The phone does **not** run the agent. The work happens on Cursor's cloud VMs or 
 
 ## Install
 
-Install from Google Play closed testing. Sideloading an APK is an alternate if you cannot use Play.
-
 Minimum Android: 8.0 (API 26). Package: `com.cursorandroid.app`.
-
-The closed-test build on Play is 1.0.28 (versionCode 128).
-
-### Google Play (closed testing)
-
-1. **Join the Google Group.** Open [unofficial-cursor-android-testers](https://groups.google.com/g/unofficial-cursor-android-testers). Sign in with the Google account on your phone. Choose **Join group** or **Ask to join**.
-2. **Opt in on the phone.** On the phone, signed into that same Google account, open the [closed-test opt-in](https://play.google.com/apps/testing/com.cursorandroid.app). Tap **Become a tester**. Tap **Accept** if Play asks.
-3. **Wait for Play to refresh.** The listing can take minutes, and sometimes hours, before it shows up. If the page says you are not eligible, confirm the group membership uses the same Google account, wait, and refresh the page.
-4. **Install or update from the Play Store.** From the opt-in page, open the store listing, or find the app in the Play Store once it appears. Tap **Install**. If a copy is already on the phone, tap **Update**. Play installs update from the Play Store. This app does not download or install APKs.
-5. **Sign in with your Cursor API key.** After install, use a user API key from [cursor.com/dashboard/api](https://cursor.com/dashboard/api). See [Sign in](#sign-in). The `demo` / `demo` sign-in is only for Play reviewers ([docs/play-review.md](docs/play-review.md)).
-6. **Battery (optional).** The first launch can ask you to leave battery use unrestricted. Allow it if you want finish and approval notifications while the screen is off. You can skip it. Details are under [Notifications](#notifications).
-7. **Stay installed.** If you are helping the closed test toward a production listing, leave the app installed for the closed-testing period.
-
-### Sideload from GitHub Releases (alternate)
-
-Use this only if you cannot use Play.
-
-1. Open the latest [GitHub Release](https://github.com/Foreverlegion/Cursor-Unofficial-Android/releases).
-2. Download `app-release.apk`.
-3. Allow installs from this source if Android asks.
-4. Install the APK.
-
-Play Protect may scan a sideloaded APK. That is Google, not this app. You can install anyway or turn Play Protect off yourself.
 
 ## Sign in
 
@@ -87,7 +62,7 @@ For alerts to arrive with the screen off, the first-launch battery prompt asks A
 
 Built and maintained in my spare time. Features track what the public Cloud Agents API allows. Things Cursor only exposes in the official web/desktop clients (for example in-app remote desktop control) are not available here unless that API exists.
 
-Closed testing is on Google Play. See [Install](#install). Issues and release APKs still live in this repository: [Foreverlegion/Cursor-Unofficial-Android](https://github.com/Foreverlegion/Cursor-Unofficial-Android).
+Issues live in this repository: [Foreverlegion/Cursor-Unofficial-Android](https://github.com/Foreverlegion/Cursor-Unofficial-Android).
 
 If you work at Cursor and want this taken down or renamed, open an issue. I will handle it. I am not trying to pass this off as yours.
 
