@@ -18,7 +18,7 @@ fun ProfileRulePrompt(
         title = { Text(ProfileRule.TITLE) },
         text = {
             Text(
-                "This starts one cloud agent with no repository and no environment. It writes an Always Apply user rule so later agents know this phone app.",
+                "This starts one cloud agent with no repository and no environment. That run cannot write Customize → Rules. Settings, Chats & threads, User rule starts a repo-backed agent once you have a new Origin clone URL.",
             )
         },
         confirmButton = {

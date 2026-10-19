@@ -315,6 +315,11 @@ private fun CursorAppContent(
                             onSessionChanged = { demo = container.store.demoMode },
                             onAppearanceChanged = refreshSettings,
                             openAccountTick = accountTick,
+                            onUserRuleAgent = { created, text ->
+                                openLaunchedAgent(container, context, created, text)
+                                selectedId = created.agent.id
+                                pane = Pane.Inbox
+                            },
                             modifier = Modifier.fillMaxSize(),
                         )
                         pane == Pane.Compose -> NewAgentScreen(
@@ -352,6 +357,11 @@ private fun CursorAppContent(
                     onSessionChanged = { demo = container.store.demoMode },
                     onAppearanceChanged = refreshSettings,
                     openAccountTick = accountTick,
+                    onUserRuleAgent = { created, text ->
+                        openLaunchedAgent(container, context, created, text)
+                        selectedId = created.agent.id
+                        pane = Pane.Inbox
+                    },
                 )
                 pane == Pane.Compose -> NewAgentScreen(
                     container = container,
@@ -410,7 +420,7 @@ private fun CursorAppContent(
                     profileScope.launch { profileSnack.showSnackbar("Starting in background") }
                     try {
                         val created = container.repo.createProfileAgent()
-                        openProfileAgent(container, context, created)
+                        openLaunchedAgent(container, context, created, ProfileRule.message())
                         container.store.profileRuleSeen = true
                         profileSeen = true
                         selectedId = created.agent.id
@@ -433,14 +443,19 @@ private fun CursorAppContent(
     }
 }
 
-private fun openProfileAgent(container: AppContainer, context: android.content.Context, created: CreateAgentResponse) {
+private fun openLaunchedAgent(
+    container: AppContainer,
+    context: android.content.Context,
+    created: CreateAgentResponse,
+    userText: String,
+) {
     container.conversations.save(
         created.agent.id,
         listOf(
             TranscriptLine(
                 id = "user-${created.run.id}",
                 kind = "user",
-                text = ProfileRule.message(),
+                text = userText,
                 runId = created.run.id,
             ),
         ),

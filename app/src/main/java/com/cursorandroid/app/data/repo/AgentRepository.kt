@@ -628,6 +628,15 @@ class AgentRepository(
         return wrap { api.createAgent(key, ProfileRule.request()) }
     }
 
+    /**
+     * Repo-backed agent on an Origin clone URL. Does not create the repo:
+     * the saved API key is not an Origin user access token.
+     */
+    suspend fun createUserRuleAgent(cloneUrl: String): CreateAgentResponse {
+        val key = java.util.UUID.randomUUID().toString()
+        return wrap { api.createAgent(key, UserRuleSync.agentRequest(cloneUrl)) }
+    }
+
     private suspend fun postCreate(key: String, body: CreateAgentRequest): CreateAgentResponse {
         val send = if (CloudFieldGate.createRunScoped) {
             body
