@@ -50,7 +50,11 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
 import com.cursorandroid.app.ui.settings.BatteryPrompt
+import com.cursorandroid.app.data.api.CreateAgentResponse
+import com.cursorandroid.app.data.repo.ProfileRule
+import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
+import com.cursorandroid.app.ui.settings.ProfileRulePrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
@@ -383,6 +387,56 @@ private fun CursorAppContent(
     }
         }
     }
+    var profileSeen by remember { mutableStateOf(container.store.profileRuleSeen) }
+    var profileLater by remember { mutableStateOf(false) }
+    if (!demo && profileSeen.not() && !profileLater) {
+        ProfileRulePrompt(
+            create = { container.repo.createProfileAgent() },
+            onOpen = { created ->
+                openProfileAgent(container, context, created)
+                container.store.profileRuleSeen = true
+                profileSeen = true
+                selectedId = created.agent.id
+                pane = Pane.Inbox
+            },
+            onNotNow = {
+                container.store.profileRuleSeen = true
+                profileSeen = true
+            },
+            onLater = { profileLater = true },
+        )
+    }
+}
+
+private fun openProfileAgent(container: AppContainer, context: android.content.Context, created: CreateAgentResponse) {
+    container.conversations.save(
+        created.agent.id,
+        listOf(
+            TranscriptLine(
+                id = "user-${created.run.id}",
+                kind = "user",
+                text = ProfileRule.TITLE,
+                runId = created.run.id,
+            ),
+        ),
+        runId = created.run.id,
+        runStatus = created.run.status,
+        immediate = true,
+    )
+    RunWatchScheduler.watch(
+        context.applicationContext,
+        created.agent.id,
+        created.run.id,
+        created.agent.name,
+        created.run.status,
+    )
+    container.notifier.notifyIfNeeded(
+        created.agent.id,
+        created.agent.name,
+        created.run.id,
+        created.run.status,
+        null,
+    )
 }
 
 @Composable

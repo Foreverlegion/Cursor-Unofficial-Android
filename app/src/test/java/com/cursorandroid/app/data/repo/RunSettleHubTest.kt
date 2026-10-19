@@ -58,7 +58,9 @@ class RunSettleHubTest {
         val hub = RunSettleHub()
         hub.publish("a1", "r1", "ERROR")
         val next = settleAgents(listOf(agent("a1", "ACTIVE", "r1")), hub.settled.value)
-        assertEquals(RunIndicator.Failed, runIndicator(next[0].status))
+        assertEquals("IDLE", next[0].status)
+        assertEquals("ERROR", next[0].runStatus)
+        assertEquals(RunIndicator.Failed, runIndicator(next[0].status, next[0].runStatus))
     }
 
     @Test
@@ -123,8 +125,8 @@ class RunSettleHubTest {
     @Test
     fun runWinsOverAStaleActiveAgentStatus() {
         val ended = Run(id = "r1", status = "FINISHED")
-        assertEquals("FINISHED", settledAgentStatus("ACTIVE", "r1", ended))
-        assertEquals("FINISHED", settledAgentStatus("ACTIVE", null, ended))
+        assertEquals("IDLE", settledAgentStatus("ACTIVE", "r1", ended))
+        assertEquals("IDLE", settledAgentStatus("ACTIVE", null, ended))
         assertEquals("ACTIVE", settledAgentStatus("ACTIVE", "r2", ended))
         assertEquals("ACTIVE", settledAgentStatus("ACTIVE", "r1", Run(id = "r1", status = "RUNNING")))
         assertEquals("IDLE", settledAgentStatus("IDLE", "r1", ended))

@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -45,9 +46,11 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
+import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.Env
+import com.cursorandroid.app.data.api.EnvironmentHistoryEvent
 import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.cloudCreateTarget
 import com.cursorandroid.app.data.api.gitHost
@@ -62,6 +65,11 @@ import com.cursorandroid.app.data.api.environmentConfigJson
 import com.cursorandroid.app.data.api.environmentOwner
 import com.cursorandroid.app.data.api.resolvedEnvironmentJson
 import com.cursorandroid.app.data.api.activeBuildSummary
+import com.cursorandroid.app.data.api.defaultOpenAsCursorGithubApp
+import com.cursorandroid.app.data.api.envVarMap
+import com.cursorandroid.app.data.api.envVarsError
+import com.cursorandroid.app.data.api.resolveStartingRef
+import com.cursorandroid.app.data.api.startingRefError
 import com.cursorandroid.app.data.api.poolAgentRepos
 import com.cursorandroid.app.data.api.acceptsManyRepos
 import com.cursorandroid.app.data.api.selection
@@ -72,6 +80,7 @@ import com.cursorandroid.app.data.repo.AttachItem
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.data.repo.withStartupNotice
+import com.cursorandroid.app.data.repo.agentIdEnvVarsError
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.DraftSubagent
@@ -157,7 +166,14 @@ fun NewAgentScreen(
     var envOwner by remember { mutableStateOf("personal") }
     var envJson by remember { mutableStateOf("") }
     var createEnvRepos by remember { mutableStateOf(listOf<String>()) }
+    var envHistory by remember { mutableStateOf<List<EnvironmentHistoryEvent>>(emptyList()) }
     var envBusy by remember { mutableStateOf(false) }
+    var clientAgentId by remember { mutableStateOf("") }
+    var sessionEnv by remember { mutableStateOf(listOf("" to "")) }
+    var runEnv by remember { mutableStateOf(listOf("" to "")) }
+    var metaRows by remember { mutableStateOf(listOf("" to "")) }
+    var openAsExplicit by remember { mutableStateOf<Boolean?>(null) }
+    var accountMe by remember { mutableStateOf(container.catalog.me()) }
     var createRepo by remember { mutableStateOf(false) }
     var newRepoName by remember { mutableStateOf("") }
     var newRepoPrivate by remember { mutableStateOf(true) }
@@ -172,6 +188,10 @@ fun NewAgentScreen(
     var subDesc by remember { mutableStateOf("") }
     var subPrompt by remember { mutableStateOf("") }
     var subModel by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        if (accountMe != null) return@LaunchedEffect
+        accountMe = runCatching { container.repo.refreshMe() }.getOrNull() ?: container.catalog.me()
+    }
     var draftReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -231,6 +251,7 @@ fun NewAgentScreen(
         if (saved.envOwner.isNotBlank()) envOwner = environmentOwner(saved.envOwner)
         if (saved.environmentJson.isNotBlank()) envJson = saved.environmentJson
         if (saved.createEnvRepos.isNotEmpty()) createEnvRepos = saved.createEnvRepos
+        if (saved.clientAgentId.isNotBlank()) clientAgentId = saved.clientAgentId
         savedEnvs = container.catalog.savedEnvironments()
         selectedEnvId = if (!initialEnvName.isNullOrBlank() && initialEnvType == "cloud") {
             savedEnvs.firstOrNull { it.id.isNotBlank() && it.name.equals(envName, ignoreCase = true) }?.id
@@ -289,7 +310,7 @@ fun NewAgentScreen(
         agentName, prompt, modelId, modelParams, mode, attaches, envType, envName, provider, repoUrl,
         startingRef, autoPr, workOnBranch, skipReviewer, prUrl, subagents, extraRepos,
         saveEnvironment, environmentName, envInstall, envOwner, selectedEnvId, envJson,
-        createEnvRepos, draftReady,
+        createEnvRepos, clientAgentId, draftReady,
     ) {
         if (!draftReady) return@LaunchedEffect
         val first = subagents.firstOrNull()
@@ -323,6 +344,7 @@ fun NewAgentScreen(
                 selectedEnvId = selectedEnvId.orEmpty(),
                 environmentJson = envJson,
                 createEnvRepos = createEnvRepos,
+                clientAgentId = clientAgentId,
             ),
         )
     }
@@ -331,6 +353,7 @@ fun NewAgentScreen(
         val id = selectedEnvId?.takeIf { it.isNotBlank() }
         if (id == null) {
             envStatus = ""
+            envHistory = emptyList()
             return@LaunchedEffect
         }
         envStatus = "Loading builds…"
@@ -339,7 +362,9 @@ fun NewAgentScreen(
         if (detail != null) {
             savedEnvs = container.catalog.savedEnvironments()
             if (detail.name.isNotBlank()) envName = detail.name
+            detail.environmentJson?.let { envJson = it }
         }
+        envHistory = runCatching { container.repo.environmentHistory(id) }.getOrDefault(emptyList())
         val active = runCatching { container.repo.activeEnvironmentBuild(id) }.getOrNull()
         val listed = runCatching { container.repo.listEnvironmentBuilds(id) }.getOrNull()
         if (selectedEnvId != id) return@LaunchedEffect
@@ -357,6 +382,10 @@ fun NewAgentScreen(
 
     LaunchedEffect(Unit) {
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        scope.launch {
+            val listed = runCatching { container.repo.listCloudEnvironments() }.getOrNull() ?: return@launch
+            savedEnvs = listed
+        }
         scope.launch {
             computers = runCatching { container.repo.listComputers(container.catalog.agents()) }.getOrDefault(computers)
             machinePrefs = container.machines.prefs()
@@ -506,6 +535,7 @@ fun NewAgentScreen(
                         label = { Text("Machine") },
                     )
                     FilterChip(selected = envType == "pool", onClick = { envType = "pool" }, label = { Text("Pool") })
+                    FilterChip(selected = envType == "none", onClick = { envType = "none" }, label = { Text("No repo") })
                 }
                 if (envType == "cloud") {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -566,6 +596,26 @@ fun NewAgentScreen(
                             onRepoUrls = { createEnvRepos = it },
                             environmentJson = envJson,
                             onEnvironmentJson = { envJson = it },
+                            history = envHistory,
+                            onUpdate = selectedEnvId?.let { id ->
+                                {
+                                    scope.launch {
+                                        envBusy = true
+                                        error = null
+                                        try {
+                                            val updated = container.repo.updateCloudEnvironment(id, envName, envJson)
+                                            savedEnvs = container.catalog.savedEnvironments()
+                                            envName = updated.name.ifBlank { envName }
+                                            updated.environmentJson?.let { envJson = it }
+                                            envHistory = runCatching { container.repo.environmentHistory(id) }.getOrDefault(envHistory)
+                                        } catch (e: Exception) {
+                                            error = (e as? ApiException)?.displayMessage() ?: e.message ?: "Update failed"
+                                        } finally {
+                                            envBusy = false
+                                        }
+                                    }
+                                }
+                            },
                             busy = envBusy || loading,
                             onCreate = {
                                 scope.launch {
@@ -984,7 +1034,7 @@ fun NewAgentScreen(
                         Checkbox(checked = workOnBranch, onCheckedChange = { workOnBranch = it })
                         Text("Commit on this branch")
                     }
-                } else {
+                } else if (envType == "pool") {
                     ExposedDropdownMenuBox(expanded = poolMenu, onExpandedChange = { poolMenu = it }) {
                         OutlinedTextField(
                             value = envName,
@@ -1038,6 +1088,11 @@ fun NewAgentScreen(
                             onSelected = { extraRepos = it },
                         )
                     }
+                } else {
+                    Text(
+                        "No repository and no environment. The agent starts from the prompt only.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
 
                 ExposedDropdownMenuBox(expanded = modelMenu, onExpandedChange = { modelMenu = it }) {
@@ -1156,8 +1211,8 @@ fun NewAgentScreen(
                     Text("Subagent model", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = subModel.isBlank(),
-                            onClick = { subModel = "" },
+                            selected = subModel.isBlank() || subModel == "inherit",
+                            onClick = { subModel = "inherit" },
                             label = { Text("Inherit") },
                         )
                         models.take(6).forEach { model ->
@@ -1184,6 +1239,52 @@ fun NewAgentScreen(
                         Text("Add subagent")
                     }
                 }
+                if (envType != "none") {
+                    val openAsShown = openAsExplicit ?: defaultOpenAsCursorGithubApp(accountMe)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = openAsShown,
+                            onCheckedChange = { openAsExplicit = it },
+                        )
+                        Text("Open PR as Cursor GitHub App")
+                    }
+                    Text(
+                        "User keys default off. Service account keys default on. The value is sent only after you change this.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                EnvVarFields(
+                    title = "Session env vars",
+                    hint = "Max 50. Names cannot start with CURSOR_. Cannot be combined with an agent id. A beta account may ignore them.",
+                    rows = sessionEnv,
+                    onRows = { sessionEnv = it },
+                    enabled = clientAgentId.isBlank(),
+                )
+                EnvVarFields(
+                    title = "Run env vars",
+                    hint = "For the first run only. Sent when set.",
+                    rows = runEnv,
+                    onRows = { runEnv = it },
+                )
+                EnvVarFields(
+                    title = "Metadata",
+                    hint = "Optional create metadata. Sent when set.",
+                    rows = metaRows,
+                    onRows = { metaRows = it },
+                    maskValues = false,
+                )
+                OutlinedTextField(
+                    value = clientAgentId,
+                    onValueChange = { clientAgentId = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Agent id (optional)") },
+                    placeholder = { Text("bc-…") },
+                    singleLine = true,
+                    supportingText = {
+                        Text("Idempotent create. Leave blank and Cursor assigns one. Cannot be combined with session env vars.")
+                    },
+                )
                 if (error != null) {
                     Text(error!!, color = MaterialTheme.colorScheme.error)
                 }
@@ -1198,6 +1299,17 @@ fun NewAgentScreen(
                                 val allSubs = if (pending.ready()) subagents + pending else subagents
                                 val subs = allSubs.toApi()
                                 val named = agentName.trim().takeIf { it.isNotEmpty() }
+                                val sessionVars = envVarMap(sessionEnv)
+                                val runVars = envVarMap(runEnv)
+                                val meta = envVarMap(metaRows)
+                                val idError = agentIdEnvVarsError(clientAgentId, sessionVars)
+                                    ?: envVarsError(sessionVars)
+                                    ?: envVarsError(runVars)
+                                    ?: startingRefError(startingRef, workOnBranch, prUrl)
+                                if (idError != null) {
+                                    error = idError
+                                    return@launch
+                                }
                                 if (envType == "cloud" && !cloudFromEnv && createRepo && repoUrl.isBlank()) {
                                     val made = container.repo.createOnForge(
                                         providerLabel = provider,
@@ -1242,12 +1354,19 @@ fun NewAgentScreen(
                                 } else {
                                     null
                                 }
+                                val startRef = resolveStartingRef(
+                                    branch = branch.ifBlank { null },
+                                    commitSha = tip?.sha,
+                                    workOnCurrentBranch = workOnBranch,
+                                    prUrl = prUrl,
+                                    defaultBranch = selectedRepo?.defaultBranch,
+                                )
                                 val cloudTarget = if (envType == "cloud") {
                                     cloudCreateTarget(
                                         launchFromEnv,
                                         launchEnvName,
                                         repo,
-                                        tip?.sha ?: branch.ifBlank { null },
+                                        startRef,
                                         prUrl,
                                         extraRepoUrls = if (launchFromEnv) emptyList() else extraRepos,
                                     )
@@ -1264,32 +1383,41 @@ fun NewAgentScreen(
                                         error = "Pick a repository the machine has checked out. A machine start with no repo is rejected."
                                         return@launch
                                     }
-                                    machineCreateTarget(envName, machineRepo, branch.ifBlank { null })
+                                    machineCreateTarget(envName, machineRepo, startRef)
                                 } else {
                                     null
                                 }
                                 val picked = models.firstOrNull { it.id == modelId }
+                                val noRepo = envType == "none"
                                 val body = CreateAgentRequest(
                                     prompt = Attachments.prompt(prefixPrompt(promptPrefix, prompt), ready),
                                     model = picked?.selection(modelParams),
                                     name = named,
-                                    env = when (envType) {
-                                        "cloud" -> cloudTarget?.first
-                                        "machine" -> machineTarget?.first
+                                    env = when {
+                                        noRepo -> null
+                                        envType == "cloud" -> cloudTarget?.first
+                                        envType == "machine" -> machineTarget?.first
                                         else -> Env(type = envType, name = envName.trim().ifBlank { null })
                                     },
-                                    repos = when (envType) {
-                                        "cloud" -> cloudTarget?.second
-                                        "machine" -> machineTarget?.second
+                                    repos = when {
+                                        noRepo -> null
+                                        envType == "cloud" -> cloudTarget?.second
+                                        envType == "machine" -> machineTarget?.second
                                         else -> pooledRepos
                                     },
                                     workOnCurrentBranch = when {
+                                        noRepo -> null
                                         envType == "cloud" && !launchFromEnv -> workOnBranch
                                         envType == "machine" -> workOnBranch
                                         else -> null
                                     },
-                                    autoCreatePR = if (envType == "cloud") autoPr else null,
-                                    skipReviewerRequest = if (envType == "cloud" && autoPr && skipReviewer) true else null,
+                                    autoCreatePR = if (envType == "cloud" && !noRepo) autoPr else null,
+                                    skipReviewerRequest = if (envType == "cloud" && !noRepo && autoPr && skipReviewer) true else null,
+                                    agentId = clientAgentId.trim().ifBlank { null },
+                                    envVars = sessionVars.takeIf { it.isNotEmpty() },
+                                    runEnvVars = runVars.takeIf { it.isNotEmpty() },
+                                    metadata = meta.takeIf { it.isNotEmpty() },
+                                    openAsCursorGithubApp = if (envType == "none") null else openAsExplicit,
                                     mode = mode,
                                     mcpServers = mcpServersFor(container.store.storedMcps(), repoMcpIds),
                                     customSubagents = subs,
@@ -1322,7 +1450,7 @@ fun NewAgentScreen(
                                             text = Attachments.label(prompt, ready),
                                             runId = created.run.id,
                                         ),
-                                    ).withStartupNotice(envType),
+                                    ).withStartupNotice(if (noRepo) "none" else envType),
                                     runId = created.run.id,
                                     runStatus = created.run.status,
                                     immediate = true,
@@ -1344,13 +1472,14 @@ fun NewAgentScreen(
                                 container.drafts.clear(DraftStore.NEW_AGENT)
                                 onCreated(created.agent.id)
                             } catch (e: Exception) {
-                                error = e.message ?: "Create failed"
+                                error = (e as? ApiException)?.displayMessage() ?: e.message ?: "Create failed"
                             } finally {
                                 loading = false
                             }
                         }
                     },
                     enabled = (prompt.isNotBlank() || attaches.any { it.ok }) && !loading && when (envType) {
+                        "none" -> true
                         "machine" -> envName.isNotBlank() && repoUrl.isNotBlank() && startingRef.isNotBlank()
                         "cloud" -> {
                             if (cloudFromEnv) {

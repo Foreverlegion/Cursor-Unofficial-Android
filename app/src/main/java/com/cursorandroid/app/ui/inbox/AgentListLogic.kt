@@ -86,7 +86,7 @@ fun withRepoFallbacks(
 }
 
 fun cloudBucket(agent: AgentSummary, needsApproval: Boolean): CloudFilter {
-    return when (runIndicator(agent.status, approvalPending = needsApproval)) {
+    return when (runIndicator(agent.status, agent.runStatus, needsApproval)) {
         RunIndicator.Running -> CloudFilter.Running
         RunIndicator.NeedsApproval, RunIndicator.Failed -> CloudFilter.NeedsAttention
         RunIndicator.Done -> CloudFilter.Done

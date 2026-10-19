@@ -15,6 +15,7 @@ object FirstChatNotice {
         return when (envType?.trim()?.lowercase()) {
             "machine" -> MACHINE
             "pool" -> POOL
+            "none" -> "The first reply can take a little longer."
             else -> CLOUD
         }
     }

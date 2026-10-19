@@ -123,12 +123,13 @@ private fun isEndedRun(status: String): Boolean = status != "ARCHIVED" && isTerm
 
 fun settleAgent(agent: AgentSummary, settled: RunSettled?, live: LiveRun? = null): AgentSummary {
     if (settled != null && settled.agentId == agent.id && agent.latestRunId == settled.runId) {
-        return if (isLiveStatus(agent.status)) agent.copy(status = settled.status) else agent
+        if (!isLiveStatus(agent.status)) return agent
+        return agent.copy(status = "IDLE", runStatus = settled.status)
     }
     if (live != null && live.agentId == agent.id && agent.latestRunId == live.runId &&
         !isLiveStatus(agent.status) && !agent.status.equals("ARCHIVED", true)
     ) {
-        return agent.copy(status = live.status)
+        return agent.copy(status = "ACTIVE", runStatus = live.status)
     }
     return agent
 }
@@ -149,15 +150,15 @@ fun settleAgents(
 }
 
 /**
- * The agent object can keep saying ACTIVE after its latest run ended. When the run we hold is
- * terminal and is the agent's latest, the run wins.
+ * Agent lifecycle stays ACTIVE, IDLE, or ARCHIVED. A stale ACTIVE whose latest run already
+ * ended is idle. The run's own status (FINISHED, ERROR) stays on the run.
  */
 fun settledAgentStatus(agentStatus: String?, latestRunId: String?, run: Run?): String? {
     if (run == null || !isLiveStatus(agentStatus)) return agentStatus
     val ended = run.status?.trim()?.uppercase().orEmpty()
     if (!isEndedRun(ended)) return agentStatus
     if (latestRunId != null && latestRunId != run.id) return agentStatus
-    return ended
+    return "IDLE"
 }
 
 fun markLocalActive(agents: List<AgentSummary>, active: Set<String>): List<AgentSummary> {

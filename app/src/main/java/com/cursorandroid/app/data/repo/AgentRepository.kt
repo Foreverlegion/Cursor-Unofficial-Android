@@ -8,13 +8,23 @@ import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.McpServer
 import com.cursorandroid.app.data.api.TokenUsage
 import com.cursorandroid.app.data.api.Computer
+import com.cursorandroid.app.data.api.CloudFieldGate
 import com.cursorandroid.app.data.api.CloudEnvironment
+import com.cursorandroid.app.data.api.conflictAgentId
+import com.cursorandroid.app.data.api.envVarsError
+import com.cursorandroid.app.data.api.normalizeRepoUrl
+import com.cursorandroid.app.data.api.sanitizePromptImages
 import com.cursorandroid.app.data.api.CreateAgentRequest
 import com.cursorandroid.app.data.api.CreateEnvironmentRequest
 import com.cursorandroid.app.data.api.EnvRepo
 import com.cursorandroid.app.data.api.EnvironmentActiveBuild
 import com.cursorandroid.app.data.api.EnvironmentBuild
 import com.cursorandroid.app.data.api.EnvironmentBuildList
+import com.cursorandroid.app.data.api.EnvironmentHistoryEvent
+import com.cursorandroid.app.data.api.PutSecretRequest
+import com.cursorandroid.app.data.api.SecretVersion
+import com.cursorandroid.app.data.api.UpdateEnvironmentRequest
+import com.cursorandroid.app.data.api.secretVersionsFromBody
 import com.cursorandroid.app.data.api.MAX_ENV_REPOS
 import com.cursorandroid.app.data.api.environmentOwner
 import com.cursorandroid.app.data.api.Worker
@@ -120,6 +130,125 @@ class AgentRepository(
         catalog.forgetEnvironment(id)
     }
 
+    suspend fun listCloudEnvironments(): List<CloudEnvironment> {
+        val out = LinkedHashMap<String, CloudEnvironment>()
+        var cursor: String? = null
+        repeat(MAX_PAGES) {
+            val page = wrap { api.listEnvironments(limit = 100, cursor = cursor) }
+            page.items.forEach { env ->
+                val key = env.id.ifBlank { env.name.lowercase() }
+                if (key.isNotBlank()) out[key] = env
+                catalog.rememberEnvironment(env)
+            }
+            val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+            if (next == null || page.items.isEmpty()) return out.values.toList()
+            cursor = next
+        }
+        return out.values.toList()
+    }
+
+    suspend fun updateCloudEnvironment(id: String, name: String?, environmentJson: String?): CloudEnvironment {
+        val body = UpdateEnvironmentRequest(
+            name = name?.trim()?.takeIf { it.isNotEmpty() },
+            environmentJson = environmentJson?.trim()?.takeIf { it.isNotEmpty() },
+        )
+        if (body.name == null && body.environmentJson == null) {
+            throw IllegalArgumentException("Name or environment.json is required")
+        }
+        wrap { api.updateEnvironment(id, body) }
+        return getCloudEnvironment(id)
+    }
+
+    suspend fun environmentHistory(id: String): List<EnvironmentHistoryEvent> {
+        val out = ArrayList<EnvironmentHistoryEvent>()
+        var cursor: String? = null
+        repeat(MAX_PAGES) {
+            val page = wrap { api.environmentHistory(id, limit = 50, cursor = cursor) }
+            out += page.items
+            val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+            if (next == null || page.items.isEmpty()) return out
+            cursor = next
+        }
+        return out
+    }
+
+    suspend fun listAccountSecrets(
+        scope: String? = null,
+        environmentId: String? = null,
+        name: String? = null,
+    ): List<SecretVersion> {
+        val out = ArrayList<SecretVersion>()
+        var cursor: String? = null
+        repeat(MAX_PAGES) {
+            val page = wrap {
+                api.listSecrets(
+                    scope = scope?.takeIf { it.isNotBlank() },
+                    environmentId = environmentId?.takeIf { it.isNotBlank() },
+                    name = name?.takeIf { it.isNotBlank() },
+                    limit = 100,
+                    cursor = cursor,
+                )
+            }
+            out += page.items
+            val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+            if (next == null) return out
+            cursor = next
+        }
+        return out
+    }
+
+    suspend fun listEnvironmentSecrets(id: String): List<SecretVersion> {
+        return wrap { api.listEnvironmentSecrets(id).items }
+    }
+
+    suspend fun listTeamSecrets(): List<SecretVersion> {
+        return wrap { api.listTeamSecrets().items }
+    }
+
+    suspend fun putEnvironmentSecret(
+        id: String,
+        name: String,
+        value: String,
+        type: String?,
+        repos: List<String>?,
+        versionId: String? = null,
+    ): SecretVersion {
+        return wrapSecret {
+            api.putEnvironmentSecret(
+                id,
+                name.trim(),
+                versionId?.takeIf { it.isNotBlank() },
+                PutSecretRequest(value = value, type = type, repos = repos),
+            )
+        }
+    }
+
+    suspend fun deleteEnvironmentSecret(id: String, name: String, versionId: String? = null) {
+        wrapSecret {
+            api.deleteEnvironmentSecret(id, name, versionId?.takeIf { it.isNotBlank() })
+        }
+    }
+
+    suspend fun putTeamSecret(
+        name: String,
+        value: String,
+        type: String?,
+        repos: List<String>?,
+        versionId: String? = null,
+    ): SecretVersion {
+        return wrapSecret {
+            api.putTeamSecret(
+                name.trim(),
+                versionId?.takeIf { it.isNotBlank() },
+                PutSecretRequest(value = value, type = type, repos = repos),
+            )
+        }
+    }
+
+    suspend fun deleteTeamSecret(name: String, versionId: String? = null) {
+        wrapSecret { api.deleteTeamSecret(name, versionId?.takeIf { it.isNotBlank() }) }
+    }
+
     suspend fun listEnvironmentBuilds(id: String, cursor: String? = null): EnvironmentBuildList {
         return wrap { api.listEnvironmentBuilds(id, cursor) }
     }
@@ -140,21 +269,26 @@ class AgentRepository(
         }
     }
 
-    suspend fun listAgentsPage(includeArchived: Boolean = true, cursor: String? = null): AgentListResponse {
+    suspend fun listAgentsPage(
+        includeArchived: Boolean = true,
+        cursor: String? = null,
+        prUrl: String? = null,
+    ): AgentListResponse {
         return wrap {
             api.listAgents(
                 limit = PAGE_SIZE,
                 includeArchived = includeArchived,
                 cursor = cursor,
+                prUrl = prUrl?.trim()?.takeIf { it.isNotEmpty() },
             )
         }
     }
 
-    suspend fun listAllAgents(includeArchived: Boolean = true): AgentListResponse {
+    suspend fun listAllAgents(includeArchived: Boolean = true, prUrl: String? = null): AgentListResponse {
         val pages = ArrayList<AgentListResponse>()
         var cursor: String? = null
         repeat(MAX_PAGES) {
-            val page = listAgentsPage(includeArchived, cursor)
+            val page = listAgentsPage(includeArchived, cursor, prUrl)
             pages += page
             val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
             if (next == null || page.entries().isEmpty()) {
@@ -173,10 +307,10 @@ class AgentRepository(
         return AgentListResponse(items = marked, nextCursor = all.nextCursor)
     }
 
-    suspend fun walkInboxPages(onPage: suspend (AgentListResponse) -> Unit) {
+    suspend fun walkInboxPages(onPage: suspend (AgentListResponse) -> Unit, prUrl: String? = null) {
         var cursor: String? = null
         repeat(MAX_PAGES) {
-            val page = listAgentsPage(includeArchived = true, cursor = cursor)
+            val page = listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrl)
             onPage(page)
             val next = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
             if (next == null || page.entries().isEmpty()) return
@@ -355,11 +489,11 @@ class AgentRepository(
                             agentId = agent.id,
                             branch = git.branch,
                             prUrl = git.prUrl,
-                            repoUrl = git.repoUrl,
+                            repoUrl = normalizeRepoUrl(git.repoUrl),
                         ),
                     )
-                    git.repoUrl?.let { url ->
-                        val full = if (url.startsWith("http")) url else "https://$url"
+                    normalizeRepoUrl(git.repoUrl)?.let { url ->
+                        val full = url
                         val existing = catalog.repos()
                         if (existing.none { it.url.contains(url, ignoreCase = true) }) {
                             catalog.saveRepos(
@@ -474,15 +608,58 @@ class AgentRepository(
         return names
     }
 
-    suspend fun createAgent(body: CreateAgentRequest): CreateAgentResponse {
-        return wrap {
-            api.createAgent(
-                body.copy(
-                    prompt = ClientOrigin.stamp(body.prompt),
-                    envVars = (body.envVars ?: emptyMap()) + ("CLIENT_APP" to ClientOrigin.ID),
-                ),
-            )
+    suspend fun createAgent(
+        body: CreateAgentRequest,
+        idempotencyKey: String? = null,
+    ): CreateAgentResponse {
+        val prepared = assembleCreate(body)
+        val key = idempotencyKey?.trim()?.takeIf { it.isNotEmpty() } ?: java.util.UUID.randomUUID().toString()
+        return try {
+            postCreate(key, prepared)
+        } catch (e: ApiException) {
+            if (!e.isAgentIdConflict) throw e
+            recoverCreate(prepared, e)
         }
+    }
+
+    /** Prompt only. repos, env, and envVars are omitted, and the prompt is not stamped. */
+    suspend fun createProfileAgent(): CreateAgentResponse {
+        val key = java.util.UUID.randomUUID().toString()
+        return wrap { api.createAgent(key, ProfileRule.request()) }
+    }
+
+    private suspend fun postCreate(key: String, body: CreateAgentRequest): CreateAgentResponse {
+        val send = if (CloudFieldGate.createRunScoped) {
+            body
+        } else {
+            body.copy(runEnvVars = null, metadata = null)
+        }
+        return try {
+            wrap { api.createAgent(key, send) }
+        } catch (e: ApiException) {
+            val dropRun = CloudFieldGate.rejects(e, "runEnvVars")
+            val dropMeta = CloudFieldGate.rejects(e, "metadata")
+            if (!dropRun && !dropMeta) throw e
+            if (dropRun) CloudFieldGate.createRunScoped = false
+            if (dropMeta) CloudFieldGate.createRunScoped = false
+            wrap {
+                api.createAgent(
+                    key,
+                    send.copy(
+                        runEnvVars = if (dropRun) null else send.runEnvVars,
+                        metadata = if (dropMeta) null else send.metadata,
+                    ),
+                )
+            }
+        }
+    }
+
+    private suspend fun recoverCreate(body: CreateAgentRequest, error: ApiException): CreateAgentResponse {
+        val id = conflictAgentId(body.agentId, error.body) ?: throw error
+        val agent = wrap { api.getAgent(id) }
+        val runId = agent.latestRunId ?: throw error
+        val run = wrap { api.getRun(agent.id, runId) }
+        return CreateAgentResponse(agent, run)
     }
 
     suspend fun followUp(
@@ -491,27 +668,105 @@ class AgentRepository(
         mode: String? = null,
         model: ModelSelection? = null,
         mcpServers: List<McpServer>? = null,
+        envVars: Map<String, String>? = null,
+        idempotencyKey: String? = null,
+    ): Run {
+        val vars = envVars?.takeIf { it.isNotEmpty() }
+        envVarsError(vars)?.let { throw IllegalArgumentException(it) }
+        val stamped = ClientOrigin.stamp(prompt).let { it.copy(images = sanitizePromptImages(it.images)) }
+        val key = idempotencyKey?.trim()?.takeIf { it.isNotEmpty() } ?: java.util.UUID.randomUUID().toString()
+        val created = postRun(agentId, key, stamped, mode, model, mcpServers, vars)
+        statusChanged(agentId)
+        return created
+    }
+
+    private suspend fun postRun(
+        agentId: String,
+        key: String,
+        prompt: Prompt,
+        mode: String?,
+        model: ModelSelection?,
+        mcpServers: List<McpServer>?,
+        envVars: Map<String, String>?,
+    ): Run {
+        val vars = if (CloudFieldGate.followUpEnv) envVars else null
+        return try {
+            createRunOnce(agentId, key, prompt, mode, model, mcpServers, vars)
+        } catch (e: ApiException) {
+            when {
+                e.isArchivedAgent -> {
+                    unarchive(agentId)
+                    createRunOnce(agentId, key, prompt, mode, model, mcpServers, vars)
+                }
+                CloudFieldGate.rejects(e, "envVars") && vars != null -> {
+                    CloudFieldGate.followUpEnv = false
+                    createRunOnce(agentId, key, prompt, mode, model, mcpServers, null)
+                }
+                else -> throw e
+            }
+        }
+    }
+
+    private suspend fun createRunOnce(
+        agentId: String,
+        key: String,
+        prompt: Prompt,
+        mode: String?,
+        model: ModelSelection?,
+        mcpServers: List<McpServer>?,
+        envVars: Map<String, String>?,
     ): Run {
         // Create Run replaces the servers the agent was created with, so they are left out unless this chat's
         // selection was changed on purpose; the agent then keeps the set it started with.
-        val created = wrap {
+        return wrap {
             api.createRun(
                 agentId,
+                key,
                 CreateRunRequest(
-                    prompt = ClientOrigin.stamp(prompt),
+                    prompt = prompt,
                     mode = mode,
                     model = model,
                     mcpServers = mcpServers,
+                    envVars = envVars,
                 ),
             ).run
         }
-        statusChanged(agentId)
-        return created
     }
 
     suspend fun cancel(agentId: String, runId: String) {
         wrap { api.cancelRun(agentId, runId) }
         statusChanged(agentId)
+    }
+
+    /**
+     * Cancel the active run, then send [prompt] as the next run.
+     * A run that already finished (not cancellable) still continues to the new run.
+     */
+    suspend fun sendQueuedNow(
+        agentId: String,
+        activeRunId: String?,
+        prompt: Prompt,
+        mode: String? = null,
+        model: ModelSelection? = null,
+        mcpServers: List<McpServer>? = null,
+        envVars: Map<String, String>? = null,
+        idempotencyKey: String? = null,
+    ): Run {
+        return ImmediateSend.cancelThenRun(
+            agentId = agentId,
+            activeRunId = activeRunId,
+            prompt = prompt,
+            cancel = { id, runId ->
+                try {
+                    cancel(id, runId)
+                } catch (e: ApiException) {
+                    if (!e.isNotCancellable) throw e
+                }
+            },
+            createRun = { id, body ->
+                followUp(id, body, mode, model, mcpServers, envVars, idempotencyKey)
+            },
+        )
     }
 
     suspend fun steer(agentId: String, runId: String, prompt: Prompt): Boolean {
@@ -781,6 +1036,17 @@ class AgentRepository(
         }
         return root.mapNotNull { el ->
             (el as? JsonObject)?.get("name")?.jsonPrimitive?.contentOrNull
+        }
+    }
+
+    private suspend fun <T> wrapSecret(block: suspend () -> T): T {
+        try {
+            return wrap(block)
+        } catch (e: ApiException) {
+            if (e.isSecretNameAmbiguous) {
+                throw SecretAmbiguousException(secretVersionsFromBody(e.body), e)
+            }
+            throw e
         }
     }
 

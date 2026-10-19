@@ -110,7 +110,12 @@ import com.cursorandroid.app.data.api.ModelSelection
 import com.cursorandroid.app.data.api.Prompt
 import com.cursorandroid.app.data.api.Run
 import com.cursorandroid.app.data.api.StreamEvent
+import com.cursorandroid.app.data.api.costLine
+import com.cursorandroid.app.data.api.envVarMap
 import com.cursorandroid.app.data.api.gitPath
+import com.cursorandroid.app.data.api.normalizeRepoUrl
+import com.cursorandroid.app.data.api.queueInsteadOfFail
+import com.cursorandroid.app.data.api.retainEventId
 import com.cursorandroid.app.data.api.isActive
 import com.cursorandroid.app.data.api.isCloudEnvType
 import com.cursorandroid.app.data.api.isLiveStatus
@@ -144,6 +149,7 @@ import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.withoutStaleStartupNotice
 import com.cursorandroid.app.data.repo.ChatShare
+import com.cursorandroid.app.data.repo.ImmediateSend
 import com.cursorandroid.app.data.repo.QueuedItem
 import com.cursorandroid.app.data.repo.QueueProbe
 import com.cursorandroid.app.data.repo.applyQueuedFlags
@@ -164,6 +170,11 @@ import com.cursorandroid.app.ui.status.foreground
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.repoNameOnly
 import com.cursorandroid.app.ui.status.shortRepo
+import com.cursorandroid.app.ui.status.agentLifecycleLabel
+import com.cursorandroid.app.ui.status.runStatusLabel
+import com.cursorandroid.app.ui.status.threadStatusLine
+import com.cursorandroid.app.data.api.dollarLine
+import com.cursorandroid.app.ui.composeAgent.EnvVarFields
 import com.cursorandroid.app.ui.status.threadSubtitle
 import com.cursorandroid.app.ui.status.toolCallParts
 import com.cursorandroid.app.ui.status.toolCallText
@@ -460,6 +471,7 @@ class ThreadViewModel(
         appContext: android.content.Context,
         attaches: List<AttachItem> = emptyList(),
         caption: String = "",
+        envVars: Map<String, String>? = null,
     ) {
         val shown = label.ifBlank { prompt.text }.trim()
         if (shown.isEmpty() && prompt.images.isNullOrEmpty()) return
@@ -473,7 +485,16 @@ class ThreadViewModel(
             queued = run?.isActive() == true || outbound.isNotEmpty(),
             thumbs = thumbs,
         )
-        outbound.add(QueuedOutbound(localId, prompt, attaches, caption, at = System.currentTimeMillis()))
+        outbound.add(
+            QueuedOutbound(
+                localId,
+                prompt,
+                attaches,
+                caption,
+                at = System.currentTimeMillis(),
+                envVars = envVars?.takeIf { it.isNotEmpty() },
+            ),
+        )
         persistQueue()
         viewModelScope.launch {
             if (run?.isActive() == true) {
@@ -492,10 +513,39 @@ class ThreadViewModel(
         }
     }
 
+    // Unadvertised probe. The public API has no mid-run steer; a miss leaves the message queued.
     private suspend fun trySteer(item: QueuedOutbound): Boolean {
         val runId = run?.id ?: return false
         if (run?.isActive() != true) return false
         return runCatching { container.repo.steer(agentId, runId, outboundPrompt(item)) }.getOrDefault(false)
+    }
+
+    fun sendImmediately(id: String) {
+        if (busy || id == sendingId) return
+        val order = ImmediateSend.promote(outbound.map { it.id }, id) ?: return
+        val byId = outbound.associateBy { it.id }
+        outbound.clear()
+        order.forEach { key -> byId[key]?.let { outbound.add(it) } }
+        persistQueue()
+        val next = outbound.firstOrNull() ?: return
+        val cancelId = when {
+            run?.isActive() == true -> run?.id
+            agent?.isWorking() == true -> agent?.latestRunId ?: run?.id
+            else -> null
+        }
+        busy = true
+        viewModelScope.launch {
+            try {
+                if (cancelId != null) {
+                    streamJob?.cancel()
+                    pollJob?.cancel()
+                    streaming = false
+                }
+                deliverOutbound(next, cancelId, held = true)
+            } finally {
+                if (sendingId == null) busy = false
+            }
+        }
     }
 
     fun cancelQueued(id: String) {
@@ -593,7 +643,7 @@ class ThreadViewModel(
             ?: git?.repoUrl
             ?: meta.repoUrl
             ?: return
-        val fullRepo = if (repoUrl.startsWith("http")) repoUrl else "https://$repoUrl"
+        val fullRepo = normalizeRepoUrl(repoUrl) ?: return
         val requested = detail.repos?.firstOrNull()?.startingRef
         val baseBranch = meta.baseBranch
             ?: requested?.takeUnless { looksLikeGitSha(it) }
@@ -645,6 +695,11 @@ class ThreadViewModel(
         if (busy) return
         val next = outbound.firstOrNull() ?: return
         if (run?.isActive() == true) return
+        deliverOutbound(next, cancelRunId = null, held = false)
+    }
+
+    private suspend fun deliverOutbound(next: QueuedOutbound, cancelRunId: String?, held: Boolean) {
+        if (busy && !held) return
         busy = true
         sendingId = next.id
         lines = lines.map { line ->
@@ -656,12 +711,26 @@ class ThreadViewModel(
             val sent = followModel.takeIf { it.isNotBlank() }?.let {
                 ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
             }
-            val created = container.repo.followUp(
-                agentId,
-                outboundPrompt(next),
-                mode = followMode.takeIf { it.isNotBlank() },
-                model = sent,
-            )
+            val created = if (cancelRunId != null) {
+                container.repo.sendQueuedNow(
+                    agentId,
+                    cancelRunId,
+                    outboundPrompt(next),
+                    mode = followMode.takeIf { it.isNotBlank() },
+                    model = sent,
+                    envVars = next.envVars,
+                    idempotencyKey = next.id,
+                )
+            } else {
+                container.repo.followUp(
+                    agentId,
+                    outboundPrompt(next),
+                    mode = followMode.takeIf { it.isNotBlank() },
+                    model = sent,
+                    envVars = next.envVars,
+                    idempotencyKey = next.id,
+                )
+            }
             outbound.removeAll { it.id == next.id }
             persistQueue()
             Attachments.forget(next.attaches)
@@ -687,9 +756,15 @@ class ThreadViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (e is ApiException && e.isBusy) {
+            if (e is ApiException && queueInsteadOfFail(e)) {
                 error = null
                 markUsersQueued()
+            } else if (e is ApiException && e.isArchivedAgent) {
+                error = e.displayMessage()
+                lines = lines.map { line ->
+                    if (line.id == next.id) line.copy(queued = true) else line
+                }
+                persist()
             } else {
                 lines = lines.map { line ->
                     if (line.id == next.id) line.copy(queued = true) else line
@@ -936,7 +1011,14 @@ class ThreadViewModel(
         if (pollJob?.isActive != true || run?.id != runId) startPoll(runId)
     }
 
+    private var streamStoppedFor: String? = null
+
     private fun startStream(runId: String, replay: Boolean) {
+        if (streamStoppedFor == runId) {
+            streaming = false
+            receiving = false
+            return
+        }
         streamJob?.cancel()
         if (replay || streamedRunId != runId) {
             assistantBuf = StringBuilder()
@@ -961,7 +1043,7 @@ class ThreadViewModel(
                     }
                 }
                 .collect { event ->
-                    event.eventId?.let { lastEventId = it }
+                    lastEventId = retainEventId(lastEventId, event.eventId)
                     when (event) {
                         is StreamEvent.Assistant -> {
                             receiving = true
@@ -1018,8 +1100,13 @@ class ThreadViewModel(
                             refreshArtifacts()
                             flushOutbound()
                         }
+                        is StreamEvent.Retention -> Unit
                         is StreamEvent.StreamError -> {
-                            if (event.recoverable || event.message == "stream_expired") {
+                            if (event.message == "invalid_last_event_id") {
+                                lastEventId = null
+                                error = "Stream position was rejected. Refreshing the run."
+                                handleStreamGone(runId)
+                            } else if (event.recoverable || event.message == "stream_expired") {
                                 handleStreamGone(runId)
                             } else if (event.message != "stream_canceled") {
                                 error = if (container.session.expired()) null else event.message
@@ -1142,6 +1229,8 @@ class ThreadViewModel(
     }
 
     private suspend fun handleStreamGone(runId: String) {
+        streamStoppedFor = runId
+        streamJob?.cancel()
         val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
         if (latest != null) {
             run = latest
@@ -1149,14 +1238,13 @@ class ThreadViewModel(
                 upsert("assistant-$runId", "assistant", latest.result, runId)
             }
             if (latest.isActive()) {
-                startStream(runId, replay = lastEventId == null)
-                return
+                if (pollJob?.isActive != true) startPoll(runId)
+            } else {
+                viewModelScope.launch { settleRun(latest) }
             }
-            viewModelScope.launch { settleRun(latest) }
         }
         streaming = false
         receiving = false
-        error = null
         flushOutbound()
     }
 
@@ -1247,6 +1335,7 @@ data class QueuedOutbound(
     val attaches: List<AttachItem> = emptyList(),
     val caption: String = "",
     val at: Long = 0L,
+    val envVars: Map<String, String>? = null,
 )
 
 class ThreadVmFactory(
@@ -1286,6 +1375,8 @@ fun ThreadScreen(
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var draftReady by remember { mutableStateOf(false) }
     var modelMenu by remember { mutableStateOf(false) }
+    var showFollowEnv by remember { mutableStateOf(false) }
+    var followEnv by remember { mutableStateOf(listOf("" to "")) }
     val listState = remember(agentId) { LazyListState() }
     val context = LocalContext.current
     val pendingPr = vm.pendingPrUrl
@@ -1320,7 +1411,7 @@ fun ThreadScreen(
         ?: repoNameOnly(container.catalog.gitSnaps()[agentId]?.repoUrl)
         ?: repoNameOnly(vm.agent?.repos?.firstOrNull()?.url)
         ?: vm.agent?.env?.name?.takeIf { it.isNotBlank() }
-    val subtitle = threadSubtitle(repoLabel, indicator)
+    val subtitle = threadSubtitle(repoLabel, threadStatusLine(agentStatus, vm.run?.status, indicator))
     val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
     val activity = workActivityLine(
         receiving = vm.receiving,
@@ -1645,6 +1736,11 @@ fun ThreadScreen(
                                 } else {
                                     null
                                 },
+                                onSendNow = if (lineShowsQueued(row.line)) {
+                                    { vm.sendImmediately(row.line.id) }
+                                } else {
+                                    null
+                                },
                             )
                             is ChatRow.Tools -> ToolCallsBlock(
                                 tools = row.tools,
@@ -1693,6 +1789,11 @@ fun ThreadScreen(
                     onClick = { vm.followMode = "plan" },
                     label = { Text("Plan") },
                 )
+                FilterChip(
+                    selected = showFollowEnv || envVarMap(followEnv).isNotEmpty(),
+                    onClick = { showFollowEnv = !showFollowEnv },
+                    label = { Text("Run env") },
+                )
                 val modelLabel = models.firstOrNull { it.id == vm.followModel }?.displayName
                     ?: vm.followModel.ifBlank { "Model" }
                 Box {
@@ -1738,6 +1839,16 @@ fun ThreadScreen(
                 onParams = { vm.followParams = it },
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
+            if (showFollowEnv) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EnvVarFields(
+                        title = "Run env vars",
+                        hint = "Sent on the next run. Max 50. Names cannot start with CURSOR_.",
+                        rows = followEnv,
+                        onRows = { followEnv = it },
+                    )
+                }
+            }
             Row(
                 modifier = Modifier
                     .testTag("chat-composer")
@@ -1780,6 +1891,7 @@ fun ThreadScreen(
                                 context.applicationContext,
                                 ready,
                                 caption = draft,
+                                envVars = envVarMap(followEnv),
                             )
                             draft = ""
                             attaches = emptyList()
@@ -1847,12 +1959,16 @@ fun ThreadScreen(
             .ifBlank { null }
         ChatPropertiesDialog(
             title = title,
-            status = agentStatus ?: vm.run?.status,
+            agentStatus = agentLifecycleLabel(agentStatus),
+            runStatus = runStatusLabel(vm.run?.status),
+            runError = vm.run?.takeIf { it.status.equals("ERROR", true) || it.status.equals("EXPIRED", true) }
+                ?.let { it.error?.takeIf { text -> text.isNotBlank() } ?: it.result },
             env = env,
             branch = git?.branch ?: cached?.branch,
-            repoUrl = git?.repoUrl ?: cached?.repoUrl,
+            repoUrl = normalizeRepoUrl(git?.repoUrl ?: cached?.repoUrl),
             prUrl = git?.prUrl ?: cached?.prUrl,
             tokens = vm.usage?.totalUsage?.totalTokens,
+            cost = vm.usage?.costLine(vm.run?.id) ?: vm.run?.cost?.dollarLine(),
             onOpenUrl = { url ->
                 SafeLinks.open(context, url)
             },
@@ -2003,6 +2119,7 @@ internal fun TranscriptBubble(
     onQuote: (String) -> Unit = {},
     onEditQueued: (() -> Unit)? = null,
     onCancelQueued: (() -> Unit)? = null,
+    onSendNow: (() -> Unit)? = null,
     timeMs: Long? = null,
     zone: ZoneId = ZoneId.systemDefault(),
     use24h: Boolean = false,
@@ -2120,11 +2237,14 @@ internal fun TranscriptBubble(
                     ),
             )
         }
-        if (onEditQueued != null || onCancelQueued != null) {
+        if (onEditQueued != null || onCancelQueued != null || onSendNow != null) {
             Row(
                 modifier = Modifier.padding(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                if (onSendNow != null) {
+                    TextButton(onClick = onSendNow) { Text("Send immediately") }
+                }
                 if (onEditQueued != null) {
                     TextButton(onClick = onEditQueued) { Text("Edit") }
                 }

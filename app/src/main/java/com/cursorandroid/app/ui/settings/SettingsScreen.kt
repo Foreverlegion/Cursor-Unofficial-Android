@@ -92,6 +92,7 @@ internal enum class SettingsPage(val title: String, val summary: String) {
     Chats("Chats & threads", "Tools, thinking, and model"),
     Notifications("Notifications", "Run alerts and battery"),
     Connections("Connections", "Links, MCP, and forges"),
+    Secrets("Secrets", "Team and environment secrets"),
     Forges("Forges", "Git hosts and tokens"),
     Machines("Machines", "Hide or forget remote machines"),
     Backup("Backup", "Export and import"),
@@ -332,7 +333,12 @@ internal fun SettingsScreenContent(
                 SecureStorageNotice(container.store)
                 when (page) {
                     SettingsPage.Home -> {
-                        SettingsPage.entries.filter { it != SettingsPage.Home && it != SettingsPage.Forges && it != SettingsPage.Machines }.forEach { item ->
+                        SettingsPage.entries.filter {
+                            it != SettingsPage.Home &&
+                                it != SettingsPage.Forges &&
+                                it != SettingsPage.Machines &&
+                                it != SettingsPage.Secrets
+                        }.forEach { item ->
                             SettingsLinkRow(item.title, item.summary) { page = item }
                         }
                     }
@@ -536,6 +542,14 @@ internal fun SettingsScreenContent(
                         val machinePrefs = container.machines.prefs()
                         val hiddenMachines = machinePrefs.marks.values.count { it.state != MachineMarkState.SHOWN }
                         SettingsLinkRow(
+                            title = "Secrets",
+                            summary = "Team and environment secrets. Values are never shown.",
+                            onClick = {
+                                under = SettingsPage.Connections
+                                page = SettingsPage.Secrets
+                            },
+                        )
+                        SettingsLinkRow(
                             title = "Machines",
                             summary = when {
                                 hiddenMachines > 0 -> "$hiddenMachines hidden or forgotten"
@@ -551,6 +565,7 @@ internal fun SettingsScreenContent(
                         )
                     }
                     SettingsPage.Forges -> ForgesPage(container)
+                    SettingsPage.Secrets -> SecretsPage(container)
                     SettingsPage.Machines -> MachinesPage(container)
                     SettingsPage.RepoDefaults -> RepoDefaultsPage(container)
                     SettingsPage.Backup -> {

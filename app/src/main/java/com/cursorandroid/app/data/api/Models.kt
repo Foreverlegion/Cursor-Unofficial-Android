@@ -8,7 +8,11 @@ import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.nullable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonNames
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -51,6 +55,8 @@ data class AgentSummary(
     val updatedAt: String? = null,
     val latestRunId: String? = null,
     val archived: Boolean? = null,
+    /** Run outcome from Get A Run. Not an agent lifecycle status. */
+    val runStatus: String? = null,
 )
 
 @Serializable
@@ -76,8 +82,16 @@ data class AgentDetail(
     val updatedAt: String? = null,
     val latestRunId: String? = null,
     val archived: Boolean? = null,
+    val openAsCursorGithubApp: Boolean? = null,
+    val metadata: Map<String, String>? = null,
     @Serializable(with = FlexibleModelSerializer::class)
     val model: ModelSelection? = null,
+)
+
+@Serializable
+data class ImageDimension(
+    val width: Int,
+    val height: Int,
 )
 
 @Serializable
@@ -85,6 +99,7 @@ data class PromptImage(
     val data: String? = null,
     val mimeType: String? = null,
     val url: String? = null,
+    val dimension: ImageDimension? = null,
 )
 
 @Serializable
@@ -129,6 +144,7 @@ data class CustomSubagent(
     val name: String,
     val description: String,
     val prompt: String,
+    @Serializable(with = SubagentModelSerializer::class)
     val model: String? = null,
 )
 
@@ -188,6 +204,104 @@ data class EnvironmentActiveBuild(
 )
 
 @Serializable
+data class EnvironmentListResponse(
+    val items: List<CloudEnvironment> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
+data class UpdateEnvironmentRequest(
+    val name: String? = null,
+    val environmentJson: String? = null,
+)
+
+@Serializable
+data class EnvironmentHistoryEvent(
+    val id: String = "",
+    val createdAt: String? = null,
+    val kind: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val source: String? = null,
+    val current: Boolean? = null,
+    val environmentJson: String? = null,
+) {
+    fun line(): String {
+        return listOfNotNull(
+            title?.takeIf { it.isNotBlank() },
+            kind?.takeIf { it.isNotBlank() },
+            source?.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
+    }
+}
+
+@Serializable
+data class EnvironmentHistoryResponse(
+    val items: List<EnvironmentHistoryEvent> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
+data class SecretOwnerUser(
+    val email: String? = null,
+)
+
+@Serializable
+data class SecretOwner(
+    val type: String? = null,
+    val environmentId: String? = null,
+    val user: SecretOwnerUser? = null,
+)
+
+/** A secret version. List and write responses never include the value. */
+@Serializable
+data class SecretVersion(
+    val id: String? = null,
+    val name: String = "",
+    val type: String? = null,
+    val repos: List<String> = emptyList(),
+    val createdAt: String? = null,
+    val owner: SecretOwner? = null,
+) {
+    fun scopeLine(): String {
+        val where = if (repos.isEmpty()) "every repo" else repos.joinToString(", ")
+        val who = owner?.type?.takeIf { it.isNotBlank() }
+        return listOfNotNull(secretTypeLabel(type), where, who).joinToString(" · ")
+    }
+}
+
+@Serializable
+data class SecretListResponse(
+    val items: List<SecretVersion> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
+data class PutSecretRequest(
+    val value: String,
+    val type: String? = null,
+    val repos: List<String>? = null,
+)
+
+@Serializable
+data class SecretDeleteResponse(
+    val name: String? = null,
+)
+
+const val SECRET_RUNTIME = "runtime_secret"
+const val SECRET_ENV_VAR = "environment_variable"
+const val SECRET_BUILD = "build_secret"
+
+fun secretTypeLabel(type: String?): String = when (type) {
+    SECRET_RUNTIME -> "Runtime secret"
+    SECRET_ENV_VAR -> "Environment variable"
+    SECRET_BUILD -> "Build secret"
+    else -> type?.takeIf { it.isNotBlank() } ?: "Secret"
+}
+
+fun secretCanSet(type: String?): Boolean = type != SECRET_BUILD
+
+@Serializable
 data class CreateEnvironmentRequest(
     val owner: String,
     val name: String,
@@ -209,6 +323,14 @@ data class CreateAgentRequest(
     val mcpServers: List<McpServer>? = null,
     val customSubagents: List<CustomSubagent>? = null,
     val envVars: Map<String, String>? = null,
+    /** Client id `bc-…`. Cannot be combined with envVars. */
+    val agentId: String? = null,
+    /** User keys default false, service accounts true. Sent only when the user sets it. */
+    val openAsCursorGithubApp: Boolean? = null,
+    /** SDK-ahead. Omitted after a 400 that rejects the field. */
+    val runEnvVars: Map<String, String>? = null,
+    /** SDK-ahead. Omitted after a 400 that rejects the field. */
+    val metadata: Map<String, String>? = null,
 )
 
 @Serializable
@@ -223,6 +345,7 @@ data class CreateRunRequest(
     val mode: String? = null,
     val model: ModelSelection? = null,
     val mcpServers: List<McpServer>? = null,
+    val envVars: Map<String, String>? = null,
 )
 
 @Serializable
@@ -261,6 +384,9 @@ data class Run(
     val prompt: Prompt? = null,
     @Serializable(with = FlexibleModelSerializer::class)
     val model: ModelSelection? = null,
+    val cost: UsageCost? = null,
+    @Serializable(with = FlexibleJsonTextSerializer::class)
+    val error: String? = null,
 )
 
 @Serializable
@@ -286,6 +412,7 @@ data class ConversationMessage(
 @Serializable
 data class AgentConversation(
     val id: String? = null,
+    @Serializable(with = ConversationMessagesSerializer::class)
     val messages: List<ConversationMessage> = emptyList(),
 )
 
@@ -937,14 +1064,22 @@ data class AgentUsageRow(
 )
 
 @Serializable
+data class UsageCost(
+    val rawCostCents: Double? = null,
+    val chargedCents: Double? = null,
+)
+
+@Serializable
 data class UsageRun(
     val id: String? = null,
     val usage: TokenUsage? = null,
+    val cost: UsageCost? = null,
 )
 
 @Serializable
 data class AgentUsageResponse(
     val totalUsage: TokenUsage? = null,
+    val cost: UsageCost? = null,
     val runs: List<UsageRun> = emptyList(),
 )
 
@@ -986,6 +1121,11 @@ fun isLiveStatus(status: String?): Boolean {
 fun isCreatingStatus(status: String?): Boolean =
     status.equals("CREATING", ignoreCase = true)
 
+fun isRunTerminal(status: String?): Boolean {
+    val s = status?.trim()?.uppercase().orEmpty()
+    return s == "FINISHED" || s == "ERROR" || s == "CANCELLED" || s == "EXPIRED"
+}
+
 fun Run.isTerminal(): Boolean = isTerminalStatus(status)
 
 fun Run.isActive(): Boolean = isLiveStatus(status)
@@ -1026,6 +1166,83 @@ internal object FlexibleModelSerializer : KSerializer<ModelSelection> {
                 ModelSelection((el["id"] as? JsonPrimitive)?.content.orEmpty())
             }
             else -> ModelSelection("")
+        }
+    }
+}
+
+/**
+ * v0 conversation messages. A null list, a non-array, or a bad entry reads as no message
+ * rather than failing the whole transcript. There is no public v1 conversation route.
+ */
+internal object ConversationMessagesSerializer : KSerializer<List<ConversationMessage>> {
+    private val delegate = ListSerializer(ConversationMessage.serializer())
+    override val descriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: List<ConversationMessage>) {
+        delegate.serialize(encoder, value)
+    }
+
+    override fun deserialize(decoder: Decoder): List<ConversationMessage> {
+        val json = decoder as? JsonDecoder ?: return delegate.deserialize(decoder)
+        val el = json.decodeJsonElement()
+        if (el is JsonNull || el !is JsonArray) return emptyList()
+        return el.mapNotNull { item ->
+            if (item is JsonNull) return@mapNotNull null
+            runCatching { json.json.decodeFromJsonElement(ConversationMessage.serializer(), item) }.getOrNull()
+        }
+    }
+}
+
+/** Subagent model: a model id string, "inherit", or a ModelSelection object. */
+@OptIn(ExperimentalSerializationApi::class)
+internal object SubagentModelSerializer : KSerializer<String?> {
+    override val descriptor = PrimitiveSerialDescriptor("SubagentModel", PrimitiveKind.STRING).nullable
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        if (value == null) {
+            encoder.encodeNull()
+            return
+        }
+        val jsonEnc = encoder as? JsonEncoder
+        if (jsonEnc != null && value.trimStart().startsWith("{")) {
+            val el = runCatching { jsonEnc.json.parseToJsonElement(value) }.getOrNull()
+            if (el is JsonObject) {
+                jsonEnc.encodeJsonElement(el)
+                return
+            }
+        }
+        encoder.encodeString(value)
+    }
+
+    override fun deserialize(decoder: Decoder): String? {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeString()
+        val el = json.decodeJsonElement()
+        return when (el) {
+            is JsonNull -> null
+            is JsonPrimitive -> el.content.takeIf { it.isNotBlank() }
+            is JsonObject -> el.toString()
+            else -> null
+        }
+    }
+}
+
+/** Run error text, whether the API sends a string or an object with message. */
+@OptIn(ExperimentalSerializationApi::class)
+internal object FlexibleJsonTextSerializer : KSerializer<String?> {
+    override val descriptor = PrimitiveSerialDescriptor("FlexibleJsonText", PrimitiveKind.STRING).nullable
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeString(value)
+    }
+
+    override fun deserialize(decoder: Decoder): String? {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeString()
+        val el = json.decodeJsonElement()
+        return when (el) {
+            is JsonNull -> null
+            is JsonPrimitive -> el.content.takeIf { it.isNotBlank() }
+            is JsonObject -> (el["message"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() } ?: el.toString()
+            else -> null
         }
     }
 }

@@ -41,16 +41,53 @@ private val APPROVAL = setOf(
     "REQUIRES_APPROVAL",
 )
 
+fun isAgentLifecycle(status: String?): Boolean {
+    return normalizeStatus(status) in setOf("ACTIVE", "IDLE", "ARCHIVED")
+}
+
+fun agentLifecycleLabel(status: String?): String? = when (normalizeStatus(status)) {
+    "ACTIVE" -> "Active"
+    "IDLE" -> "Idle"
+    "ARCHIVED" -> "Archived"
+    else -> null
+}
+
+fun runStatusLabel(status: String?): String? = when (normalizeStatus(status)) {
+    "CREATING" -> "Creating"
+    "RUNNING" -> "Running"
+    "FINISHED" -> "Finished"
+    "ERROR" -> "Error"
+    "CANCELLED", "CANCELED" -> "Cancelled"
+    "EXPIRED" -> "Expired"
+    else -> null
+}
+
+fun threadStatusLine(agentStatus: String?, runStatus: String?, indicator: RunIndicator): String {
+    val agent = agentLifecycleLabel(agentStatus)
+    val run = runStatusLabel(runStatus)
+    return when {
+        agent != null && run != null -> "$agent · $run"
+        run != null -> run
+        agent != null -> agent
+        else -> indicator.label
+    }
+}
+
 fun runIndicator(
     agentStatus: String?,
     runStatus: String? = null,
     approvalPending: Boolean = false,
 ): RunIndicator {
     if (approvalPending) return RunIndicator.NeedsApproval
-    val raw = listOfNotNull(agentStatus, runStatus).filter { it.isNotBlank() }
-    if (raw.any { isApprovalStatus(it) }) return RunIndicator.NeedsApproval
-    if (raw.any { isLiveStatus(it) || isCreatingStatus(it) }) return RunIndicator.Running
-    if (raw.any { normalizeStatus(it) in FAILED }) return RunIndicator.Failed
+    if (isApprovalStatus(agentStatus) || isApprovalStatus(runStatus)) return RunIndicator.NeedsApproval
+    val runKey = normalizeStatus(runStatus)
+    val agentKey = normalizeStatus(agentStatus)
+    val runLive = runKey.isNotEmpty() && runKey != "ACTIVE" && (isLiveStatus(runKey) || isCreatingStatus(runKey))
+    if (runLive) return RunIndicator.Running
+    if (runKey in FAILED) return RunIndicator.Failed
+    if (runKey == "FINISHED") return RunIndicator.Done
+    if (isLiveStatus(agentStatus) || isCreatingStatus(agentStatus)) return RunIndicator.Running
+    if (agentKey in FAILED) return RunIndicator.Failed
     return RunIndicator.Done
 }
 
@@ -95,9 +132,11 @@ fun agentCardSubtitle(envType: String?, envName: String?, repoUrl: String?): Str
     return listOfNotNull(repo, env).joinToString(" · ")
 }
 
-fun threadSubtitle(repo: String?, indicator: RunIndicator): String {
+fun threadSubtitle(repo: String?, indicator: RunIndicator): String = threadSubtitle(repo, indicator.label)
+
+fun threadSubtitle(repo: String?, status: String): String {
     val name = repo?.trim()?.takeIf { it.isNotEmpty() }
-    return if (name == null) indicator.label else "$name · ${indicator.label}"
+    return if (name == null) status else "$name · $status"
 }
 
 fun relativeAge(iso: String?, nowMillis: Long = System.currentTimeMillis()): String {

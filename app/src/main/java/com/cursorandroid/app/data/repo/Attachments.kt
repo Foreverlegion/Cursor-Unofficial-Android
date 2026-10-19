@@ -7,8 +7,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
 import android.webkit.MimeTypeMap
+import com.cursorandroid.app.data.api.ImageDimension
 import com.cursorandroid.app.data.api.Prompt
 import com.cursorandroid.app.data.api.PromptImage
+import com.cursorandroid.app.data.api.sanitizePromptImages
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -57,7 +59,7 @@ object Attachments {
                     id = uri.toString(),
                     name = name,
                     mime = mime,
-                    error = "Cloud Agents accept images or text files. $name is $mime.",
+                    error = "Only images and text in the prompt are sent. $name is $mime.",
                 )
             }
             val limit = if (isImage(mime)) MAX_IMAGE_BYTES else MAX_TEXT_BYTES
@@ -80,17 +82,13 @@ object Attachments {
                             AttachItem(uri.toString(), name, mime, error = "Could not read $name as an image")
                         } else {
                             imageCount += 1
-                            val (outBytes, outMime) = raster
-                            val cache = writeCache(context, name, outBytes, extFor(outMime))
+                            val cache = writeCache(context, name, raster.bytes, extFor(raster.mime))
                             AttachItem(
                                 id = uri.toString(),
                                 name = name,
-                                mime = outMime,
-                                image = PromptImage(
-                                    data = Base64.encodeToString(outBytes, Base64.NO_WRAP),
-                                    mimeType = outMime,
-                                ),
-                                thumbPath = writeThumb(context, name, outBytes),
+                                mime = raster.mime,
+                                image = promptImage(raster),
+                                thumbPath = writeThumb(context, name, raster.bytes),
                                 cachePath = cache,
                             )
                         }
@@ -113,10 +111,35 @@ object Attachments {
                     id = uri.toString(),
                     name = name,
                     mime = mime,
-                    error = "Cloud Agents accept images or text files. $name is $mime.",
+                    error = "Only images and text in the prompt are sent. $name is $mime.",
                 )
             }
         }
+    }
+
+    fun isImageHttpUrl(raw: String): Boolean {
+        val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase()
+        return (scheme == "http" || scheme == "https") && !uri.host.isNullOrBlank()
+    }
+
+    /** An image Cursor fetches by URL. Counts toward the 5-image cap. No mime type is sent. */
+    fun imageUrlItem(raw: String, alreadyImages: Int = 0): AttachItem {
+        val url = raw.trim()
+        val error = when {
+            url.isEmpty() -> "Enter an image URL"
+            !isImageHttpUrl(url) -> "Use an http or https URL"
+            alreadyImages >= MAX_IMAGES -> "Max $MAX_IMAGES images"
+            else -> null
+        }
+        val name = url.substringAfterLast('/').substringBefore('?').take(48).ifBlank { "image" }
+        return AttachItem(
+            id = "url:$url",
+            name = name,
+            mime = "",
+            image = if (error == null) PromptImage(url = url) else null,
+            error = error,
+        )
     }
 
     fun prompt(text: String, items: List<AttachItem>): Prompt {
@@ -133,8 +156,8 @@ object Attachments {
                 append("\n```")
             }
         }.ifBlank { "See attached." }
-        val images = items.mapNotNull { it.image }.take(MAX_IMAGES)
-        return Prompt(text = body, images = images.takeIf { it.isNotEmpty() })
+        val images = sanitizePromptImages(items.mapNotNull { it.image })
+        return Prompt(text = body, images = images)
     }
 
     fun label(text: String, items: List<AttachItem>): String {
@@ -190,15 +213,11 @@ object Attachments {
         }
         return if (isImage(mime)) {
             val raster = rasterize(bytes, mime) ?: return AttachItem(path, name, mime, error = "Could not read $name as an image")
-            val (outBytes, outMime) = raster
             AttachItem(
                 id = path,
                 name = name,
-                mime = outMime,
-                image = PromptImage(
-                    data = Base64.encodeToString(outBytes, Base64.NO_WRAP),
-                    mimeType = outMime,
-                ),
+                mime = raster.mime,
+                image = promptImage(raster),
                 thumbPath = writeThumbFromFile(file),
                 cachePath = path,
             )
@@ -226,7 +245,22 @@ object Attachments {
         return file.absolutePath
     }
 
-    private fun rasterize(bytes: ByteArray, mime: String): Pair<ByteArray, String>? {
+    private data class Raster(val bytes: ByteArray, val mime: String, val width: Int, val height: Int)
+
+    private fun promptImage(raster: Raster): PromptImage {
+        val dim = if (raster.width > 0 && raster.height > 0) {
+            ImageDimension(raster.width, raster.height)
+        } else {
+            null
+        }
+        return PromptImage(
+            data = Base64.encodeToString(raster.bytes, Base64.NO_WRAP),
+            mimeType = raster.mime,
+            dimension = dim,
+        )
+    }
+
+    private fun rasterize(bytes: ByteArray, mime: String): Raster? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val srcW = bounds.outWidth
@@ -254,7 +288,7 @@ object Attachments {
         if (!ok) return null
         val outBytes = out.toByteArray()
         if (outBytes.isEmpty() || outBytes.size > MAX_IMAGE_BYTES) return null
-        return outBytes to if (png) "image/png" else "image/jpeg"
+        return Raster(outBytes, if (png) "image/png" else "image/jpeg", w, h)
     }
 
     private fun extFor(mime: String): String {

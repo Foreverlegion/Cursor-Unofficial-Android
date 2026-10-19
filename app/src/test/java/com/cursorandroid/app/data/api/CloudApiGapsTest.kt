@@ -3,7 +3,13 @@ package com.cursorandroid.app.data.api
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftSubagent
 import com.cursorandroid.app.data.repo.toApi
+import com.cursorandroid.app.ui.status.RunIndicator
+import com.cursorandroid.app.ui.status.agentLifecycleLabel
+import com.cursorandroid.app.ui.status.runIndicator
+import com.cursorandroid.app.ui.status.runStatusLabel
+import com.cursorandroid.app.ui.status.threadStatusLine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -248,6 +254,163 @@ class CloudApiGapsTest {
         assertEquals("plain", stringPrompt.prompt?.text)
         val missing = json.decodeFromString<Run>("""{"id":"r3","result":"ok"}""")
         assertNull(missing.prompt)
+    }
+
+    @Test
+    fun openAsCursorGithubAppAndRunScopedFieldsEncodeWhenSet() {
+        val json = kotlinx.serialization.json.Json { explicitNulls = false }
+        val body = CreateAgentRequest(
+            prompt = Prompt("hi"),
+            openAsCursorGithubApp = true,
+            runEnvVars = mapOf("API_URL" to "https://example.com"),
+            metadata = mapOf("source" to "phone"),
+            envVars = mapOf("TOKEN" to "x"),
+        )
+        val text = json.encodeToString(CreateAgentRequest.serializer(), body)
+        assertTrue(text.contains("\"openAsCursorGithubApp\":true"))
+        assertTrue(text.contains("\"runEnvVars\""))
+        assertTrue(text.contains("\"metadata\""))
+        val omitted = json.encodeToString(CreateAgentRequest.serializer(), CreateAgentRequest(prompt = Prompt("hi")))
+        assertFalse(omitted.contains("openAsCursorGithubApp"))
+        assertFalse(omitted.contains("runEnvVars"))
+        assertFalse(omitted.contains("metadata"))
+        assertEquals(false, defaultOpenAsCursorGithubApp(MeResponse(userId = 7)))
+        assertEquals(true, defaultOpenAsCursorGithubApp(MeResponse(userId = null, apiKeyName = "sa")))
+        assertEquals(false, defaultOpenAsCursorGithubApp(null))
+    }
+
+    @Test
+    fun envVarsRejectCursorPrefixAndAgentId() {
+        assertEquals("Env var names cannot start with CURSOR_.", envVarsError(mapOf("CURSOR_API" to "x")))
+        assertEquals("At most 50 env vars.", envVarsError((1..51).associate { "K$it" to "v" }))
+        assertNull(envVarsError(mapOf("TOKEN" to "x")))
+        val run = CreateRunRequest(
+            prompt = Prompt("next"),
+            model = ModelSelection("composer-2"),
+            envVars = mapOf("TOKEN" to "x"),
+        )
+        val text = kotlinx.serialization.json.Json { explicitNulls = false }
+            .encodeToString(CreateRunRequest.serializer(), run)
+        assertTrue(text.contains("\"envVars\""))
+        assertTrue(text.contains("\"model\""))
+    }
+
+    @Test
+    fun promptImageSendsDimensionOrUrlWithoutInventingMime() {
+        val json = kotlinx.serialization.json.Json { explicitNulls = false }
+        val withSize = json.encodeToString(
+            PromptImage.serializer(),
+            PromptImage(data = "abc", mimeType = "image/png", dimension = ImageDimension(12, 8)),
+        )
+        assertTrue(withSize.contains("\"dimension\""))
+        assertTrue(withSize.contains("\"width\":12"))
+        val kept = sanitizePromptImages(
+            listOf(
+                PromptImage(url = "https://example.com/a.png"),
+                PromptImage(data = "abc", mimeType = "image/bmp"),
+                PromptImage(data = "abc", mimeType = "image/jpeg", dimension = ImageDimension(1, 1)),
+            ),
+        )
+        assertEquals(2, kept!!.size)
+        assertEquals("https://example.com/a.png", kept[0].url)
+        assertNull(kept[0].mimeType)
+        assertEquals("image/jpeg", kept[1].mimeType)
+        assertEquals(1, kept[1].dimension?.width)
+    }
+
+    @Test
+    fun usageCostIsShownOnlyWhenPresent() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val usage = json.decodeFromString<AgentUsageResponse>(
+            """{"totalUsage":{"totalTokens":3},"cost":{"rawCostCents":12,"chargedCents":10},"runs":[{"id":"r1","cost":{"rawCostCents":12,"chargedCents":10}}]}""",
+        )
+        assertEquals("$0.10 charged · $0.12 raw", usage.costLine("r1"))
+        val missing = json.decodeFromString<AgentUsageResponse>("""{"totalUsage":{"totalTokens":3},"runs":[{"id":"r1"}]}""")
+        assertNull(missing.cost)
+        assertNull(missing.costLine())
+        val run = json.decodeFromString<Run>("""{"id":"r1","status":"ERROR","error":{"message":"boom"}}""")
+        assertEquals("boom", run.error)
+        assertEquals("ERROR", run.status)
+    }
+
+    @Test
+    fun agentIdleIsNotARunFailure() {
+        assertEquals(RunIndicator.Done, runIndicator("IDLE", "FINISHED"))
+        assertEquals(RunIndicator.Failed, runIndicator("IDLE", "ERROR"))
+        assertEquals(RunIndicator.Done, runIndicator("ACTIVE", "FINISHED"))
+        assertEquals(RunIndicator.Running, runIndicator("ACTIVE", "RUNNING"))
+        assertEquals(RunIndicator.Running, runIndicator("ACTIVE"))
+        assertEquals("Idle", agentLifecycleLabel("IDLE"))
+        assertEquals("Error", runStatusLabel("ERROR"))
+        assertEquals("Idle · Error", threadStatusLine("IDLE", "ERROR", RunIndicator.Failed))
+    }
+
+    @Test
+    fun startingRefShaRulesAndRepoUrlScheme() {
+        assertEquals("main", resolveStartingRef("main", "abc1234def", true, null, "main"))
+        assertEquals("main", resolveStartingRef("main", "abc1234def", true, null, "develop"))
+        assertEquals("abc1234def", resolveStartingRef("main", "abc1234def", false, null, "main"))
+        assertEquals("feature", resolveStartingRef("feature", "abc1234def", false, null, "main"))
+        assertNull(resolveStartingRef("main", "abc1234def", false, "https://github.com/acme/app/pull/1", "main"))
+        assertEquals(
+            "A commit SHA cannot be used when committing on the current branch.",
+            startingRefError("abc1234def", true, null),
+        )
+        assertNull(startingRefError("abc1234def", true, "https://github.com/acme/app/pull/1"))
+        assertEquals("https://github.com/acme/app", normalizeRepoUrl("github.com/acme/app"))
+        assertEquals("https://github.com/acme/app", normalizeRepoUrl("https://github.com/acme/app"))
+    }
+
+    @Test
+    fun errorEnvelopeKeepsHelpProviderAndEnvironment() {
+        val parsed = ApiException.fromBody(
+            409,
+            """{"error":{"code":"integration_not_connected","message":"GitHub is not connected","helpUrl":"https://cursor.com/help","provider":"github"}}""",
+        )
+        assertEquals("github", parsed.provider)
+        assertEquals("https://cursor.com/help", parsed.helpUrl)
+        assertTrue(parsed.displayMessage().contains("github"))
+        assertTrue(parsed.displayMessage().contains("https://cursor.com/help"))
+        val named = ApiException.fromBody(
+            409,
+            """{"error":{"code":"environment_name_conflict","message":"name taken","environmentId":"env-1"}}""",
+        )
+        assertEquals("env-1", named.environmentId)
+        assertTrue(named.displayMessage().contains("env-1"))
+        val archived = ApiException(409, "agent_archived", "agent_archived")
+        assertTrue(archived.isArchivedAgent)
+        assertTrue(archived.displayMessage().contains("Unarchive"))
+        val cursor = ApiException(400, "invalid_last_event_id", "invalid_last_event_id")
+        assertTrue(cursor.isInvalidLastEvent)
+        assertTrue(queueInsteadOfFail(ApiException(409, "busy", "agent_busy")))
+        assertEquals("bc-1", conflictAgentId("bc-1", null))
+        assertEquals("bc-abcdef12", conflictAgentId(null, """{"error":{"message":"bc-abcdef12 exists"}}"""))
+        assertEquals("prev", retainEventId("prev", null))
+        assertEquals("prev", retainEventId("prev", ""))
+        assertEquals("1713033000000-0", retainEventId("prev", "1713033000000-0"))
+        assertEquals(900L, parseRetentionSeconds("900"))
+        assertNull(parseRetentionSeconds(null))
+        val secrets = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString<SecretListResponse>("""{"items":[],"nextCursor":null}""")
+        assertNull(secrets.nextCursor)
+    }
+
+    @Test
+    fun subagentModelAcceptsStringInheritOrObject() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val inherit = json.decodeFromString<CustomSubagent>(
+            """{"name":"reviewer","description":"d","prompt":"p","model":"inherit"}""",
+        )
+        assertEquals("inherit", inherit.model)
+        val objectModel = json.decodeFromString<CustomSubagent>(
+            """{"name":"reviewer","description":"d","prompt":"p","model":{"id":"composer-2","params":[{"id":"fast","value":"true"}]}}""",
+        )
+        assertTrue(objectModel.model!!.contains("composer-2"))
+        val wire = json.encodeToString(CustomSubagent.serializer(), objectModel)
+        assertTrue(wire.contains("\"model\":{"))
+        assertTrue(json.encodeToString(CustomSubagent.serializer(), inherit).contains("\"inherit\""))
+        assertTrue(CloudFieldGate.rejects(ApiException(400, "unknown field runEnvVars", body = "runEnvVars"), "runEnvVars"))
+        assertFalse(CloudFieldGate.rejects(ApiException(400, "name is required"), "runEnvVars"))
     }
 
     @Test

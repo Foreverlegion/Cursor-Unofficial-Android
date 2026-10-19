@@ -4,6 +4,7 @@ import com.cursorandroid.app.data.api.Prompt
 
 object ClientOrigin {
     const val ID = "cursor-android" // pragma: allowlist secret
+    const val KEY = "CLIENT_APP"
     const val PREFIX = "[client=$ID]"
 
     fun stamp(prompt: Prompt): Prompt {

@@ -17,7 +17,14 @@ import com.cursorandroid.app.data.api.CursorApi
 import com.cursorandroid.app.data.api.EnvironmentActiveBuild
 import com.cursorandroid.app.data.api.EnvironmentBuild
 import com.cursorandroid.app.data.api.EnvironmentBuildList
+import com.cursorandroid.app.data.api.EnvironmentHistoryResponse
+import com.cursorandroid.app.data.api.EnvironmentListResponse
 import com.cursorandroid.app.data.api.MeResponse
+import com.cursorandroid.app.data.api.PutSecretRequest
+import com.cursorandroid.app.data.api.SecretDeleteResponse
+import com.cursorandroid.app.data.api.SecretListResponse
+import com.cursorandroid.app.data.api.SecretVersion
+import com.cursorandroid.app.data.api.UpdateEnvironmentRequest
 import com.cursorandroid.app.data.api.ModelListResponse
 import com.cursorandroid.app.data.api.PoolListResponse
 import com.cursorandroid.app.data.api.RepositoryListResponse
@@ -64,8 +71,13 @@ class DemoCursorApi(
         return BranchListResponse(branches = listOf("main", "develop"))
     }
 
-    override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): AgentListResponse {
-        if (!demo()) return live.listAgents(limit, cursor, includeArchived)
+    override suspend fun listAgents(
+        limit: Int,
+        cursor: String?,
+        includeArchived: Boolean,
+        prUrl: String?,
+    ): AgentListResponse {
+        if (!demo()) return live.listAgents(limit, cursor, includeArchived, prUrl)
         return AgentListResponse(items = session.summaries(includeArchived))
     }
 
@@ -79,8 +91,8 @@ class DemoCursorApi(
         return session.conversation(id)
     }
 
-    override suspend fun createAgent(body: CreateAgentRequest): CreateAgentResponse {
-        if (!demo()) return live.createAgent(body)
+    override suspend fun createAgent(idempotencyKey: String?, body: CreateAgentRequest): CreateAgentResponse {
+        if (!demo()) return live.createAgent(idempotencyKey, body)
         val (agent, run) = session.createAgent(body.name, body.prompt.text, body.env, body.repos)
         return CreateAgentResponse(agent = agent, run = run)
     }
@@ -98,14 +110,82 @@ class DemoCursorApi(
         return created
     }
 
+    override suspend fun listEnvironments(limit: Int, cursor: String?): EnvironmentListResponse {
+        if (!demo()) return live.listEnvironments(limit, cursor)
+        return EnvironmentListResponse(items = session.environments())
+    }
+
     override suspend fun getEnvironment(id: String): CloudEnvironment {
         if (!demo()) return live.getEnvironment(id)
         return session.environment(id) ?: session.environments().firstOrNull() ?: CloudEnvironment(id = id, name = "Android sample")
     }
 
+    override suspend fun updateEnvironment(id: String, body: UpdateEnvironmentRequest) {
+        if (!demo()) return live.updateEnvironment(id, body)
+        val current = session.environment(id) ?: return
+        session.saveEnvironment(
+            current.copy(
+                name = body.name?.takeIf { it.isNotBlank() } ?: current.name,
+                environmentJson = body.environmentJson ?: current.environmentJson,
+            ),
+        )
+    }
+
     override suspend fun deleteEnvironment(id: String) {
         if (!demo()) return live.deleteEnvironment(id)
         session.deleteEnvironment(id)
+    }
+
+    override suspend fun environmentHistory(id: String, limit: Int, cursor: String?): EnvironmentHistoryResponse {
+        if (!demo()) return live.environmentHistory(id, limit, cursor)
+        return EnvironmentHistoryResponse()
+    }
+
+    override suspend fun listSecrets(
+        scope: String?,
+        environmentId: String?,
+        name: String?,
+        repo: String?,
+        limit: Int,
+        cursor: String?,
+    ): SecretListResponse {
+        if (!demo()) return live.listSecrets(scope, environmentId, name, repo, limit, cursor)
+        return SecretListResponse()
+    }
+
+    override suspend fun listEnvironmentSecrets(id: String): SecretListResponse {
+        if (!demo()) return live.listEnvironmentSecrets(id)
+        return SecretListResponse()
+    }
+
+    override suspend fun putEnvironmentSecret(
+        id: String,
+        name: String,
+        versionId: String?,
+        body: PutSecretRequest,
+    ): SecretVersion {
+        if (!demo()) return live.putEnvironmentSecret(id, name, versionId, body)
+        return SecretVersion(id = versionId, name = name, type = body.type ?: "runtime_secret")
+    }
+
+    override suspend fun deleteEnvironmentSecret(id: String, name: String, versionId: String?): SecretDeleteResponse {
+        if (!demo()) return live.deleteEnvironmentSecret(id, name, versionId)
+        return SecretDeleteResponse(name = name)
+    }
+
+    override suspend fun listTeamSecrets(): SecretListResponse {
+        if (!demo()) return live.listTeamSecrets()
+        return SecretListResponse()
+    }
+
+    override suspend fun putTeamSecret(name: String, versionId: String?, body: PutSecretRequest): SecretVersion {
+        if (!demo()) return live.putTeamSecret(name, versionId, body)
+        return SecretVersion(id = versionId, name = name, type = body.type ?: "runtime_secret")
+    }
+
+    override suspend fun deleteTeamSecret(name: String, versionId: String?): SecretDeleteResponse {
+        if (!demo()) return live.deleteTeamSecret(name, versionId)
+        return SecretDeleteResponse(name = name)
     }
 
     override suspend fun listEnvironmentBuilds(id: String, cursor: String?): EnvironmentBuildList {
@@ -137,8 +217,8 @@ class DemoCursorApi(
         return session.run(id, runId) ?: Run(id = runId, agentId = id, status = "FINISHED")
     }
 
-    override suspend fun createRun(id: String, body: CreateRunRequest): CreateRunResponse {
-        if (!demo()) return live.createRun(id, body)
+    override suspend fun createRun(id: String, idempotencyKey: String?, body: CreateRunRequest): CreateRunResponse {
+        if (!demo()) return live.createRun(id, idempotencyKey, body)
         return CreateRunResponse(run = session.followUp(id, body.prompt.text))
     }
 
