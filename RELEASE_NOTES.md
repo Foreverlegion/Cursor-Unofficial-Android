@@ -1,3 +1,10 @@
+# 1.0.32
+
+- Agent replies and the Thinking card keep the spaces the stream sends, including the space after a period.
+- A sentence the agent rewrites mid-stream replaces the old wording. It is not glued onto the end, so a reply no longer reads "whilekept".
+- Text between tool calls stays its own paragraph. Thinking no longer splits a sentence.
+- When a run finishes, or you refresh, the chat shows the conversation text from the server.
+
 # 1.0.31
 
 - The agent-working bar and the composer sit on the screen background, so chat text no longer shows through them while you scroll. The bar keeps one height for the whole run.

@@ -114,7 +114,7 @@ class SseStreamer(
         }
     }
 
-    private fun parse(id: String?, type: String?, data: String): StreamEvent? {
+    internal fun parse(id: String?, type: String?, data: String): StreamEvent? {
         val obj = runCatching { json.parseToJsonElement(data) as? JsonObject }.getOrNull()
         return when (type) {
             "status" -> StreamEvent.Status(
