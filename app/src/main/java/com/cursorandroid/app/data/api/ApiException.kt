@@ -11,6 +11,10 @@ class ApiException(
     override val message: String,
     val errorCode: String? = null,
     val retryAfterMs: Long? = null,
+    val body: String? = null,
+    val helpUrl: String? = null,
+    val provider: String? = null,
+    val environmentId: String? = null,
 ) : RuntimeException(message) {
     val isRateLimited: Boolean
         get() = code == 429 ||
@@ -31,13 +35,43 @@ class ApiException(
             code == 410 ||
             message.contains("no longer available", ignoreCase = true) ||
             message.contains("stream_expired", ignoreCase = true)
+    val isAgentIdConflict: Boolean
+        get() = errorCode == "agent_id_conflict" ||
+            (code == 409 && message.contains("agent_id_conflict", ignoreCase = true))
+    val isSecretNameAmbiguous: Boolean
+        get() = errorCode == "secret_name_ambiguous" ||
+            message.contains("secret_name_ambiguous", ignoreCase = true)
+    val isArchivedAgent: Boolean
+        get() = errorCode == "agent_archived" ||
+            message.contains("agent_archived", ignoreCase = true)
+    val isInvalidLastEvent: Boolean
+        get() = errorCode == "invalid_last_event_id" ||
+            (code == 400 && message.contains("invalid_last_event_id", ignoreCase = true))
+    val isIntegrationDisconnected: Boolean
+        get() = errorCode == "integration_not_connected"
+    val isEnvironmentNameConflict: Boolean
+        get() = errorCode == "environment_name_conflict"
 
     fun displayMessage(): String {
         return when {
             isInvalidKey -> EXPIRED_MESSAGE
+            isAgentIdConflict -> "That agent id is already in use."
+            isSecretNameAmbiguous -> "That secret name has more than one version. Pick one."
             isBusy -> "Agent is still working. Message queued."
             isNotCancellable -> "Run already finished."
+            isArchivedAgent -> "This agent is archived. Unarchive it, then try again."
+            isInvalidLastEvent -> "Stream position was rejected. Refreshing the run."
             isStreamGone -> "Run stream ended. Refreshing."
+            isIntegrationDisconnected -> buildString {
+                append("That integration is not connected")
+                provider?.takeIf { it.isNotBlank() }?.let { append(" ($it)") }
+                append(".")
+                helpUrl?.takeIf { it.isNotBlank() }?.let { append(" $it") }
+            }
+            isEnvironmentNameConflict -> buildString {
+                append("An environment with that name already exists.")
+                environmentId?.takeIf { it.isNotBlank() }?.let { append(" Id $it.") }
+            }
             isRateLimited -> "Too many requests. Retrying shortly."
             else -> message
         }
@@ -72,16 +106,39 @@ class ApiException(
                 return ApiException(code, "HTTP $code", retryAfterMs = wait)
             }
             val parsed = runCatching {
-                val root = json.parseToJsonElement(raw)
-                val err = (root as? JsonObject)?.get("error")?.jsonObject
-                val errCode = err?.get("code")?.jsonPrimitive?.contentOrNull
-                val errMsg = err?.get("message")?.jsonPrimitive?.contentOrNull
-                    ?: (root as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
-                Pair(errCode, errMsg)
+                val root = json.parseToJsonElement(raw) as? JsonObject
+                val err = root?.get("error")?.jsonObject
+                ParsedError(
+                    code = err.str("code") ?: root.str("code"),
+                    message = err.str("message") ?: root.str("message"),
+                    helpUrl = err.str("helpUrl") ?: root.str("helpUrl"),
+                    provider = err.str("provider") ?: root.str("provider"),
+                    environmentId = err.str("environmentId") ?: root.str("environmentId"),
+                )
             }.getOrNull()
-            val errCode = parsed?.first
-            val errMsg = parsed?.second?.takeIf { it.isNotBlank() } ?: raw
-            return ApiException(code, errMsg, errCode, wait)
+            val errMsg = parsed?.message?.takeIf { it.isNotBlank() } ?: raw
+            return ApiException(
+                code,
+                errMsg,
+                parsed?.code,
+                wait,
+                body = raw,
+                helpUrl = parsed?.helpUrl,
+                provider = parsed?.provider,
+                environmentId = parsed?.environmentId,
+            )
+        }
+
+        private data class ParsedError(
+            val code: String?,
+            val message: String?,
+            val helpUrl: String?,
+            val provider: String?,
+            val environmentId: String?,
+        )
+
+        private fun JsonObject?.str(key: String): String? {
+            return this?.get(key)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         }
     }
 }

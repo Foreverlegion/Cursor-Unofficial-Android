@@ -67,8 +67,10 @@ class CatalogCache(
     }
 
     fun saveGit(snap: GitSnap) {
+        val url = com.cursorandroid.app.data.api.normalizeRepoUrl(snap.repoUrl)
+        val stored = if (url == snap.repoUrl) snap else snap.copy(repoUrl = url)
         val next = gitSnaps().toMutableMap()
-        next[snap.agentId] = snap
+        next[stored.agentId] = stored
         active().edit { putString("git", json.encodeToString(next)) }
     }
 

@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.api.EnvironmentChoice
+import com.cursorandroid.app.data.api.EnvironmentHistoryEvent
 import com.cursorandroid.app.data.api.MAX_AGENT_REPOS
 import com.cursorandroid.app.data.api.MAX_ENV_REPOS
 import com.cursorandroid.app.data.api.RepositoryItem
@@ -157,6 +158,8 @@ fun SavedEnvironmentPanel(
     onRepoUrls: (List<String>) -> Unit,
     environmentJson: String,
     onEnvironmentJson: (String) -> Unit,
+    history: List<EnvironmentHistoryEvent> = emptyList(),
+    onUpdate: (() -> Unit)? = null,
     onCreate: () -> Unit,
     busy: Boolean,
 ) {
@@ -173,7 +176,7 @@ fun SavedEnvironmentPanel(
                 label = { Text("Environment") },
                 placeholder = { Text("Saved environment") },
                 supportingText = {
-                    Text("Saved environments with an id are listed first. A named environment replaces repos on the request.")
+                    Text("From your Cursor account. A named environment replaces repos on the request.")
                 },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = menu) },
                 singleLine = true,
@@ -203,15 +206,40 @@ fun SavedEnvironmentPanel(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(
-                onClick = { onDelete?.invoke() },
-                enabled = onDelete != null && !busy,
-            ) {
-                Text("Delete environment")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = { onUpdate?.invoke() },
+                    enabled = onUpdate != null && !busy,
+                ) {
+                    Text("Save changes")
+                }
+                TextButton(
+                    onClick = { onDelete?.invoke() },
+                    enabled = onDelete != null && !busy,
+                ) {
+                    Text("Delete environment")
+                }
+            }
+            if (history.isNotEmpty()) {
+                Text("History", style = MaterialTheme.typography.labelLarge)
+                history.take(8).forEach { event ->
+                    Text(
+                        event.line().ifBlank { event.id },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    val detail = event.description?.takeIf { it.isNotBlank() }
+                    if (detail != null) {
+                        Text(
+                            detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         } else if (name.isNotBlank()) {
             Text(
-                "No id yet. The public API has no environment list, so this name comes from a past agent.",
+                "No id yet. This name is from a past chat, not the environments list.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

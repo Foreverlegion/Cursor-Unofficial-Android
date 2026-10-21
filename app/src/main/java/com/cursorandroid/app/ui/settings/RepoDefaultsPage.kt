@@ -61,7 +61,7 @@ fun RepoDefaultsPage(
     }
 
     LaunchedEffect(Unit) {
-        envs = container.catalog.savedEnvironments()
+        envs = runCatching { container.repo.listCloudEnvironments() }.getOrDefault(container.catalog.savedEnvironments())
         val listed = runCatching { container.repo.repositories() }.getOrDefault(container.catalog.repos())
         val snaps = container.catalog.gitSnaps().values.mapNotNull { it.repoUrl }
         known = knownRepoUrls(listed.map { it.url }, snaps, emptyList())
@@ -277,7 +277,7 @@ fun RepoDefaultsPage(
                 readOnly = true,
                 label = { Text("Default environment") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = envMenu) },
-                supportingText = { Text("Saved on this phone. Cursor has no list-all environments API.") },
+                supportingText = { Text("From your Cursor account environments.") },
                 modifier = Modifier
                     .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                     .fillMaxWidth()

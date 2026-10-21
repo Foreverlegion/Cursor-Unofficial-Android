@@ -53,7 +53,7 @@ class FollowUpMcpTest {
     private fun repo(store: ApiKeyStore): AgentRepository {
         val api = Proxy.newProxyInstance(CursorApi::class.java.classLoader, arrayOf(CursorApi::class.java)) { _, method, args ->
             check(method.name == "createRun") { "unexpected call ${method.name}" }
-            sent += args[1] as CreateRunRequest
+            sent += args.filterIsInstance<CreateRunRequest>().single()
             check(args.last() is Continuation<*>)
             CreateRunResponse(run = Run(id = "run-2"))
         } as CursorApi

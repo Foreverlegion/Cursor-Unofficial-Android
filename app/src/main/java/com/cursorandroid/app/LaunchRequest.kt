@@ -15,6 +15,7 @@ data class LaunchRequest(
 ) {
     companion object {
         const val INVALID_AGENT_LINK = "That agent link is not valid."
+        const val ACTION_NEW_AGENT = "com.cursorandroid.app.NEW_AGENT"
 
         fun from(intent: Intent?, nonce: Long): LaunchRequest {
             if (intent == null) return LaunchRequest(nonce)
@@ -37,7 +38,7 @@ data class LaunchRequest(
                 nonce = nonce,
                 agentId = notifyId ?: web?.agentId,
                 invalidAgentLink = notifyId == null && web?.invalid == true,
-                compose = shared && notifyId == null && web?.agentId == null,
+                compose = (shared || intent.action == ACTION_NEW_AGENT) && notifyId == null && web?.agentId == null,
                 shareText = text,
                 shareUris = uris,
                 openSettings = intent.getBooleanExtra(

@@ -38,6 +38,41 @@ class ChatRowKeysTest {
     }
 
     @Test
+    fun oneTurnPutsEveryToolCallInASingleList() {
+        val rows = groupChatRows(
+            listOf(
+                msg("user-r1", "user", "go"),
+                tool("t1", "read"),
+                msg("think-r1", "thinking", "plan"),
+                tool("t2", "grep"),
+                msg("assistant-r1", "assistant", "done"),
+                msg("user-r2", "user", "next"),
+                tool("t3", "edit"),
+                msg("assistant-r2", "assistant", "ok"),
+            ),
+            showTools = true,
+            showThinking = true,
+        )
+        val groups = rows.filterIsInstance<ChatRow.Tools>()
+        assertEquals(listOf(listOf("t1", "t2"), listOf("t3")), groups.map { it.tools.map { tool -> tool.id } })
+        assertEquals(
+            listOf("m-user", "tools", "m-thinking", "m-assistant", "m-user", "tools", "m-assistant"),
+            rows.map(::chatRowType),
+        )
+    }
+
+    @Test
+    fun hiddenToolCallsAreLeftOut() {
+        val rows = groupChatRows(
+            listOf(msg("user-r1", "user", "go"), tool("t1", "read"), msg("assistant-r1", "assistant", "done")),
+            showTools = false,
+            showThinking = true,
+        )
+        assertTrue(rows.none { it is ChatRow.Tools })
+        assertEquals(listOf("user", "assistant"), rows.filterIsInstance<ChatRow.Message>().map { it.line.kind })
+    }
+
+    @Test
     fun everyRowKeyIsUniqueAndNeverCollidesWithTheLiveTail() {
         val rows = groupChatRows(
             listOf(

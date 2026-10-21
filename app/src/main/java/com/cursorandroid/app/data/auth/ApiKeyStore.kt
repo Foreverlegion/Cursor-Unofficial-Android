@@ -157,6 +157,13 @@ class ApiKeyStore internal constructor(
             notifyPrefs.edit { putBoolean(FEEDBACK_NOTICE, value) }
         }
 
+    /** First-run profile rule was built or dismissed. Remind later does not set this. */
+    var profileRuleSeen: Boolean
+        get() = notifyPrefs.getBoolean(PROFILE_RULE_SEEN, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(PROFILE_RULE_SEEN, value) }
+        }
+
     var githubToken: String?
         get() = forges().firstOrNull { it.provider == com.cursorandroid.app.data.repo.ForgeKind.GITHUB.id }?.token
             ?.takeIf { it.isNotBlank() }
@@ -405,6 +412,7 @@ class ApiKeyStore internal constructor(
         private const val BATTERY_ASKED = "battery_asked"
         private const val BATTERY_KNOWN_EXEMPT = "battery_known_exempt"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
+        private const val PROFILE_RULE_SEEN = "profile_rule_seen"
         private const val WHATS_NEW_SEEN = "whats_new_seen_code"
         private const val DEMO_MODE = "demo_mode"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()

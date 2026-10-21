@@ -35,6 +35,7 @@ const val MAX_MCP_SERVERS = 50
 /**
  * Reads the format Cursor desktop uses in `~/.cursor/mcp.json` and `.cursor/mcp.json`:
  * `{"mcpServers": {name: {url | command, args, env, headers, type, auth}}}`.
+ * `"disabled": true` or `"enabled": false` imports the server switched off.
  * A bare `{name: {...}}` map and the `servers` key are accepted too.
  */
 fun parseMcpJson(raw: String): McpImportParse {
@@ -85,7 +86,8 @@ private fun parseEntry(rawName: String, obj: JsonObject): McpImportItem {
             )
         }
     }
-    val disabled = (obj["disabled"] as? JsonPrimitive)?.booleanOrNull == true
+    val disabled = (obj["disabled"] as? JsonPrimitive)?.booleanOrNull == true ||
+        (obj["enabled"] as? JsonPrimitive)?.booleanOrNull == false
     val server = StoredMcpServer(
         enabled = !disabled,
         name = name,

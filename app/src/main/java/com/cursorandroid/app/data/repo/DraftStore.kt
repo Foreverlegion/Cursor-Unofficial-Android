@@ -10,9 +10,10 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 data class DraftAttach(
-    val path: String,
+    val path: String = "",
     val name: String,
-    val mime: String,
+    val mime: String = "",
+    val url: String = "",
 )
 
 @Serializable
@@ -44,6 +45,7 @@ data class ChatDraft(
     val selectedEnvId: String = "",
     val environmentJson: String = "",
     val createEnvRepos: List<String> = emptyList(),
+    val clientAgentId: String = "",
 ) {
     fun isEmpty(): Boolean {
         return text.isBlank() &&
@@ -72,7 +74,8 @@ data class ChatDraft(
             envOwner.isBlank() &&
             selectedEnvId.isBlank() &&
             environmentJson.isBlank() &&
-            createEnvRepos.isEmpty()
+            createEnvRepos.isEmpty() &&
+            clientAgentId.isBlank()
     }
 
     fun resolvedSubagents(): List<DraftSubagent> {
@@ -160,13 +163,24 @@ data class QueuedItem(
 
 fun List<AttachItem>.toDraft(): List<DraftAttach> {
     return mapNotNull { item ->
-        val path = item.cachePath ?: return@mapNotNull null
-        DraftAttach(path, item.name, item.mime)
+        val url = item.image?.url?.takeIf { it.isNotBlank() }
+        val path = item.cachePath
+        when {
+            url != null -> DraftAttach(path = path.orEmpty(), name = item.name, mime = item.mime, url = url)
+            path != null -> DraftAttach(path, item.name, item.mime)
+            else -> null
+        }
     }
 }
 
 fun List<DraftAttach>.toItems(): List<AttachItem> {
-    return map { Attachments.fromCache(it.path, it.name, it.mime) }
+    return map { draft ->
+        if (draft.url.isNotBlank()) {
+            Attachments.imageUrlItem(draft.url)
+        } else {
+            Attachments.fromCache(draft.path, draft.name, draft.mime)
+        }
+    }
 }
 
 @Serializable

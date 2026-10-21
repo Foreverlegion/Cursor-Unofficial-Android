@@ -3,6 +3,7 @@ package com.cursorandroid.app.data.notify
 import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,7 +19,9 @@ class NoticeStorePersistenceTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
 
     @Before
+    @After
     fun clean() {
+        VisibleAgent.resetForTest()
         context.getSharedPreferences("notice_feed", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
@@ -88,5 +91,40 @@ class NoticeStorePersistenceTest {
 
         record(s, "run-1", status = "FINISHED")
         assertEquals(1, unreadCount(s.visible()))
+    }
+
+    @Test
+    fun openThreadDoesNotBadgeItsOwnActivity() {
+        VisibleAgent.activityStarted()
+        VisibleAgent.set("agent")
+        val s = store()
+        record(s, "run-1", status = "RUNNING")
+        assertEquals(0, unreadCount(s.visible()))
+
+        record(s, "run-1", status = "FINISHED")
+        assertEquals(0, unreadCount(s.visible()))
+        assertEquals("finished", s.visible().single { it.id == "run-1" }.kind)
+        assertTrue(s.recordApproval("agent", "Agent", "call-1", "Allow shell?"))
+        assertEquals(0, unreadCount(s.visible()))
+
+        assertTrue(s.record("other", "Other", "run-2", "FINISHED", "done"))
+        assertEquals(1, unreadCount(s.visible()))
+
+        VisibleAgent.set(null)
+        record(s, "run-3", status = "FINISHED")
+        assertEquals(2, unreadCount(s.visible()))
+    }
+
+    @Test
+    fun openingAThreadClearsUnreadForThatChatOnly() {
+        val s = store()
+        record(s, "run-1")
+        s.record("other", "Other", "run-2", "FINISHED", "done")
+        assertEquals(2, unreadCount(s.visible()))
+
+        s.markAgentRead("agent")
+        assertEquals(0, unreadCount(store().visible().filter { it.agentId == "agent" }))
+        assertEquals(1, unreadCount(s.visible()))
+        assertFalse(s.visible().single { it.agentId == "other" }.read)
     }
 }

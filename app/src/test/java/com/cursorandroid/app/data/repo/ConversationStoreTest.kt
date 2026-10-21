@@ -1,6 +1,7 @@
 package com.cursorandroid.app.data.repo
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationStoreTest {
@@ -214,6 +215,46 @@ class ConversationStoreTest {
     }
 
     @Test
+    fun startupNoticeStaysForTheOpeningTurnAndDoesNotDropItsReadouts() {
+        val notice = FirstChatNotice.line("cloud")
+        val user = line("user-r1", "user", "hello", "r1")
+        val think = line("think-r1", "thinking", "plan the env", "r1")
+        val tool = TranscriptLine(id = "tool-1", kind = "tool", text = "read\nREADME.md", runId = "r1")
+        val assistant = line("assistant-r1", "assistant", "done", "r1")
+
+        val ordered = coalesceTranscript(listOf(notice, user, think, tool, assistant))
+
+        assertEquals(FirstChatNotice.ID, ordered.first().id)
+        assertEquals(listOf("plan the env"), ordered.filter { it.kind == "thinking" }.map { it.text })
+        assertEquals(listOf("tool-1"), ordered.filter { it.kind == "tool" }.map { it.id })
+    }
+
+    @Test
+    fun followUpDropsOnlyTheStartupNotice() {
+        val notice = FirstChatNotice.line("cloud")
+        val first = listOf(
+            notice,
+            line("user-r1", "user", "hello", "r1"),
+            line("think-r1", "thinking", "plan the env", "r1"),
+            TranscriptLine(id = "tool-1", kind = "tool", text = "read\nREADME.md", runId = "r1"),
+            line("assistant-r1", "assistant", "done", "r1"),
+        )
+        val followed = first + listOf(
+            line("user-r2", "user", "and then", "r2"),
+            line("think-r2", "thinking", "second plan", "r2"),
+            TranscriptLine(id = "tool-2", kind = "tool", text = "grep\nsrc", runId = "r2"),
+            line("assistant-r2", "assistant", "ok", "r2"),
+        )
+
+        val ordered = coalesceTranscript(followed)
+
+        assertTrue(ordered.none { it.id == FirstChatNotice.ID })
+        assertEquals(listOf("plan the env", "second plan"), ordered.filter { it.kind == "thinking" }.map { it.text })
+        assertEquals(listOf("tool-1", "tool-2"), ordered.filter { it.kind == "tool" }.map { it.id })
+        assertEquals(listOf("r1", "r2"), ordered.filter { it.kind == "user" }.map { it.runId })
+    }
+
+    @Test
     fun mergeDoesNotLiftOrphanThinkingToTheTop() {
         val user = line("user-r2", "user", "next", "r2")
         val assistant = line("assistant-r2", "assistant", "done", "r2")
@@ -226,6 +267,52 @@ class ConversationStoreTest {
 
         assertEquals("user", merged.first().kind)
         assertEquals("thinking", merged.last().kind)
+    }
+
+    @Test
+    fun sameRunCaptionAndPromptCollapseToOneUserLine() {
+        val caption = line("user-r1", "user", "Build profile rule to give all Cursor agents context", "r1")
+        val prompt = line("user-r1", "user", "### Scope\nAlways Apply for this account.", "r1")
+
+        val merged = coalesceTranscript(listOf(caption, prompt))
+
+        assertEquals(1, merged.count { it.kind == "user" })
+        val text = merged.single { it.kind == "user" }.text
+        assertTrue(text.contains("Build profile rule"))
+        assertTrue(text.contains("### Scope"))
+    }
+
+    @Test
+    fun launchCaptionIsNotASecondUserMessage() {
+        val local = line("user-r1", "user", "Build profile rule to give all Cursor agents context", "r1")
+        val scope = "### Scope\nAlways Apply for this account. Only Android-app interaction (artifacts, images, prompt text, phone chat UX)."
+        val messages = listOf(
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = scope),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "assistant_message", text = "I'll create the rule."),
+        )
+
+        val merged = mergeConversationTranscript(listOf(local), messages)
+
+        assertEquals(1, merged.count { it.kind == "user" })
+        val text = merged.first { it.kind == "user" }.text
+        assertTrue(text.contains("Build profile rule"))
+        assertTrue(text.contains("### Scope"))
+        assertEquals(listOf("user", "assistant"), merged.map { it.kind })
+    }
+
+    @Test
+    fun aLaterRunIsNotFoldedIntoAnOlderPrompt() {
+        val local = line("user-r2", "user", "do the next thing", "r2")
+        val messages = listOf(
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = "first task"),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "assistant_message", text = "done"),
+            com.cursorandroid.app.data.api.ConversationMessage(type = "user_message", text = "second task"),
+        )
+
+        val merged = mergeConversationTranscript(listOf(local), messages)
+
+        assertEquals(3, merged.count { it.kind == "user" })
+        assertEquals("do the next thing", merged.last { it.kind == "user" }.text)
     }
 
     private fun line(id: String, kind: String, text: String, runId: String) =

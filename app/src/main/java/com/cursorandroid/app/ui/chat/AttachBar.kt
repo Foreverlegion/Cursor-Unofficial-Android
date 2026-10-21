@@ -15,12 +15,15 @@ import android.speech.RecognizerIntent
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +49,8 @@ fun AttachButton(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
+    var urlOpen by remember { mutableStateOf(false) }
+    var urlText by remember { mutableStateOf("") }
     val photos = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(Attachments.MAX_IMAGES),
     ) { uris ->
@@ -68,10 +73,51 @@ fun AttachButton(
             },
         )
         DropdownMenuItem(
-            text = { Text("File") },
+            text = { Text("Text file") },
             onClick = {
                 menu = false
-                files.launch(arrayOf("*/*"))
+                files.launch(arrayOf("text/*", "application/json", "application/xml"))
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("Image URL") },
+            onClick = {
+                menu = false
+                urlText = ""
+                urlOpen = true
+            },
+        )
+    }
+    if (urlOpen) {
+        AlertDialog(
+            onDismissRequest = { urlOpen = false },
+            title = { Text("Image URL") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "http or https. Cursor fetches it. Up to 5 images, with photos.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = urlText,
+                        onValueChange = { urlText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("URL") },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val count = items.count { it.isImage && it.ok }
+                        onItems(items + Attachments.imageUrlItem(urlText, count))
+                        urlOpen = false
+                    },
+                ) { Text("Add") }
+            },
+            dismissButton = {
+                TextButton(onClick = { urlOpen = false }) { Text("Cancel") }
             },
         )
     }

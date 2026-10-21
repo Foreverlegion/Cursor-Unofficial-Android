@@ -20,12 +20,15 @@ import java.util.Locale
 @Composable
 fun ChatPropertiesDialog(
     title: String,
-    status: String?,
+    agentStatus: String?,
+    runStatus: String?,
+    runError: String?,
     env: String?,
     branch: String?,
     repoUrl: String?,
     prUrl: String?,
     tokens: Long?,
+    cost: String?,
     onOpenUrl: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -41,7 +44,9 @@ fun ChatPropertiesDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 PropertyLine("Name", title)
-                PropertyLine("Status", status?.takeIf { it.isNotBlank() })
+                PropertyLine("Agent", agentStatus?.takeIf { it.isNotBlank() })
+                PropertyLine("Run", runStatus?.takeIf { it.isNotBlank() })
+                PropertyLine("Run error", runError?.takeIf { it.isNotBlank() })
                 PropertyLine("Environment", env?.takeIf { it.isNotBlank() })
                 PropertyLine("Branch", branch?.takeIf { it.isNotBlank() })
                 PropertyLine(
@@ -58,6 +63,9 @@ fun ChatPropertiesDialog(
                     "Tokens",
                     tokens?.let { NumberFormat.getIntegerInstance(Locale.US).format(it) },
                 )
+                if (cost != null) {
+                    PropertyLine("Cost", cost)
+                }
             }
         },
         confirmButton = {

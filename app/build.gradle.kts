@@ -20,7 +20,6 @@ fun escapeBuildConfig(value: String): String {
     return value
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
-        .replace("$", "\\$")
         .replace("\r", "")
         .replace("\n", "\\n")
 }
@@ -51,8 +50,8 @@ android {
         applicationId = "com.cursorandroid.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 129
-        versionName = "1.0.29"
+        versionCode = 131
+        versionName = "1.0.31"
         buildConfigField(
             "String",
             "APP_ISSUES_TOKEN",

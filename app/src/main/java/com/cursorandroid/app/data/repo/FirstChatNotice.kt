@@ -15,6 +15,7 @@ object FirstChatNotice {
         return when (envType?.trim()?.lowercase()) {
             "machine" -> MACHINE
             "pool" -> POOL
+            "none" -> "The first reply can take a little longer."
             else -> CLOUD
         }
     }
@@ -27,4 +28,12 @@ object FirstChatNotice {
 fun List<TranscriptLine>.withStartupNotice(envType: String?): List<TranscriptLine> {
     if (any { it.kind == FirstChatNotice.KIND || it.id == FirstChatNotice.ID }) return this
     return listOf(FirstChatNotice.line(envType)) + this
+}
+
+/** The spin-up note is only for the opening turn. A follow-up means the environment is already up. */
+internal fun List<TranscriptLine>.withoutStaleStartupNotice(): List<TranscriptLine> {
+    if (none { it.id == FirstChatNotice.ID }) return this
+    val turns = asSequence().filter { it.kind == "user" }.map { lineKey(it) }.distinct().count()
+    if (turns < 2) return this
+    return filterNot { it.id == FirstChatNotice.ID }
 }

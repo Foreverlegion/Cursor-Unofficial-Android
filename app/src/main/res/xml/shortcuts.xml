@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_new_agent"
+        android:shortcutId="new_agent"
+        android:shortcutLongLabel="@string/shortcut_new_agent_long"
+        android:shortcutShortLabel="@string/shortcut_new_agent">
+        <intent
+            android:action="com.cursorandroid.app.NEW_AGENT"
+            android:targetClass="com.cursorandroid.app.MainActivity"
+            android:targetPackage="com.cursorandroid.app" />
+    </shortcut>
+</shortcuts>
