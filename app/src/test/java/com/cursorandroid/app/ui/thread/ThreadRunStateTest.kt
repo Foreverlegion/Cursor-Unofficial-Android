@@ -103,5 +103,23 @@ class ThreadRunStateTest {
         compose.setContent { WorkingBar("Agent working") }
         compose.onNodeWithTag("stop-run").assertDoesNotExist()
     }
+
+    @Test
+    fun workingBarKeepsItsHeightWhenTheStepAndModelChange() {
+        val model = androidx.compose.runtime.mutableStateOf<String?>(null)
+        val label = androidx.compose.runtime.mutableStateOf("Agent working · starting")
+        compose.setContent {
+            WorkingBar(label.value, model = model.value, onStop = {}, lifted = false)
+        }
+        compose.waitForIdle()
+        val before = compose.onNodeWithTag("working-bar").fetchSemanticsNode().size.height
+        compose.runOnIdle {
+            label.value = "Agent working · run_terminal_cmd"
+            model.value = "Grok 4.6"
+        }
+        compose.waitForIdle()
+        val after = compose.onNodeWithTag("working-bar").fetchSemanticsNode().size.height
+        assertEquals(before, after)
+    }
 }
 

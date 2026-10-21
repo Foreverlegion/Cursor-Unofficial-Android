@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,6 +53,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +67,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -79,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -1542,8 +1546,7 @@ fun ThreadScreen(
     }
 
     val follow = rememberBottomFollow(agentId, listState)
-    val growKey = threadScrollKey(rows, liveThink, showTyping, liveTools)
-    BottomFollowEffects(follow, listOf(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey))
+    BottomFollowEffects(follow)
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.snack) {
@@ -1554,12 +1557,27 @@ fun ThreadScreen(
         )
     }
 
+    var headerCoversContent by remember(listState) { mutableStateOf(false) }
+    var footerCoversContent by remember(listState) { mutableStateOf(false) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.canScrollForward to listState.canScrollBackward }
+            .collect { (towardOlder, towardNewer) ->
+                headerCoversContent = towardOlder
+                footerCoversContent = towardNewer
+            }
+    }
+
     Scaffold(
         modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = AppInsets.bars,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background,
+                ),
                 title = {
                     Column {
                         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
@@ -1667,10 +1685,16 @@ fun ThreadScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .scaffoldBars(padding),
         ) {
             if (working) {
-                WorkingBar(activity, workingModel, onStop = if (canKill) ({ vm.cancel() }) else null)
+                WorkingBar(
+                    activity,
+                    workingModel,
+                    onStop = if (canKill) ({ vm.cancel() }) else null,
+                    lifted = headerCoversContent,
+                )
             }
             RefreshPausedNote(vm.pausedUntilMs)
             if (vm.error != null) {
@@ -1693,7 +1717,7 @@ fun ThreadScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp, Alignment.Top),
+                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp),
                 ) {
                     if (showLiveTools || (liveThink != null && showThinking)) {
                         item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
@@ -1791,6 +1815,20 @@ fun ThreadScreen(
                     }
                 }
             }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+            HorizontalDivider(
+                thickness = 1.dp,
+                color = if (footerCoversContent) {
+                    MaterialTheme.colorScheme.outlineVariant
+                } else {
+                    Color.Transparent
+                },
+            )
             AttachChips(items = attaches, onItems = { attaches = it })
             Row(
                 modifier = Modifier
@@ -1931,6 +1969,7 @@ fun ThreadScreen(
                 ) {
                     Text("Send", fontWeight = FontWeight.SemiBold)
                 }
+            }
             }
         }
     }
@@ -2495,44 +2534,60 @@ internal fun ToolCallsBlock(
 }
 
 @Composable
-internal fun WorkingBar(text: String, model: String? = null, onStop: (() -> Unit)? = null) {
-    Row(
+internal fun WorkingBar(
+    text: String,
+    model: String? = null,
+    onStop: (() -> Unit)? = null,
+    lifted: Boolean = false,
+) {
+    Column(
         modifier = Modifier
-            .padding(horizontal = 12.dp, vertical = 8.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(PlayColors.Card)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .zIndex(1f)
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("working-bar"),
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(PlayColors.Teal),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text,
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(PlayColors.Teal),
             )
-            if (!model.isNullOrBlank()) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    model,
+                    text,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    model?.takeIf { it.isNotBlank() } ?: "\u00a0",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (onStop != null) {
+                TextButton(onClick = onStop, modifier = Modifier.testTag("stop-run")) { Text("Stop") }
+            }
         }
-        if (onStop != null) {
-            TextButton(onClick = onStop, modifier = Modifier.testTag("stop-run")) { Text("Stop") }
-        }
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = if (lifted) MaterialTheme.colorScheme.outlineVariant else Color.Transparent,
+        )
     }
 }
 

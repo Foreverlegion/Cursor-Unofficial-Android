@@ -15,6 +15,9 @@ import androidx.compose.runtime.snapshotFlow
  *
  * The list follows new content only while the user is at or near the bottom. Once they scroll up
  * [stickToBottom] turns false, the list never scrolls by itself, and the jump-to-bottom button is shown.
+ *
+ * Streaming must not call [scrollToItem] on every token. That restart fought the layout pass and
+ * moved rows the user was not touching. Growth is applied once, from the anchor item's size.
  */
 @Stable
 internal class BottomFollow(val listState: LazyListState) {
@@ -38,10 +41,10 @@ internal fun rememberBottomFollow(key: Any, listState: LazyListState): BottomFol
     remember(key, listState) { BottomFollow(listState) }
 
 /**
- * Wires [follow] to its list. [growKey] must change whenever rows are added or the newest row grows.
+ * Wires [follow] to its list. New tokens change the anchor item's height. They do not restart a scroll.
  */
 @Composable
-internal fun BottomFollowEffects(follow: BottomFollow, growKey: Any?) {
+internal fun BottomFollowEffects(follow: BottomFollow) {
     val listState = follow.listState
 
     LaunchedEffect(follow) {
@@ -54,23 +57,44 @@ internal fun BottomFollowEffects(follow: BottomFollow, growKey: Any?) {
         }
     }
 
-    LaunchedEffect(follow, growKey, follow.stickToBottom) {
-        if (follow.stickToBottom && !listState.isScrollInProgress) follow.snapToBottom()
-    }
-
-    // The newest row is anchored to the bottom edge, so text appended to it pushes everything the user
-    // is reading upward. While not following, re-add the growth to the offset so the viewport stays put.
+    // The newest rows are anchored to the bottom edge, so text appended below the viewport pushes
+    // everything the user is reading. While not following, re-add that growth to the offset.
+    // While following, correct only if the anchor has drifted. Do not scroll on an unchanged frame.
     LaunchedEffect(follow) {
-        var last: Pair<Any, Int>? = null
+        var lastKey: Any? = null
+        var lastSize = -1
         snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }?.let { it.key to it.size }
+            val index = listState.firstVisibleItemIndex
+            val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+            anchor?.let { it.key to it.size }
         }.collect { now ->
-            val before = last
-            last = now
-            if (now == null || before == null || before.first != now.first) return@collect
-            val grew = now.second - before.second
-            if (grew > 0 && !follow.stickToBottom && !follow.programmatic) {
-                listState.dispatchRawDelta(grew.toFloat())
+            val beforeKey = lastKey
+            val beforeSize = lastSize
+            lastKey = now?.first
+            lastSize = now?.second ?: -1
+            if (follow.programmatic || now == null || beforeKey == null || beforeKey != now.first || beforeSize < 0) {
+                return@collect
+            }
+            val grew = now.second - beforeSize
+            if (grew == 0) return@collect
+            if (follow.stickToBottom) {
+                if (!listState.isScrollInProgress &&
+                    (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
+                ) {
+                    follow.programmatic = true
+                    try {
+                        listState.scrollToBottom()
+                    } finally {
+                        follow.programmatic = false
+                    }
+                }
+            } else if (grew > 0 && !listState.isScrollInProgress) {
+                follow.programmatic = true
+                try {
+                    listState.dispatchRawDelta(grew.toFloat())
+                } finally {
+                    follow.programmatic = false
+                }
             }
         }
     }

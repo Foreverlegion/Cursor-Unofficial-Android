@@ -1,3 +1,8 @@
+# 1.0.31
+
+- The agent-working bar and the composer sit on the screen background, so chat text no longer shows through them while you scroll. The bar keeps one height for the whole run.
+- A chat you have scrolled up stays where you left it while the agent streams. At the bottom, the thread follows without jumping back on every token.
+
 # 1.0.30
 
 - Tapping Build on the profile-rule prompt closes it at once. The agent starts in the background, with a short "Starting in background" note. The chat gets one user message for that launch.
