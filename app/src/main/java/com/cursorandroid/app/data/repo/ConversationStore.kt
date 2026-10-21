@@ -519,7 +519,8 @@ internal fun mergeConversationTranscript(
 
     messages.forEachIndexed { index, msg ->
         val kind = msg.transcriptKind() ?: return@forEachIndexed
-        val text = visibleUserText(msg.text.orEmpty())
+        val raw = msg.text.orEmpty()
+        val text = if (kind == "user") visibleUserText(raw) else raw
         if (text.isEmpty()) return@forEachIndexed
         val remoteId = msg.id?.trim()?.takeIf { it.isNotEmpty() }
         val taken = if (remoteId != null) {
@@ -537,12 +538,14 @@ internal fun mergeConversationTranscript(
             take(kind, text)
         }
         val at = parseMessageTimeMs(msg.createdAt)
-        out += taken?.let { if (it.atMs == null && at != null) it.copy(atMs = at) else it } ?: TranscriptLine(
+        val base = taken?.let { if (it.atMs == null && at != null) it.copy(atMs = at) else it } ?: TranscriptLine(
             id = if (remoteId != null) "$kind-$remoteId" else "$kind-conv-$index",
             kind = kind,
             text = text,
             atMs = at ?: seenAtMs,
         )
+        // Assistant rows from the conversation are the canonical bytes, including leading spaces.
+        out += if (kind == "assistant" && base.text != raw) base.copy(text = raw) else base
     }
 
     val order = RunOrder(runOrder, liveRunId)
@@ -560,7 +563,7 @@ internal fun mergeConversationTranscript(
                 val text = line.text.trim()
                 val settled = line.runId in settledRuns || order.runOf(line) in settledRuns
                 val unseen = out.none { it.kind == "assistant" && it.text.trim() == text }
-                if (text.isNotEmpty() && unseen && !(settled && coveredByServer(text, out))) {
+                if (text.isNotEmpty() && unseen && !(settled && dropSettledAssistant(line.text, out))) {
                     if (old) placeOlder(out, prefix, line, order) else insertAtTurnEnd(out, line)
                 }
             }
@@ -692,6 +695,55 @@ internal fun coveredByServer(text: String, out: List<TranscriptLine>): Boolean {
     var rest = whole
     for (part in parts.sortedByDescending { it.length }) rest = rest.replace(part, " ")
     return rest.isBlank()
+}
+
+/**
+ * A finished run's streamed bubble loses to the conversation rows that are the same segment.
+ * Keep it when the server window never listed it, and when it still has a tail the server has not listed.
+ * A splice such as `whilekept` shares a long prefix or tail with the server sentence and is dropped.
+ * Another run's reply does not count: a missing old turn must stay in its own place.
+ */
+internal fun dropSettledAssistant(text: String, out: List<TranscriptLine>): Boolean {
+    val parts = out.filter { it.kind == "assistant" }.map { it.text }.filter { it.isNotEmpty() }
+    if (parts.isEmpty()) return false
+    if (coveredByServer(text, out)) return true
+    val matched = parts.filter { text.contains(it) }
+    if (matched.isNotEmpty()) return !unlistedTail(text, matched)
+    return parts.any { sameSegmentRewrite(text, it) }
+}
+
+private fun sameSegmentRewrite(local: String, server: String): Boolean {
+    if (local == server) return true
+    val prefix = sharedEdge(local, server, fromEnd = false)
+    val suffix = sharedEdge(local, server, fromEnd = true)
+    val shorter = minOf(local.length, server.length)
+    if (prefix >= 24 && prefix < local.length && prefix < server.length) return true
+    return suffix >= 24 &&
+        suffix < local.length &&
+        suffix < server.length &&
+        prefix + suffix < shorter
+}
+
+private fun sharedEdge(a: String, b: String, fromEnd: Boolean): Int {
+    val n = minOf(a.length, b.length)
+    var i = 0
+    while (i < n) {
+        val left = if (fromEnd) a[a.length - 1 - i] else a[i]
+        val right = if (fromEnd) b[b.length - 1 - i] else b[i]
+        if (left != right) break
+        i++
+    }
+    return i
+}
+
+private fun unlistedTail(text: String, parts: List<String>): Boolean {
+    var idx = 0
+    for (part in parts) {
+        val at = text.indexOf(part, idx)
+        if (at < 0) return false
+        idx = at + part.length
+    }
+    return text.substring(idx).isNotBlank()
 }
 
 /** A streamed tail is the newest text of its turn: after every server message up to the next user turn. */

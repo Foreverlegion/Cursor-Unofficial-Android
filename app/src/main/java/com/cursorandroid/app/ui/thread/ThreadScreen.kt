@@ -269,8 +269,7 @@ class ThreadViewModel(
     private var retryJob: Job? = null
     private var retryStrikes = 0
     private val wake = Channel<Unit>(Channel.CONFLATED)
-    private var assistantBuf = StringBuilder()
-    private var thinkingBuf = StringBuilder()
+    private val streamFold = RunStreamFold()
     private var lastEventId: String? = null
     private var streamedRunId: String? = null
     private val pendingApprovals = HashSet<String>()
@@ -286,7 +285,6 @@ class ThreadViewModel(
     internal var runSpans by mutableStateOf<Map<String, RunSpan>>(emptyMap())
         private set
     private var settledKey: String? = null
-    private var afterNonAssistant = false
     private val lineGate = Any()
 
     init {
@@ -746,8 +744,7 @@ class ThreadViewModel(
                 sent,
                 explicit = false,
             )
-            assistantBuf = StringBuilder()
-            thinkingBuf = StringBuilder()
+            streamFold.reset()
             lastEventId = null
             streamedRunId = created.id
             markUserSent(next.id, created.id)
@@ -1025,9 +1022,7 @@ class ThreadViewModel(
         }
         streamJob?.cancel()
         if (replay || streamedRunId != runId) {
-            assistantBuf = StringBuilder()
-            thinkingBuf = StringBuilder()
-            afterNonAssistant = false
+            streamFold.reset()
             lastEventId = null
             streamedRunId = runId
         }
@@ -1051,19 +1046,20 @@ class ThreadViewModel(
                     when (event) {
                         is StreamEvent.Assistant -> {
                             receiving = true
-                            appendAssistantSegment(assistantBuf, event.text, afterNonAssistant)
-                            afterNonAssistant = false
-                            upsert("assistant-$runId", "assistant", assistantBuf.toString(), runId)
+                            streamFold.onAssistant(event.eventId, event.text)
+                            upsert("assistant-$runId", "assistant", streamFold.assistantText(), runId)
                         }
                         is StreamEvent.Thinking -> {
                             receiving = true
-                            afterNonAssistant = true
-                            thinkingBuf.append(event.text)
-                            upsert("think-$runId", "thinking", thinkingBuf.toString(), runId)
+                            streamFold.onThinking(event.eventId, event.text)
+                            val thought = streamFold.thinkingText()
+                            if (thought.isNotEmpty()) {
+                                upsert("think-$runId", "thinking", thought, runId)
+                            }
                         }
                         is StreamEvent.ToolCall -> {
                             receiving = true
-                            afterNonAssistant = true
+                            streamFold.onTool(event.eventId)
                             noteToolApproval(event.callId, event.status)
                             upsert(
                                 event.callId ?: "tool-$runId-${event.name}",
@@ -1088,6 +1084,7 @@ class ThreadViewModel(
                             clearApprovals()
                             run = run?.copy(status = event.status, result = event.text)
                             if (!event.text.isNullOrBlank()) {
+                                streamFold.replaceAssistant(event.text)
                                 upsert("assistant-$runId", "assistant", event.text, runId)
                             }
                             streaming = false
@@ -2053,11 +2050,6 @@ internal const val LIVE_TAIL_KEY = "live-tail"
 private const val SEEN_WINDOW_MS = 60_000L
 private const val SETTLE_FETCHES = 3
 private const val SETTLE_RETRY_MS = 1_500L
-
-internal fun appendAssistantSegment(buf: StringBuilder, text: String, afterOther: Boolean) {
-    if (afterOther && buf.isNotEmpty() && text.isNotEmpty() && !buf.endsWith("\n")) buf.append("\n\n")
-    buf.append(text)
-}
 
 internal fun conversationCovers(messages: List<ConversationMessage>, result: String?): Boolean {
     val needle = result?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
