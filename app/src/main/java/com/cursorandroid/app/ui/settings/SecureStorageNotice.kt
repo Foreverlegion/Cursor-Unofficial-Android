@@ -10,8 +10,8 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.auth.ApiKeyStore
 
 const val SECURE_STORAGE_WARNING =
-    "Secure storage is unavailable on this phone. The API key, tokens, and MCP secrets are kept in memory only " +
-        "and are lost when the app closes. Background alerts cannot sign in without them."
+    "Secure storage is unavailable on this phone. The API key, tokens, and MCP secrets are kept in a local " +
+        "fallback file until secure storage works again. Background alerts may be limited until then."
 
 @Composable
 fun SecureStorageNotice(store: ApiKeyStore, modifier: Modifier = Modifier) {
