@@ -52,26 +52,26 @@ class SecretStorageTest {
     private fun fallbackKeys(): Set<String> = prefs("cursor_secure_fallback").all.keys
 
     @Test
-    fun whenTheKeystoreFailsSecretsStayInMemoryAndNothingIsWrittenToDisk() {
+    fun whenTheKeystoreFailsSecretsStayInMemoryAndOnTheDurableFallback() {
         val store = open(secure = false)
         assertFalse(store.secureStorage)
         store.apiKey = "key-1"
         store.saveStoredMcps(listOf(StoredMcpServer(name = "a", url = "https://a.example/mcp", headers = mapOf("Authorization" to "Bearer t"))))
         assertEquals("key-1", store.apiKey)
         assertEquals("Bearer t", store.storedMcps().single().headers["Authorization"])
-        assertTrue(fallbackKeys().isEmpty())
+        assertEquals(setOf("api_key", "mcp_list"), fallbackKeys())
         assertFalse(prefs("cursor_prefs").contains("mcp_url"))
-        assertNull("memory only, gone after the process", open(secure = false).apiKey)
+        assertEquals("survives process death via fallback", "key-1", open(secure = false).apiKey)
     }
 
     @Test
-    fun anOldPlaintextFallbackStaysReadableButIsNeverWrittenAgain() {
+    fun anOldPlaintextFallbackStaysReadableAndIsUpdatedWhileSecureStorageIsDown() {
         prefs("cursor_secure_fallback").edit(commit = true) { putString("api_key", "key-old") }
         val store = open(secure = false)
         assertEquals("key-old", store.apiKey)
         store.apiKey = "key-new"
         assertEquals("key-new", store.apiKey)
-        assertEquals("the plaintext file is not rewritten", "key-old", prefs("cursor_secure_fallback").getString("api_key", null))
+        assertEquals("key-new", prefs("cursor_secure_fallback").getString("api_key", null))
         store.apiKey = null
         assertNull(store.apiKey)
         assertTrue("an explicit sign-out clears it", fallbackKeys().isEmpty())
@@ -179,7 +179,20 @@ class SecretStorageTest {
     }
 
     @Test
-    fun savedForgesSurviveReopenWithEachTokenAndFeedTheSourceList() {
+    @Test
+    fun openFailureMustNotDeleteExistingSecurePrefsFiles() {
+        val dir = java.io.File(context.applicationInfo.dataDir, "shared_prefs").apply { mkdirs() }
+        val file = java.io.File(dir, "cursor_secure.xml")
+        file.writeText("<map><string name=\"api_key\">keep-me</string></map>")
+        // Opener always fails (simulates Keystore/Tink glitch after an update).
+        val prefs = UiPrefsStore.open(context).also { ui += it }
+        val store = ApiKeyStore(context, prefs) { _, _ -> null }
+        assertFalse(store.secureStorage)
+        assertTrue("prefs file must remain for a later recovery", file.exists())
+        assertTrue(file.readText().contains("keep-me"))
+    }
+
+        fun savedForgesSurviveReopenWithEachTokenAndFeedTheSourceList() {
         val store = open()
         store.saveForges(
             listOf(

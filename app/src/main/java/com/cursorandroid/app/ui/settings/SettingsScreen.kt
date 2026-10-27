@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import com.cursorandroid.app.data.repo.USAGE_WINDOW_DAYS
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +40,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,7 +72,10 @@ import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AppUpdate
 import com.cursorandroid.app.data.repo.MachineMarkState
 import com.cursorandroid.app.data.repo.FeedbackPolicy
+import com.cursorandroid.app.data.api.ApiException
+import com.cursorandroid.app.data.api.CreateAgentResponse
 import com.cursorandroid.app.data.repo.GithubRepos
+import com.cursorandroid.app.data.repo.UserRuleSync
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
@@ -90,6 +96,7 @@ internal enum class SettingsPage(val title: String, val summary: String) {
     Chats("Chats & threads", "Tools, thinking, and model"),
     Notifications("Notifications", "Run alerts and battery"),
     Connections("Connections", "Links, MCP, and forges"),
+    Secrets("Secrets", "Team and environment secrets"),
     Forges("Forges", "Git hosts and tokens"),
     Machines("Machines", "Hide or forget remote machines"),
     Backup("Backup", "Export and import"),
@@ -127,6 +134,7 @@ fun SettingsScreen(
     onSessionChanged: () -> Unit = {},
     onAppearanceChanged: () -> Unit = {},
     openAccountTick: Int = 0,
+    onUserRuleAgent: (CreateAgentResponse, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     SettingsScreenContent(
@@ -137,6 +145,7 @@ fun SettingsScreen(
         onSessionChanged = onSessionChanged,
         onAppearanceChanged = onAppearanceChanged,
         openAccountTick = openAccountTick,
+        onUserRuleAgent = onUserRuleAgent,
         modifier = modifier,
     )
 }
@@ -151,6 +160,7 @@ internal fun SettingsScreenContent(
     onSessionChanged: () -> Unit = {},
     onAppearanceChanged: () -> Unit = {},
     openAccountTick: Int = 0,
+    onUserRuleAgent: (CreateAgentResponse, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     initialPage: SettingsPage = SettingsPage.Home,
 ) {
@@ -192,6 +202,10 @@ internal fun SettingsScreenContent(
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var defaultModel by remember { mutableStateOf(container.store.defaultModel) }
     var showMicrophone by remember { mutableStateOf(container.store.showMicrophone) }
+    var userRuleOpen by remember { mutableStateOf(false) }
+    var userRuleUrl by remember { mutableStateOf("") }
+    var userRuleError by remember { mutableStateOf<String?>(null) }
+    val userRuleScope = rememberCoroutineScope()
     var modelItems by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelMenu by remember { mutableStateOf(false) }
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
@@ -297,9 +311,41 @@ internal fun SettingsScreenContent(
         )
     }
 
+    val snackbar = remember { SnackbarHostState() }
+    if (userRuleOpen) {
+        UserRuleDialog(
+            url = userRuleUrl,
+            onUrl = {
+                userRuleUrl = it
+                userRuleError = null
+            },
+            error = userRuleError,
+            onDismiss = { userRuleOpen = false },
+            onStart = { clone ->
+                val normalized = UserRuleSync.originCloneUrl(clone) ?: return@UserRuleDialog
+                userRuleOpen = false
+                userRuleScope.launch {
+                    userRuleScope.launch { snackbar.showSnackbar("Starting in background") }
+                    try {
+                        val created = container.repo.createUserRuleAgent(normalized)
+                        onUserRuleAgent(created, UserRuleSync.prompt(normalized))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        userRuleError = (e as? ApiException)?.displayMessage()
+                            ?: e.message?.takeIf { it.isNotBlank() }
+                            ?: "Could not start the agent"
+                        userRuleOpen = true
+                        snackbar.showSnackbar(userRuleError ?: "Could not start the agent")
+                    }
+                }
+            },
+        )
+    }
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text(page.title) },
@@ -328,7 +374,12 @@ internal fun SettingsScreenContent(
                 SecureStorageNotice(container.store)
                 when (page) {
                     SettingsPage.Home -> {
-                        SettingsPage.entries.filter { it != SettingsPage.Home && it != SettingsPage.Forges && it != SettingsPage.Machines }.forEach { item ->
+                        SettingsPage.entries.filter {
+                            it != SettingsPage.Home &&
+                                it != SettingsPage.Forges &&
+                                it != SettingsPage.Machines &&
+                                it != SettingsPage.Secrets
+                        }.forEach { item ->
                             SettingsLinkRow(item.title, item.summary) { page = item }
                         }
                     }
@@ -441,6 +492,16 @@ internal fun SettingsScreenContent(
                             onInfo = { info = it },
                             onClick = { modelMenu = true },
                         )
+                        SettingsChoiceRow(
+                            title = "User rule",
+                            summary = "Start an agent on an Origin repo",
+                            info = UserRuleSync.BLOCK,
+                            onInfo = { info = it },
+                            onClick = {
+                                userRuleError = null
+                                userRuleOpen = true
+                            },
+                        )
                     }
                     SettingsPage.Notifications -> {
                         SettingsSwitchRow(
@@ -516,7 +577,7 @@ internal fun SettingsScreenContent(
                                     Icon(Icons.Outlined.Info, contentDescription = "About MCP")
                                 }
                             }
-                            McpListSection(container.store)
+                            McpListSection(container.store, snackbar)
                         }
                         val forgeCount = container.store.forges().size
                         SettingsLinkRow(
@@ -531,6 +592,14 @@ internal fun SettingsScreenContent(
                         )
                         val machinePrefs = container.machines.prefs()
                         val hiddenMachines = machinePrefs.marks.values.count { it.state != MachineMarkState.SHOWN }
+                        SettingsLinkRow(
+                            title = "Secrets",
+                            summary = "Team and environment secrets. Values are never shown.",
+                            onClick = {
+                                under = SettingsPage.Connections
+                                page = SettingsPage.Secrets
+                            },
+                        )
                         SettingsLinkRow(
                             title = "Machines",
                             summary = when {
@@ -547,6 +616,7 @@ internal fun SettingsScreenContent(
                         )
                     }
                     SettingsPage.Forges -> ForgesPage(container)
+                    SettingsPage.Secrets -> SecretsPage(container)
                     SettingsPage.Machines -> MachinesPage(container)
                     SettingsPage.RepoDefaults -> RepoDefaultsPage(container)
                     SettingsPage.Backup -> {

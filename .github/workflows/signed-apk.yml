@@ -1,16 +1,12 @@
 name: signed-apk
 
-# Builds an APK (not an AAB) signed with the release keystore, checks it against the cert of the published
-# release APK, and uploads it as a workflow artifact. Never tags, releases, or publishes anything.
+# Builds an APK (not an AAB) signed with the release keystore, checks it against the pinned
+# Foreverlegion upload/release cert, and uploads it as a workflow artifact. Never tags, releases,
+# or publishes anything.
 # Runs on manual dispatch, or on a push to a Backend/** branch that touches this file (bump the build note below).
-# Build note: every chat message gets a time, filled in between known times.
+# Build note: pin cert fingerprint (GitHub releases were removed; Play-only).
 on:
   workflow_dispatch:
-    inputs:
-      reference_tag:
-        description: Release whose APK cert the new APK must match
-        default: v1.0.28
-        required: false
   push:
     branches:
       - "Backend/**"
@@ -23,7 +19,8 @@ jobs:
     permissions:
       contents: read
     env:
-      REFERENCE_TAG: ${{ inputs.reference_tag || 'v1.0.28' }}
+      # Foreverlegion upload/release signing cert (matches sideload previews and Play upload key).
+      EXPECTED_CERT_SHA256: 578282687fc38ded68edbf8c36f6ba3bed5123ed35e7b4b92c571f3e148e5930
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-android-build
@@ -51,9 +48,7 @@ jobs:
           fi
           ./gradlew --no-daemon :app:assembleRelease
       - id: verify
-        name: Verify signature and compare with the published release
-        env:
-          GH_TOKEN: ${{ github.token }}
+        name: Verify signature against pinned Foreverlegion cert
         run: |
           set -euo pipefail
           tools="$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/* | sort -V | tail -1)"
@@ -67,22 +62,17 @@ jobs:
           "$tools/apksigner" verify --verbose --print-certs "$out" | tee new-certs.txt
           new=$(grep -m1 'certificate SHA-256 digest' new-certs.txt | grep -oE '[0-9a-f]{64}' || true)
 
-          mkdir -p reference
-          gh release download "$REFERENCE_TAG" --pattern app-release.apk --dir reference
-          "$tools/apksigner" verify --print-certs reference/app-release.apk | tee ref-certs.txt
-          ref=$(grep -m1 'certificate SHA-256 digest' ref-certs.txt | grep -oE '[0-9a-f]{64}' || true)
-
           badge=$("$tools/aapt2" dump badging "$out" | head -1)
           {
             echo "### Release-signed APK"
-            echo "- file: \`$out\`"
+            echo "- file: '$out'"
             echo "- $badge"
-            echo "- cert SHA-256: \`$new\`"
-            echo "- $REFERENCE_TAG release APK cert SHA-256: \`$ref\`"
+            echo "- cert SHA-256: '$new'"
+            echo "- expected cert SHA-256: '$EXPECTED_CERT_SHA256'"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ -z "$new" ] || [ "$new" != "$ref" ]; then
-            echo "Signing cert does not match $REFERENCE_TAG"
+          if [ -z "$new" ] || [ "$new" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "Signing cert does not match pinned Foreverlegion fingerprint"
             exit 1
           fi
           echo "file=$out" >> "$GITHUB_OUTPUT"

@@ -1,5 +1,38 @@
+# 1.0.31
+
+- Fixes being signed out / losing your API key after an app update.
+- The agent-working bar and the composer sit on the screen background, so chat text no longer shows through them while you scroll. The bar keeps one height for the whole run.
+- A chat you have scrolled up stays where you left it while the agent streams. At the bottom, the thread follows without jumping back on every token.
+
+# 1.0.30
+
+- Tapping Build on the profile-rule prompt closes it at once. The agent starts in the background, with a short "Starting in background" note. The chat gets one user message for that launch.
+- New agent choices for target and subagent model keep each label on one line. On a narrow screen the row wraps instead of squeezing a label into a vertical stack of letters.
+- Tool calls for the run that is still working sit in one Tool Calls list and follow the chat only when you are already at the bottom.
+- Settings, Chats & threads, User rule starts one agent on an Origin clone URL and asks it to update the account user rule in place. The phone key cannot write that rule itself, and it cannot create the Origin repo.
+
 # 1.0.29
 
+- New agent can open the pull request as the Cursor GitHub App. The switch is sent only after you change it. User keys start off. Service account keys start on.
+- New agent accepts session env vars (max 50, names cannot start with CURSOR_). They cannot be combined with a client agent id. A follow-up can send its own run env vars and model.
+- Run env vars and metadata on create are sent when you set them. If the API rejects one of those fields, the create is retried without it.
+- Photos include width and height when the phone knows them. Image URLs do not invent a size.
+- Chat properties show a dollar cost only when the API sends one.
+- An agent is Active, Idle, or Archived. A finished or failed run stays on the run. Idle with a failed run is not the same as the agent itself failing.
+- Create and follow-up send an Idempotency-Key. If that agent id already exists, the app opens the existing agent.
+- A follow-up that hits a busy agent stays queued. Send immediately still cancels the run, then sends. An archived agent is unarchived once, then the follow-up is sent. A dead run stream is not retried; the app reads the run instead. An expired stream cursor is cleared.
+- A commit SHA is sent as the start ref only on the default branch. It is left out when you commit on the current branch, and it is ignored when a pull request URL is set. Git links add https:// when the API omits it.
+- First launch can build a profile rule. Confirm starts a cloud agent with no repository and no environment, using a fixed setup prompt, then opens that chat. Not now hides it. Remind later asks again next time you open the app.
+- New agent has a No repo target. The create request omits both repos and env.
+- A queued message has Send immediately. That cancels the active run, then sends that message as the next run. Cancel on the queue still drops the message.
+- Attach an image by http or https URL, or as a photo. Up to 5 images. Text files are inlined into the prompt. There is no separate file upload.
+- Saved environments load from your account. A selected environment can be renamed, its environment.json replaced, and its history shown.
+- Settings, Connections, Secrets lists team and environment secrets. Values are never shown. Build secrets cannot be set here. A name with several versions asks which one.
+- New agent has an optional agent id (bc-…) for idempotent create. It cannot be combined with session env vars. A duplicate id is reported.
+- The agent list can filter by a pull request URL. Clear the field to show every chat again.
+- Chat history still loads from the v0 conversation endpoint.
+- MCP: Create MCP sheet for import, next to Import in Settings, Connections, MCP, saves a template `mcp-template.json` to your Downloads folder and offers to open it. The template has an HTTP, an SSE and a stdio example with placeholder values, all switched off, so importing it as it is changes nothing. A second one is saved as `mcp-template (1).json`, never over the first.
+- MCP import reads `"enabled": false` as well as `"disabled": true`.
 - Message times: every message in a chat now shows when it was sent, with day separators. Long-press a message to see the full date.
 - Forges: your saved forges sync their repo lists on start, when you save, on pull-to-refresh, and every 6 hours. Sync status shows in Settings and the Source list.
 - Fixed a crash when importing settings from a backup.
@@ -10,7 +43,61 @@
 - Machines show as status unknown, not offline, when their status can't be loaded.
 - A What's new popup shows these notes after each update.
 
+## Importing MCP servers
+
+Steps:
+
+1. Get an `mcp.json` onto the phone, or have its text ready to paste. It uses the same format as `~/.cursor/mcp.json` and `.cursor/mcp.json` on a PC. To start from a template, open Settings, Connections, MCP and tap Create MCP sheet for import. That saves `mcp-template.json` to your Downloads folder, and the message at the bottom has an Open button.
+2. In Settings, Connections, MCP, tap Import, then From mcp.json.
+3. Tap Choose file (or paste the text), then Preview. Tick the servers you want and tap Import.
+
+The format:
+
+```json
+{
+  "mcpServers": {
+    "example-http": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" },
+      "enabled": false
+    },
+    "example-sse": {
+      "type": "sse",
+      "url": "https://example.com/sse",
+      "enabled": false
+    },
+    "example-stdio": {
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server"],
+      "env": { "API_KEY": "YOUR_TOKEN_HERE" },
+      "enabled": false
+    }
+  }
+}
+```
+
+Fields:
+
+- `mcpServers` (required): a map from server name to its settings. The name is the key. It must not be empty, and names are matched case-insensitively. A top-level `servers` map, or a bare map of servers, is accepted too.
+- HTTP server: `url` is required and must start with `https://`. `headers` is optional. `type` is optional (`"http"` is assumed when there is a `url`).
+- SSE server: `type` must be `"sse"`, and `url` is required. Cursor says SSE is not supported for cloud agents, so the importer flags it.
+- Stdio server: `command` is required. `args` (a list of strings) and `env` (a map of strings) are optional. It runs inside the cloud VM. `type` is optional (`"stdio"` is assumed when there is a `command` and no `url`).
+- `enabled`: optional. `false` imports the server switched off. Without it the server is on, and on for every new agent. `"disabled": true` means the same and is the only form version 1.0.28 reads.
+- `auth`: optional OAuth client for HTTP and SSE servers: `CLIENT_ID` (required), `CLIENT_SECRET`, `scopes`.
+- Header, env and `args` values are used exactly as written. `${VAR}` placeholders are not expanded.
+
+Secrets and headers:
+
+- Header values, env values and OAuth client secrets are stored encrypted on the phone. A header whose value is only `Bearer` (no token) is never sent.
+- Enabled servers, with their headers and env, are sent to Cursor when you start a new agent, because that is how Cursor's API takes MCP servers. Nothing else leaves the phone, and there is no tracking.
+- If a name is already saved, the importer leaves it unchecked and asks before replacing it. A replaced server keeps its saved header, env and OAuth values wherever the file leaves them empty.
+- Export writes the same format with header and env values and client secrets left empty. Turn on Include secrets only for a file you will keep private, because it is plain text.
+- OAuth-only servers (for example GitLab, Slack, Sentry) are connected at cursor.com/agents, MCP Servers. This app cannot finish that sign-in.
+- A phone holds at most 50 servers.
+- The template's three servers are placeholders and are all switched off. Importing it as it is saves three disabled entries and nothing is sent to an agent. Replace the `example.com` URLs and `YOUR_TOKEN_HERE` values, and remove `"enabled": false`, to use one.
+
 ---
+
 
 # 1.0.28
 

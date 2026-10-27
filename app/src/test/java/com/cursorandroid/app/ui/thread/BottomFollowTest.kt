@@ -52,7 +52,7 @@ class BottomFollowTest {
             val f = rememberBottomFollow("agent", state)
             listState = state
             follow = f
-            BottomFollowEffects(f, lines)
+            BottomFollowEffects(f)
             Box(Modifier.fillMaxWidth().height(400.dp).testTag("list")) {
                 LazyColumn(state = state, reverseLayout = true, modifier = Modifier.fillMaxSize()) {
                     item(key = "tail") {
@@ -97,6 +97,8 @@ class BottomFollowTest {
         assertTrue(follow.stickToBottom)
         assertEquals(0, listState.firstVisibleItemIndex)
         assertEquals(0, listState.firstVisibleItemScrollOffset)
+        assertTrue("older rows sit under the header", listState.canScrollForward)
+        assertFalse(listState.canScrollBackward)
         val lastTop = top("tail-39")
         assertTrue("newest line is on screen, top=$lastTop", lastTop >= 0f && lastTop < 400f)
     }
@@ -126,6 +128,49 @@ class BottomFollowTest {
         stream(15)
         assertFalse(follow.stickToBottom)
         assertEquals(anchor, top("h-${(visible.key as String).drop(1)}"), 1f)
+    }
+
+    @Test
+    fun scrolledUpHistoryStaysPutWhenALowerReplyGrows() {
+        var replyLines by mutableIntStateOf(2)
+        compose.setContent {
+            val state = remember { LazyListState() }
+            val f = rememberBottomFollow("agent", state)
+            listState = state
+            follow = f
+            BottomFollowEffects(f)
+            Box(Modifier.fillMaxWidth().height(400.dp).testTag("list")) {
+                LazyColumn(state = state, reverseLayout = true, modifier = Modifier.fillMaxSize()) {
+                    item(key = "tail") {
+                        Text("tail", Modifier.height(40.dp))
+                    }
+                    item(key = "reply") {
+                        Column {
+                            repeat(replyLines) { i ->
+                                Text("reply $i", Modifier.height(28.dp).testTag("reply-$i"))
+                            }
+                        }
+                    }
+                    items((0 until 40).toList(), key = { "h$it" }) { i ->
+                        Text("history $i", Modifier.height(60.dp).testTag("h-$i"))
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        userScrollsUp()
+        userScrollsUp()
+        assertFalse(follow.stickToBottom)
+        assertTrue(listState.firstVisibleItemIndex > 1)
+        val visible = listState.layoutInfo.visibleItemsInfo.first { (it.key as String).startsWith("h") }
+        val tag = "h-${(visible.key as String).drop(1)}"
+        val anchor = top(tag)
+        repeat(8) {
+            compose.runOnIdle { replyLines += 1 }
+            compose.waitForIdle()
+        }
+        assertFalse(follow.stickToBottom)
+        assertEquals(anchor, top(tag), 1f)
     }
 
     @Test

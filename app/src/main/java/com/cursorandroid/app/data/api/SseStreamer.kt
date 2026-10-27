@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,8 +33,10 @@ sealed class StreamEvent {
         val status: String?,
         val text: String?,
         override val eventId: String? = null,
+        val git: GitState? = null,
     ) : StreamEvent()
     data class StreamError(val message: String, val recoverable: Boolean = false) : StreamEvent()
+    data class Retention(val seconds: Long) : StreamEvent()
     data object Done : StreamEvent()
 }
 
@@ -61,6 +64,11 @@ class SseStreamer(
                 .build()
 
             val listener = object : EventSourceListener() {
+                override fun onOpen(eventSource: EventSource, response: Response) {
+                    val seconds = parseRetentionSeconds(response.header("X-Cursor-Stream-Retention-Seconds"))
+                    if (seconds != null) trySend(StreamEvent.Retention(seconds))
+                }
+
                 override fun onEvent(
                     eventSource: EventSource,
                     id: String?,
@@ -82,7 +90,9 @@ class SseStreamer(
                     val parsed = ApiException.fromBody(code ?: 0, body.ifBlank { t?.message.orEmpty() }, response?.header("Retry-After"))
                     val recoverable = code == 410 || parsed.isStreamGone ||
                         (t?.message?.contains("no longer available", ignoreCase = true) == true)
+                    val invalidCursor = parsed.isInvalidLastEvent
                     val message = when {
+                        invalidCursor -> "invalid_last_event_id"
                         recoverable -> "stream_expired"
                         t != null && isCancel(t) -> "stream_canceled"
                         t != null -> t.message ?: "stream failed"
@@ -126,12 +136,21 @@ class SseStreamer(
                 status = obj.string("status"),
                 text = obj.string("text"),
                 eventId = id,
+                git = obj?.get("git")?.let {
+                    runCatching { json.decodeFromJsonElement(GitState.serializer(), it) }.getOrNull()
+                },
             )
             "error" -> {
-                val message = obj.string("message") ?: "stream error"
-                val recoverable = message.contains("no longer available", ignoreCase = true) ||
-                    message.contains("stream_expired", ignoreCase = true)
-                StreamEvent.StreamError(message, recoverable)
+                val code = obj.string("code")
+                val message = obj.string("message") ?: code ?: "stream error"
+                if (code == "invalid_last_event_id") {
+                    StreamEvent.StreamError("invalid_last_event_id", recoverable = false)
+                } else {
+                    val recoverable = code == "stream_expired" ||
+                        message.contains("no longer available", ignoreCase = true) ||
+                        message.contains("stream_expired", ignoreCase = true)
+                    StreamEvent.StreamError(message, recoverable)
+                }
             }
             "done" -> StreamEvent.Done
             "heartbeat", "interaction_update" -> null

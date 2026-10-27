@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,7 +44,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.FormatQuote
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -53,6 +53,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -66,6 +67,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -80,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -111,7 +114,12 @@ import com.cursorandroid.app.data.api.ModelSelection
 import com.cursorandroid.app.data.api.Prompt
 import com.cursorandroid.app.data.api.Run
 import com.cursorandroid.app.data.api.StreamEvent
+import com.cursorandroid.app.data.api.costLine
+import com.cursorandroid.app.data.api.envVarMap
 import com.cursorandroid.app.data.api.gitPath
+import com.cursorandroid.app.data.api.normalizeRepoUrl
+import com.cursorandroid.app.data.api.queueInsteadOfFail
+import com.cursorandroid.app.data.api.retainEventId
 import com.cursorandroid.app.data.api.isActive
 import com.cursorandroid.app.data.api.isCloudEnvType
 import com.cursorandroid.app.data.api.isLiveStatus
@@ -143,7 +151,9 @@ import com.cursorandroid.app.data.repo.AttachItem
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.ChatDraft
+import com.cursorandroid.app.data.repo.withoutStaleStartupNotice
 import com.cursorandroid.app.data.repo.ChatShare
+import com.cursorandroid.app.data.repo.ImmediateSend
 import com.cursorandroid.app.data.repo.QueuedItem
 import com.cursorandroid.app.data.repo.QueueProbe
 import com.cursorandroid.app.data.repo.applyQueuedFlags
@@ -164,6 +174,11 @@ import com.cursorandroid.app.ui.status.foreground
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.repoNameOnly
 import com.cursorandroid.app.ui.status.shortRepo
+import com.cursorandroid.app.ui.status.agentLifecycleLabel
+import com.cursorandroid.app.ui.status.runStatusLabel
+import com.cursorandroid.app.ui.status.threadStatusLine
+import com.cursorandroid.app.data.api.dollarLine
+import com.cursorandroid.app.ui.composeAgent.EnvVarFields
 import com.cursorandroid.app.ui.status.threadSubtitle
 import com.cursorandroid.app.ui.status.toolCallParts
 import com.cursorandroid.app.ui.status.toolCallText
@@ -460,6 +475,7 @@ class ThreadViewModel(
         appContext: android.content.Context,
         attaches: List<AttachItem> = emptyList(),
         caption: String = "",
+        envVars: Map<String, String>? = null,
     ) {
         val shown = label.ifBlank { prompt.text }.trim()
         if (shown.isEmpty() && prompt.images.isNullOrEmpty()) return
@@ -473,7 +489,16 @@ class ThreadViewModel(
             queued = run?.isActive() == true || outbound.isNotEmpty(),
             thumbs = thumbs,
         )
-        outbound.add(QueuedOutbound(localId, prompt, attaches, caption, at = System.currentTimeMillis()))
+        outbound.add(
+            QueuedOutbound(
+                localId,
+                prompt,
+                attaches,
+                caption,
+                at = System.currentTimeMillis(),
+                envVars = envVars?.takeIf { it.isNotEmpty() },
+            ),
+        )
         persistQueue()
         viewModelScope.launch {
             if (run?.isActive() == true) {
@@ -492,10 +517,39 @@ class ThreadViewModel(
         }
     }
 
+    // Unadvertised probe. The public API has no mid-run steer; a miss leaves the message queued.
     private suspend fun trySteer(item: QueuedOutbound): Boolean {
         val runId = run?.id ?: return false
         if (run?.isActive() != true) return false
         return runCatching { container.repo.steer(agentId, runId, outboundPrompt(item)) }.getOrDefault(false)
+    }
+
+    fun sendImmediately(id: String) {
+        if (busy || id == sendingId) return
+        val order = ImmediateSend.promote(outbound.map { it.id }, id) ?: return
+        val byId = outbound.associateBy { it.id }
+        outbound.clear()
+        order.forEach { key -> byId[key]?.let { outbound.add(it) } }
+        persistQueue()
+        val next = outbound.firstOrNull() ?: return
+        val cancelId = when {
+            run?.isActive() == true -> run?.id
+            agent?.isWorking() == true -> agent?.latestRunId ?: run?.id
+            else -> null
+        }
+        busy = true
+        viewModelScope.launch {
+            try {
+                if (cancelId != null) {
+                    streamJob?.cancel()
+                    pollJob?.cancel()
+                    streaming = false
+                }
+                deliverOutbound(next, cancelId, held = true)
+            } finally {
+                if (sendingId == null) busy = false
+            }
+        }
     }
 
     fun cancelQueued(id: String) {
@@ -593,7 +647,7 @@ class ThreadViewModel(
             ?: git?.repoUrl
             ?: meta.repoUrl
             ?: return
-        val fullRepo = if (repoUrl.startsWith("http")) repoUrl else "https://$repoUrl"
+        val fullRepo = normalizeRepoUrl(repoUrl) ?: return
         val requested = detail.repos?.firstOrNull()?.startingRef
         val baseBranch = meta.baseBranch
             ?: requested?.takeUnless { looksLikeGitSha(it) }
@@ -645,6 +699,11 @@ class ThreadViewModel(
         if (busy) return
         val next = outbound.firstOrNull() ?: return
         if (run?.isActive() == true) return
+        deliverOutbound(next, cancelRunId = null, held = false)
+    }
+
+    private suspend fun deliverOutbound(next: QueuedOutbound, cancelRunId: String?, held: Boolean) {
+        if (busy && !held) return
         busy = true
         sendingId = next.id
         lines = lines.map { line ->
@@ -656,12 +715,26 @@ class ThreadViewModel(
             val sent = followModel.takeIf { it.isNotBlank() }?.let {
                 ModelSelection(it, followParams.takeIf { params -> params.isNotEmpty() })
             }
-            val created = container.repo.followUp(
-                agentId,
-                outboundPrompt(next),
-                mode = followMode.takeIf { it.isNotBlank() },
-                model = sent,
-            )
+            val created = if (cancelRunId != null) {
+                container.repo.sendQueuedNow(
+                    agentId,
+                    cancelRunId,
+                    outboundPrompt(next),
+                    mode = followMode.takeIf { it.isNotBlank() },
+                    model = sent,
+                    envVars = next.envVars,
+                    idempotencyKey = next.id,
+                )
+            } else {
+                container.repo.followUp(
+                    agentId,
+                    outboundPrompt(next),
+                    mode = followMode.takeIf { it.isNotBlank() },
+                    model = sent,
+                    envVars = next.envVars,
+                    idempotencyKey = next.id,
+                )
+            }
             outbound.removeAll { it.id == next.id }
             persistQueue()
             Attachments.forget(next.attaches)
@@ -687,9 +760,15 @@ class ThreadViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (e is ApiException && e.isBusy) {
+            if (e is ApiException && queueInsteadOfFail(e)) {
                 error = null
                 markUsersQueued()
+            } else if (e is ApiException && e.isArchivedAgent) {
+                error = e.displayMessage()
+                lines = lines.map { line ->
+                    if (line.id == next.id) line.copy(queued = true) else line
+                }
+                persist()
             } else {
                 lines = lines.map { line ->
                     if (line.id == next.id) line.copy(queued = true) else line
@@ -936,7 +1015,14 @@ class ThreadViewModel(
         if (pollJob?.isActive != true || run?.id != runId) startPoll(runId)
     }
 
+    private var streamStoppedFor: String? = null
+
     private fun startStream(runId: String, replay: Boolean) {
+        if (streamStoppedFor == runId) {
+            streaming = false
+            receiving = false
+            return
+        }
         streamJob?.cancel()
         if (replay || streamedRunId != runId) {
             assistantBuf = StringBuilder()
@@ -961,7 +1047,7 @@ class ThreadViewModel(
                     }
                 }
                 .collect { event ->
-                    event.eventId?.let { lastEventId = it }
+                    lastEventId = retainEventId(lastEventId, event.eventId)
                     when (event) {
                         is StreamEvent.Assistant -> {
                             receiving = true
@@ -1006,13 +1092,25 @@ class ThreadViewModel(
                             }
                             streaming = false
                             receiving = false
-                            container.notifier.notifyIfNeeded(agentId, agent?.name, runId, event.status, event.text)
+                            container.notifier.notifyIfNeeded(
+                                agentId,
+                                agent?.name,
+                                runId,
+                                event.status,
+                                event.text,
+                                event.git?.branches?.firstOrNull()?.prUrl,
+                            )
                             run?.let { ended -> viewModelScope.launch { settleRun(ended) } }
                             refreshArtifacts()
                             flushOutbound()
                         }
+                        is StreamEvent.Retention -> Unit
                         is StreamEvent.StreamError -> {
-                            if (event.recoverable || event.message == "stream_expired") {
+                            if (event.message == "invalid_last_event_id") {
+                                lastEventId = null
+                                error = "Stream position was rejected. Refreshing the run."
+                                handleStreamGone(runId)
+                            } else if (event.recoverable || event.message == "stream_expired") {
                                 handleStreamGone(runId)
                             } else if (event.message != "stream_canceled") {
                                 error = if (container.session.expired()) null else event.message
@@ -1086,7 +1184,14 @@ class ThreadViewModel(
         }
         if (latest.isTerminal()) {
             settleRun(latest)
-            container.notifier.notifyIfNeeded(agentId, agent?.name, latest.id, latest.status, latest.result)
+            container.notifier.notifyIfNeeded(
+                agentId,
+                agent?.name,
+                latest.id,
+                latest.status,
+                latest.result,
+                latest.git?.branches?.firstOrNull()?.prUrl,
+            )
         }
         return true
     }
@@ -1128,6 +1233,8 @@ class ThreadViewModel(
     }
 
     private suspend fun handleStreamGone(runId: String) {
+        streamStoppedFor = runId
+        streamJob?.cancel()
         val latest = runCatching { container.repo.getRun(agentId, runId) }.getOrNull()
         if (latest != null) {
             run = latest
@@ -1135,14 +1242,13 @@ class ThreadViewModel(
                 upsert("assistant-$runId", "assistant", latest.result, runId)
             }
             if (latest.isActive()) {
-                startStream(runId, replay = lastEventId == null)
-                return
+                if (pollJob?.isActive != true) startPoll(runId)
+            } else {
+                viewModelScope.launch { settleRun(latest) }
             }
-            viewModelScope.launch { settleRun(latest) }
         }
         streaming = false
         receiving = false
-        error = null
         flushOutbound()
     }
 
@@ -1233,6 +1339,7 @@ data class QueuedOutbound(
     val attaches: List<AttachItem> = emptyList(),
     val caption: String = "",
     val at: Long = 0L,
+    val envVars: Map<String, String>? = null,
 )
 
 class ThreadVmFactory(
@@ -1272,6 +1379,8 @@ fun ThreadScreen(
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var draftReady by remember { mutableStateOf(false) }
     var modelMenu by remember { mutableStateOf(false) }
+    var showFollowEnv by remember { mutableStateOf(false) }
+    var followEnv by remember { mutableStateOf(listOf("" to "")) }
     val listState = remember(agentId) { LazyListState() }
     val context = LocalContext.current
     val pendingPr = vm.pendingPrUrl
@@ -1306,7 +1415,7 @@ fun ThreadScreen(
         ?: repoNameOnly(container.catalog.gitSnaps()[agentId]?.repoUrl)
         ?: repoNameOnly(vm.agent?.repos?.firstOrNull()?.url)
         ?: vm.agent?.env?.name?.takeIf { it.isNotBlank() }
-    val subtitle = threadSubtitle(repoLabel, indicator)
+    val subtitle = threadSubtitle(repoLabel, threadStatusLine(agentStatus, vm.run?.status, indicator))
     val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
     val activity = workActivityLine(
         receiving = vm.receiving,
@@ -1325,13 +1434,6 @@ fun ThreadScreen(
     val use24h = remember(context) { DateFormat.is24HourFormat(context) }
     val runSpans = vm.runSpans
     val lineTimes = remember(shownLines, runSpans) { resolveLineTimes(shownLines, runSpans) }
-    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone) {
-        withDaySeparators(
-            groupChatRows(shownLines, showTools, showThinking),
-            timeOf = { lineTimes[it.id] },
-            zone = zone,
-        )
-    }
     val runHints = vm.runHints
     val lineHints = remember(shownLines, runHints) { lineModelHints(shownLines, runHints) }
     val workingModel = runModelLabel(
@@ -1345,8 +1447,25 @@ fun ThreadScreen(
     val liveThink = remember(shownLines, currentRunId, working) {
         liveThinkingLine(shownLines, currentRunId, working)
     }
+    val liveTools = remember(shownLines, currentRunId, working, showTools) {
+        if (showTools) liveToolLines(shownLines, currentRunId, working) else emptyList()
+    }
+    val rows = remember(shownLines, showTools, showThinking, lineTimes, zone, liveThink?.id, liveTools) {
+        withDaySeparators(
+            groupChatRows(
+                shownLines,
+                showTools,
+                showThinking,
+                liveThink?.id,
+                liveTools.map { it.id }.toSet(),
+            ),
+            timeOf = { lineTimes[it.id] },
+            zone = zone,
+        )
+    }
     val showLiveThink = showThinking && liveThink != null
-    val showTyping = working && !showLiveThink
+    val showLiveTools = liveTools.isNotEmpty()
+    val showTyping = working && !showLiveThink && !showLiveTools
     val waitText = if (showTyping) {
         waitCopy(
             receiving = vm.receiving,
@@ -1386,11 +1505,13 @@ fun ThreadScreen(
         showMicrophone = container.store.showMicrophone
         muted = container.chats.isMuted(agentId)
         favorite = container.chats.isFavorite(agentId)
+        container.notices.markAgentRead(agentId)
         vm.refresh()
     }
 
     DisposableEffect(agentId) {
         VisibleAgent.set(agentId)
+        container.notices.markAgentRead(agentId)
         onDispose { VisibleAgent.set(null) }
     }
 
@@ -1425,8 +1546,7 @@ fun ThreadScreen(
     }
 
     val follow = rememberBottomFollow(agentId, listState)
-    val growKey = threadScrollKey(rows, liveThink, showTyping)
-    BottomFollowEffects(follow, listOf(agentId, rows.size, showTyping, vm.pinnedArtifact != null, growKey))
+    BottomFollowEffects(follow)
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.snack) {
@@ -1437,12 +1557,27 @@ fun ThreadScreen(
         )
     }
 
+    var headerCoversContent by remember(listState) { mutableStateOf(false) }
+    var footerCoversContent by remember(listState) { mutableStateOf(false) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.canScrollForward to listState.canScrollBackward }
+            .collect { (towardOlder, towardNewer) ->
+                headerCoversContent = towardOlder
+                footerCoversContent = towardNewer
+            }
+    }
+
     Scaffold(
         modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = AppInsets.bars,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background,
+                ),
                 title = {
                     Column {
                         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
@@ -1550,10 +1685,16 @@ fun ThreadScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .scaffoldBars(padding),
         ) {
             if (working) {
-                WorkingBar(activity, workingModel, onStop = if (canKill) ({ vm.cancel() }) else null)
+                WorkingBar(
+                    activity,
+                    workingModel,
+                    onStop = if (canKill) ({ vm.cancel() }) else null,
+                    lifted = headerCoversContent,
+                )
             }
             RefreshPausedNote(vm.pausedUntilMs)
             if (vm.error != null) {
@@ -1576,11 +1717,21 @@ fun ThreadScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp, Alignment.Top),
+                    verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp),
                 ) {
-                    if (liveThink != null && showThinking) {
+                    if (showLiveTools || (liveThink != null && showThinking)) {
                         item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
-                            ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
+                            Column(verticalArrangement = Arrangement.spacedBy(LocalAppearance.current.rowGap.dp)) {
+                                if (showLiveTools) {
+                                    ToolCallsBlock(
+                                        tools = liveTools,
+                                        onCopy = { text -> copyMessage(context, text) },
+                                    )
+                                }
+                                if (liveThink != null && showThinking) {
+                                    ThinkingBlock(liveThink, onCopy = { text -> copyMessage(context, text) })
+                                }
+                            }
                         }
                     } else if (showTyping) {
                         item(key = LIVE_TAIL_KEY, contentType = "live-tail") {
@@ -1629,6 +1780,11 @@ fun ThreadScreen(
                                 } else {
                                     null
                                 },
+                                onSendNow = if (lineShowsQueued(row.line)) {
+                                    { vm.sendImmediately(row.line.id) }
+                                } else {
+                                    null
+                                },
                             )
                             is ChatRow.Tools -> ToolCallsBlock(
                                 tools = row.tools,
@@ -1659,6 +1815,20 @@ fun ThreadScreen(
                     }
                 }
             }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+            HorizontalDivider(
+                thickness = 1.dp,
+                color = if (footerCoversContent) {
+                    MaterialTheme.colorScheme.outlineVariant
+                } else {
+                    Color.Transparent
+                },
+            )
             AttachChips(items = attaches, onItems = { attaches = it })
             Row(
                 modifier = Modifier
@@ -1676,6 +1846,11 @@ fun ThreadScreen(
                     selected = vm.followMode == "plan",
                     onClick = { vm.followMode = "plan" },
                     label = { Text("Plan") },
+                )
+                FilterChip(
+                    selected = showFollowEnv || envVarMap(followEnv).isNotEmpty(),
+                    onClick = { showFollowEnv = !showFollowEnv },
+                    label = { Text("Run env") },
                 )
                 val modelLabel = models.firstOrNull { it.id == vm.followModel }?.displayName
                     ?: vm.followModel.ifBlank { "Model" }
@@ -1722,6 +1897,16 @@ fun ThreadScreen(
                 onParams = { vm.followParams = it },
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
+            if (showFollowEnv) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EnvVarFields(
+                        title = "Run env vars",
+                        hint = "Sent on the next run. Max 50. Names cannot start with CURSOR_.",
+                        rows = followEnv,
+                        onRows = { followEnv = it },
+                    )
+                }
+            }
             Row(
                 modifier = Modifier
                     .testTag("chat-composer")
@@ -1764,6 +1949,7 @@ fun ThreadScreen(
                                 context.applicationContext,
                                 ready,
                                 caption = draft,
+                                envVars = envVarMap(followEnv),
                             )
                             draft = ""
                             attaches = emptyList()
@@ -1783,6 +1969,7 @@ fun ThreadScreen(
                 ) {
                     Text("Send", fontWeight = FontWeight.SemiBold)
                 }
+            }
             }
         }
     }
@@ -1831,12 +2018,16 @@ fun ThreadScreen(
             .ifBlank { null }
         ChatPropertiesDialog(
             title = title,
-            status = agentStatus ?: vm.run?.status,
+            agentStatus = agentLifecycleLabel(agentStatus),
+            runStatus = runStatusLabel(vm.run?.status),
+            runError = vm.run?.takeIf { it.status.equals("ERROR", true) || it.status.equals("EXPIRED", true) }
+                ?.let { it.error?.takeIf { text -> text.isNotBlank() } ?: it.result },
             env = env,
             branch = git?.branch ?: cached?.branch,
-            repoUrl = git?.repoUrl ?: cached?.repoUrl,
+            repoUrl = normalizeRepoUrl(git?.repoUrl ?: cached?.repoUrl),
             prUrl = git?.prUrl ?: cached?.prUrl,
             tokens = vm.usage?.totalUsage?.totalTokens,
+            cost = vm.usage?.costLine(vm.run?.id) ?: vm.run?.cost?.dollarLine(),
             onOpenUrl = { url ->
                 SafeLinks.open(context, url)
             },
@@ -1907,6 +2098,7 @@ internal fun threadScrollKey(
     rows: List<ChatRow>,
     liveThink: TranscriptLine? = null,
     showTyping: Boolean = false,
+    liveTools: List<TranscriptLine> = emptyList(),
 ): String {
     val last = when (val row = rows.lastOrNull()) {
         is ChatRow.Message -> "${row.line.id}:${row.line.text.length}"
@@ -1918,7 +2110,8 @@ internal fun threadScrollKey(
     val tools = rows.filterIsInstance<ChatRow.Tools>().lastOrNull()
         ?.let { "${it.id}:${it.tools.size}" }
         .orEmpty()
-    return "$last|$think|$tools|${rows.size}|$showTyping"
+    val live = liveTools.joinToString(",") { "${it.id}:${it.text.length}" }
+    return "$last|$think|$tools|$live|${rows.size}|$showTyping"
 }
 
 internal fun liveThinkingLine(
@@ -1937,37 +2130,55 @@ internal fun liveThinkingLine(
     return think?.takeIf { it.text.isNotBlank() }
 }
 
+/** Tool calls for the run that is still working. They sit in the live tail, with the same follow rules as thinking. */
+internal fun liveToolLines(
+    lines: List<TranscriptLine>,
+    runId: String?,
+    working: Boolean,
+): List<TranscriptLine> {
+    if (!working || runId.isNullOrBlank()) return emptyList()
+    return lines.filter { it.kind == "tool" && it.runId == runId && it.text.isNotBlank() }
+}
+
 internal fun groupChatRows(
     lines: List<TranscriptLine>,
     showTools: Boolean,
     showThinking: Boolean,
+    liveThinkId: String? = null,
+    liveToolIds: Set<String> = emptySet(),
 ): List<ChatRow> {
-    val rows = ArrayList<ChatRow>(lines.size)
-    val pendingTools = ArrayList<TranscriptLine>()
+    val source = lines.withoutStaleStartupNotice()
+    val rows = ArrayList<ChatRow>(source.size)
+    val turnTools = ArrayList<TranscriptLine>()
+    var toolAt = -1
 
-    fun flushTools() {
-        if (pendingTools.isEmpty()) return
-        if (showTools) {
-            rows += ChatRow.Tools(pendingTools.first().id, pendingTools.toList())
-        }
-        pendingTools.clear()
+    fun placeTools() {
+        if (turnTools.isEmpty()) return
+        val at = toolAt.coerceIn(0, rows.size)
+        rows.add(at, ChatRow.Tools(turnTools.first().id, turnTools.toList()))
+        turnTools.clear()
+        toolAt = -1
     }
 
-    for (line in lines) {
+    for (line in source) {
         when (line.kind) {
-            "tool" -> if (showTools) pendingTools += line
-            "thinking" -> flushTools()
-            "assistant", "user", "notice" -> {
-                flushTools()
-                rows += ChatRow.Message(line)
+            "tool" -> if (showTools && line.id !in liveToolIds) {
+                if (turnTools.isEmpty()) toolAt = rows.size
+                turnTools.add(line)
             }
-            else -> {
-                flushTools()
-                rows += ChatRow.Message(line)
+            "user" -> {
+                placeTools()
+                rows.add(ChatRow.Message(line))
             }
+            "thinking" -> {
+                if (showThinking && line.id != liveThinkId && line.text.isNotBlank()) {
+                    rows.add(ChatRow.Message(line))
+                }
+            }
+            else -> rows.add(ChatRow.Message(line))
         }
     }
-    flushTools()
+    placeTools()
     return rows
 }
 
@@ -1980,6 +2191,7 @@ internal fun TranscriptBubble(
     onQuote: (String) -> Unit = {},
     onEditQueued: (() -> Unit)? = null,
     onCancelQueued: (() -> Unit)? = null,
+    onSendNow: (() -> Unit)? = null,
     timeMs: Long? = null,
     zone: ZoneId = ZoneId.systemDefault(),
     use24h: Boolean = false,
@@ -2097,11 +2309,14 @@ internal fun TranscriptBubble(
                     ),
             )
         }
-        if (onEditQueued != null || onCancelQueued != null) {
+        if (onEditQueued != null || onCancelQueued != null || onSendNow != null) {
             Row(
                 modifier = Modifier.padding(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                if (onSendNow != null) {
+                    TextButton(onClick = onSendNow) { Text("Send immediately") }
+                }
                 if (onEditQueued != null) {
                     TextButton(onClick = onEditQueued) { Text("Edit") }
                 }
@@ -2240,105 +2455,139 @@ private fun ThinkingBlock(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ToolCallsBlock(
+internal fun ToolCallsBlock(
     tools: List<TranscriptLine>,
     onCopy: (String) -> Unit = {},
 ) {
-    var menu by remember(tools.firstOrNull()?.id ?: "tools") { mutableStateOf(false) }
+    val anchor = tools.firstOrNull()?.id ?: "tools"
+    var open by remember(anchor) { mutableStateOf(false) }
+    var menu by remember(anchor) { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val copyText = tools.joinToString("\n") { it.text }.trim()
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        tools.forEach { tool ->
-            val (name, path) = toolCallParts(tool.text)
-            Box {
-                Row(
-                    modifier = Modifier
-                        .widthIn(max = 520.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(PlayColors.Card)
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                if (copyText.isBlank()) return@combinedClickable
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                menu = true
-                            },
-                        )
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Settings,
-                        contentDescription = null,
-                        tint = PlayColors.Muted,
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .widthIn(max = 520.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .combinedClickable(
+                        onClick = { open = !open },
+                        onLongClick = {
+                            if (copyText.isBlank()) return@combinedClickable
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu = true
+                        },
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.bodyMedium, color = Color.White)
-                        if (!path.isNullOrBlank()) {
-                            Text(
-                                path,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = PlayColors.Muted,
-                            )
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("tool-calls"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Tool Calls",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (open) {
+                        Column(
+                            modifier = Modifier.padding(top = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            tools.forEach { tool ->
+                                val (name, path) = toolCallParts(tool.text)
+                                Column {
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    if (!path.isNullOrBlank()) {
+                                        Text(
+                                            path,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+                Icon(
+                    imageVector = if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (open) "Collapse tool calls" else "Expand tool calls",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+            MessageClipMenu(
+                expanded = menu,
+                onDismiss = { menu = false },
+                copyText = copyText,
+                quoteText = null,
+                onCopy = onCopy,
+                onQuote = {},
+            )
         }
-        MessageClipMenu(
-            expanded = menu,
-            onDismiss = { menu = false },
-            copyText = copyText,
-            quoteText = null,
-            onCopy = onCopy,
-            onQuote = {},
-        )
     }
 }
 
 @Composable
-internal fun WorkingBar(text: String, model: String? = null, onStop: (() -> Unit)? = null) {
-    Row(
+internal fun WorkingBar(
+    text: String,
+    model: String? = null,
+    onStop: (() -> Unit)? = null,
+    lifted: Boolean = false,
+) {
+    Column(
         modifier = Modifier
-            .padding(horizontal = 12.dp, vertical = 8.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(PlayColors.Card)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .zIndex(1f)
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("working-bar"),
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(PlayColors.Teal),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text,
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(PlayColors.Teal),
             )
-            if (!model.isNullOrBlank()) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    model,
+                    text,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    model?.takeIf { it.isNotBlank() } ?: "\u00a0",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (onStop != null) {
+                TextButton(onClick = onStop, modifier = Modifier.testTag("stop-run")) { Text("Stop") }
+            }
         }
-        if (onStop != null) {
-            TextButton(onClick = onStop, modifier = Modifier.testTag("stop-run")) { Text("Stop") }
-        }
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = if (lifted) MaterialTheme.colorScheme.outlineVariant else Color.Transparent,
+        )
     }
 }
 

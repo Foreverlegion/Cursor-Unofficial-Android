@@ -72,8 +72,10 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.ui.status.PlayColors
 import com.cursorandroid.app.ui.status.StatusPill
 import com.cursorandroid.app.ui.status.agentCardSubtitle
+import com.cursorandroid.app.ui.status.agentLifecycleLabel
 import com.cursorandroid.app.ui.status.relativeAge
 import com.cursorandroid.app.ui.status.runIndicator
+import com.cursorandroid.app.ui.status.runStatusLabel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -171,6 +173,7 @@ fun InboxScreen(
     var git by remember { mutableStateOf(loadGit()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
+    var prUrlFilter by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
     var workingOnly by remember { mutableStateOf(container.chats.inboxWorkingOnly) }
@@ -216,7 +219,7 @@ fun InboxScreen(
             if (showSpinner) refreshing = true
             error = null
             try {
-                val page = container.repo.listAgentsPage(includeArchived = true)
+                val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
                 ensureActive()
                 val incoming = container.repo.hydrateStatuses(page.entries())
                 var latest = mergeInboxAgents(items, incoming)
@@ -239,14 +242,14 @@ fun InboxScreen(
                 var cursor = page.nextCursor
                 while (!cursor.isNullOrBlank()) {
                     ensureActive()
-                    val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor)
+                    val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
                     if (more.entries().isEmpty()) break
                     latest = mergeInboxAgents(latest, more.entries())
                     applyAgents(latest, more.nextCursor, watch = false)
                     cursor = more.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
                 }
                 val marked = runCatching {
-                    val active = container.repo.listAllAgents(includeArchived = false)
+                    val active = container.repo.listAllAgents(includeArchived = false, prUrl = prUrlFilter)
                     markCloudArchived(latest, active.entries())
                 }.getOrNull()
                 if (marked != null) {
@@ -324,7 +327,7 @@ fun InboxScreen(
                     if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
                     if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
-                    val page = container.repo.listAgentsPage(includeArchived = true)
+                    val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
                     val fresh = page.entries()
                     val checks = runCheckTargets(items, fresh, container.runSettle.settled.value)
                     val incoming = container.repo.hydrateStatuses(fresh)
@@ -520,6 +523,11 @@ fun InboxScreen(
                         live = live,
                         query = query,
                         onQueryChange = { query = it },
+                        prUrl = prUrlFilter,
+                        onApplyPrUrl = { next ->
+                            prUrlFilter = next.trim()
+                            reload()
+                        },
                         showArchived = showArchived,
                         onShowArchived = {
                             showArchived = it
@@ -540,7 +548,7 @@ fun InboxScreen(
                             val cursor = nextCursor ?: return@AgentList
                             scope.launch {
                                 val page = runCatching {
-                                    container.repo.listAgentsPage(includeArchived = true, cursor = cursor)
+                                    container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
                                 }.getOrNull() ?: return@launch
                                 items = mergeInboxAgents(items, page.entries())
                                 nextCursor = page.nextCursor
@@ -687,6 +695,8 @@ private fun AgentList(
     live: Map<String, String>,
     query: String,
     onQueryChange: (String) -> Unit,
+    prUrl: String,
+    onApplyPrUrl: (String) -> Unit,
     showArchived: Boolean,
     onShowArchived: (Boolean) -> Unit,
     showHidden: Boolean,
@@ -804,6 +814,22 @@ private fun AgentList(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Search chats") },
                         singleLine = true,
+                    )
+                    var prDraft by remember(prUrl) { mutableStateOf(prUrl) }
+                    OutlinedTextField(
+                        value = prDraft,
+                        onValueChange = { prDraft = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        label = { Text("Filter by PR URL") },
+                        placeholder = { Text("https://github.com/org/repo/pull/1") },
+                        singleLine = true,
+                        trailingIcon = {
+                            TextButton(
+                                onClick = { onApplyPrUrl(prDraft) },
+                            ) { Text(if (prDraft.isBlank()) "Clear" else "Filter") }
+                        },
                     )
                     if (cloud) {
                         FlowRow(
@@ -1303,12 +1329,20 @@ internal fun AgentRow(
     var menu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val archived = agent.isArchived()
-    val indicator = runIndicator(agent.status, approvalPending = needsApproval)
+    val indicator = runIndicator(agent.status, agent.runStatus, approvalPending = needsApproval)
     val subtitle = if (compact) {
         if (muted) "Muted" else ""
     } else {
         buildString {
             append(agentCardSubtitle(agent.env?.type, agent.env?.name, git?.repoUrl))
+            val life = agentLifecycleLabel(agent.status)
+            val runLine = runStatusLabel(agent.runStatus)
+            if (life != null && runLine != null && agent.runStatus?.equals("FINISHED", true) != true) {
+                append(" · ")
+                append(life)
+                append(" · ")
+                append(runLine)
+            }
             if (muted) append(" · muted")
             git?.line()?.takeIf { it.isNotBlank() }?.let {
                 append(" · ")

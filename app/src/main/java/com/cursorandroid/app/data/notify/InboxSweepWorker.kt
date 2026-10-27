@@ -45,6 +45,7 @@ class InboxSweepWorker(
                         run.id,
                         run.status,
                         run.result,
+                        run.git?.branches?.firstOrNull()?.prUrl,
                     )
                     RunWatchStore.remove(applicationContext, run.id)
                     ApprovalStreamHub.close(run.id)

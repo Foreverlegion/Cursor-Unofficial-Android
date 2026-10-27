@@ -2,6 +2,7 @@ package com.cursorandroid.app.ui.thread
 
 import com.cursorandroid.app.data.api.isCreatingStatus
 import com.cursorandroid.app.data.api.isLiveStatus
+import com.cursorandroid.app.data.api.isRunTerminal
 import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.ui.status.RunIndicator
 import com.cursorandroid.app.ui.status.runIndicator
@@ -21,8 +22,9 @@ internal fun threadRunState(
     receiving: Boolean,
     approvalPending: Boolean,
 ): ThreadRunState {
-    val statusLive = isLiveStatus(agentStatus) || isLiveStatus(runStatus) ||
-        isCreatingStatus(agentStatus) || isCreatingStatus(runStatus)
+    val runEnded = isRunTerminal(runStatus)
+    val statusLive = isLiveStatus(runStatus) || isCreatingStatus(runStatus) ||
+        (!runEnded && (isLiveStatus(agentStatus) || isCreatingStatus(agentStatus)))
     val statusKnown = !agentStatus.isNullOrBlank() || !runStatus.isNullOrBlank()
     val active = busy || streaming || receiving || statusLive || approvalPending ||
         (!statusKnown && lastUserUnanswered(lines))

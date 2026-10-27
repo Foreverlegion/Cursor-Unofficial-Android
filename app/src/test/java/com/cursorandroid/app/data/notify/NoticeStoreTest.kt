@@ -92,6 +92,29 @@ class NoticeStoreTest {
     }
 
     @Test
+    fun activityAlreadySeenStaysReadWhenTheRunUpdates() {
+        val read = listOf(notice("run-1", kind = "working", body = "Working").copy(read = true))
+        val seen = notice("run-1", kind = "finished", body = "Finished").copy(read = true)
+        val (next, _) = applyUpsert(read, seen, emptyList())
+        assertTrue(next.single().read)
+        assertEquals("finished", next.single().kind)
+    }
+
+    @Test
+    fun markAgentReadClearsOnlyThatChat() {
+        val items = listOf(
+            notice("run-1", kind = "finished", body = "Finished"),
+            notice("run-2", kind = "finished", body = "Finished").copy(agentId = "other"),
+        )
+        val next = markAgentRead(items, "agent")
+        assertTrue(next.single { it.id == "run-1" }.read)
+        assertFalse(next.single { it.id == "run-2" }.read)
+        assertEquals(1, unreadCount(next))
+        assertTrue(markAgentRead(next, "agent") === next)
+        assertTrue(markAgentRead(items, "") === items)
+    }
+
+    @Test
     fun dismissedNoticesDoNotCountAsUnread() {
         val items = listOf(
             notice("a", kind = "finished", body = "Finished"),

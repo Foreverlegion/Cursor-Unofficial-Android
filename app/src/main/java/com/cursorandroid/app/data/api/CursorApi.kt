@@ -2,8 +2,11 @@ package com.cursorandroid.app.data.api
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.HTTP
+import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -29,25 +32,93 @@ interface CursorApi {
         @Query("limit") limit: Int = 100,
         @Query("cursor") cursor: String? = null,
         @Query("includeArchived") includeArchived: Boolean = true,
+        @Query("prUrl") prUrl: String? = null,
     ): AgentListResponse
 
     @GET("v1/agents/{id}")
     suspend fun getAgent(@Path("id") id: String): AgentDetail
 
+    /** Documented v0 conversation. Public Cloud Agents docs have no v1 conversation route. */
     @GET("v0/agents/{id}/conversation")
     suspend fun getConversation(@Path("id") id: String): AgentConversation
 
     @POST("v1/agents")
-    suspend fun createAgent(@Body body: CreateAgentRequest): CreateAgentResponse
+    suspend fun createAgent(
+        @Header("Idempotency-Key") idempotencyKey: String? = null,
+        @Body body: CreateAgentRequest,
+    ): CreateAgentResponse
 
     @POST("v1/environments")
     suspend fun createEnvironment(@Body body: CreateEnvironmentRequest): CloudEnvironment
 
+    @GET("v1/environments")
+    suspend fun listEnvironments(
+        @Query("limit") limit: Int = 100,
+        @Query("cursor") cursor: String? = null,
+    ): EnvironmentListResponse
+
     @GET("v1/environments/{id}")
     suspend fun getEnvironment(@Path("id") id: String): CloudEnvironment
 
+    @PATCH("v1/environments/{id}")
+    suspend fun updateEnvironment(
+        @Path("id") id: String,
+        @Body body: UpdateEnvironmentRequest,
+    )
+
     @HTTP(method = "DELETE", path = "v1/environments/{id}", hasBody = false)
     suspend fun deleteEnvironment(@Path("id") id: String)
+
+    @GET("v1/environments/{id}/history")
+    suspend fun environmentHistory(
+        @Path("id") id: String,
+        @Query("limit") limit: Int = 20,
+        @Query("cursor") cursor: String? = null,
+    ): EnvironmentHistoryResponse
+
+    @GET("v1/secrets")
+    suspend fun listSecrets(
+        @Query("scope") scope: String? = null,
+        @Query("environmentId") environmentId: String? = null,
+        @Query("name") name: String? = null,
+        @Query("repo") repo: String? = null,
+        @Query("limit") limit: Int = 100,
+        @Query("cursor") cursor: String? = null,
+    ): SecretListResponse
+
+    @GET("v1/environments/{id}/secrets")
+    suspend fun listEnvironmentSecrets(@Path("id") id: String): SecretListResponse
+
+    @PUT("v1/environments/{id}/secrets/{name}")
+    suspend fun putEnvironmentSecret(
+        @Path("id") id: String,
+        @Path("name") name: String,
+        @Query("id") versionId: String? = null,
+        @Body body: PutSecretRequest,
+    ): SecretVersion
+
+    @HTTP(method = "DELETE", path = "v1/environments/{id}/secrets/{name}", hasBody = false)
+    suspend fun deleteEnvironmentSecret(
+        @Path("id") id: String,
+        @Path("name") name: String,
+        @Query("id") versionId: String? = null,
+    ): SecretDeleteResponse
+
+    @GET("v1/team/secrets")
+    suspend fun listTeamSecrets(): SecretListResponse
+
+    @PUT("v1/team/secrets/{name}")
+    suspend fun putTeamSecret(
+        @Path("name") name: String,
+        @Query("id") versionId: String? = null,
+        @Body body: PutSecretRequest,
+    ): SecretVersion
+
+    @HTTP(method = "DELETE", path = "v1/team/secrets/{name}", hasBody = false)
+    suspend fun deleteTeamSecret(
+        @Path("name") name: String,
+        @Query("id") versionId: String? = null,
+    ): SecretDeleteResponse
 
     @GET("v1/environments/{id}/builds")
     suspend fun listEnvironmentBuilds(
@@ -80,6 +151,7 @@ interface CursorApi {
     @POST("v1/agents/{id}/runs")
     suspend fun createRun(
         @Path("id") id: String,
+        @Header("Idempotency-Key") idempotencyKey: String? = null,
         @Body body: CreateRunRequest,
     ): CreateRunResponse
 

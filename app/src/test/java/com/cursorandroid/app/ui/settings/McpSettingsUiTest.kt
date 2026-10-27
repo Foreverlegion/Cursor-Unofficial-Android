@@ -2,6 +2,9 @@ package com.cursorandroid.app.ui.settings
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -9,12 +12,15 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.repo.McpTemplateTest
 import com.cursorandroid.app.data.repo.UiPrefsStore
+import org.junit.Assert.assertEquals
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -64,5 +70,60 @@ class McpSettingsUiTest {
     fun theListExplainsWhyThereIsNoImportFromCursor() {
         compose.setContent { McpListSection(store) }
         compose.onNode(hasText("Cursor has no API that lists the MCP servers", substring = true)).assertExists()
+    }
+
+    @Test
+    fun templateButtonSitsNextToImportAndShowsASnackbarWithOpen() {
+        val provider = Robolectric.setupContentProvider(McpTemplateTest.FakeMediaProvider::class.java, "media")
+        val snackbar = SnackbarHostState()
+        compose.setContent {
+            Box {
+                McpListSection(store, snackbar)
+                SnackbarHost(snackbar)
+            }
+        }
+        compose.onNodeWithText("Import").assertExists()
+        compose.onNodeWithText("Create MCP sheet for import").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText("Saved mcp-template.json to Downloads")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Open").assertExists()
+        assertEquals(listOf("mcp-template.json"), provider.names())
+    }
+
+    @Test
+    fun asecondTemplateGetsANumberedName() {
+        val provider = Robolectric.setupContentProvider(McpTemplateTest.FakeMediaProvider::class.java, "media")
+        compose.setContent { McpListSection(store) }
+        compose.onNodeWithText("Create MCP sheet for import").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText("Saved mcp-template.json to Downloads")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Create MCP sheet for import").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText("Saved mcp-template (1).json to Downloads")).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(listOf("mcp-template.json", "mcp-template (1).json"), provider.names())
+    }
+
+    @Test
+    fun creatingTheTemplateDoesNotTouchSavedServers() {
+        Robolectric.setupContentProvider(McpTemplateTest.FakeMediaProvider::class.java, "media")
+        compose.setContent { McpListSection(store) }
+        compose.onNodeWithText("Create MCP sheet for import").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText("Saved mcp-template.json to Downloads")).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(0, store.storedMcps().size)
+    }
+
+    @Test
+    fun aFailedWriteSaysSo() {
+        Robolectric.setupContentProvider(McpTemplateTest.FakeMediaProvider::class.java, "media").failInsert = true
+        compose.setContent { McpListSection(store) }
+        compose.onNodeWithText("Create MCP sheet for import").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText("Could not create the template")).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 }

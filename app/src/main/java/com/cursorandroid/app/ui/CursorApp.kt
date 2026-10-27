@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -25,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
@@ -50,7 +53,12 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.composeAgent.NewAgentScreen
 import com.cursorandroid.app.ui.inbox.InboxScreen
 import com.cursorandroid.app.ui.settings.BatteryPrompt
+import com.cursorandroid.app.data.api.ApiException
+import com.cursorandroid.app.data.api.CreateAgentResponse
+import com.cursorandroid.app.data.repo.ProfileRule
+import com.cursorandroid.app.data.repo.TranscriptLine
 import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
+import com.cursorandroid.app.ui.settings.ProfileRulePrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
 import com.cursorandroid.app.ui.theme.CursorTheme
@@ -243,6 +251,9 @@ private fun CursorAppContent(
     )
     val rejectedKey by container.session.rejectedKey.collectAsStateWithLifecycle()
     val sessionExpired = !demo && rejectedKey != null && rejectedKey == container.store.apiKey?.trim()
+    val profileScope = rememberCoroutineScope()
+    val profileSnack = remember { SnackbarHostState() }
+    var profileStarting by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         if (demo) {
             DemoBanner(Modifier.windowInsetsPadding(topBars))
@@ -304,6 +315,11 @@ private fun CursorAppContent(
                             onSessionChanged = { demo = container.store.demoMode },
                             onAppearanceChanged = refreshSettings,
                             openAccountTick = accountTick,
+                            onUserRuleAgent = { created, text ->
+                                openLaunchedAgent(container, context, created, text)
+                                selectedId = created.agent.id
+                                pane = Pane.Inbox
+                            },
                             modifier = Modifier.fillMaxSize(),
                         )
                         pane == Pane.Compose -> NewAgentScreen(
@@ -341,6 +357,11 @@ private fun CursorAppContent(
                     onSessionChanged = { demo = container.store.demoMode },
                     onAppearanceChanged = refreshSettings,
                     openAccountTick = accountTick,
+                    onUserRuleAgent = { created, text ->
+                        openLaunchedAgent(container, context, created, text)
+                        selectedId = created.agent.id
+                        pane = Pane.Inbox
+                    },
                 )
                 pane == Pane.Compose -> NewAgentScreen(
                     container = container,
@@ -381,8 +402,81 @@ private fun CursorAppContent(
             }
         }
     }
+            SnackbarHost(
+                profileSnack,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp),
+            )
         }
     }
+    var profileSeen by remember { mutableStateOf(container.store.profileRuleSeen) }
+    var profileLater by remember { mutableStateOf(false) }
+    if (!demo && profileSeen.not() && !profileLater && !profileStarting) {
+        ProfileRulePrompt(
+            onBuild = {
+                profileStarting = true
+                profileScope.launch {
+                    profileScope.launch { profileSnack.showSnackbar("Starting in background") }
+                    try {
+                        val created = container.repo.createProfileAgent()
+                        openLaunchedAgent(container, context, created, ProfileRule.message())
+                        container.store.profileRuleSeen = true
+                        profileSeen = true
+                        selectedId = created.agent.id
+                        pane = Pane.Inbox
+                    } catch (e: Exception) {
+                        profileStarting = false
+                        val message = (e as? ApiException)?.displayMessage()
+                            ?: e.message?.takeIf { it.isNotBlank() }
+                            ?: "Could not start the agent"
+                        profileSnack.showSnackbar(message)
+                    }
+                }
+            },
+            onNotNow = {
+                container.store.profileRuleSeen = true
+                profileSeen = true
+            },
+            onLater = { profileLater = true },
+        )
+    }
+}
+
+private fun openLaunchedAgent(
+    container: AppContainer,
+    context: android.content.Context,
+    created: CreateAgentResponse,
+    userText: String,
+) {
+    container.conversations.save(
+        created.agent.id,
+        listOf(
+            TranscriptLine(
+                id = "user-${created.run.id}",
+                kind = "user",
+                text = userText,
+                runId = created.run.id,
+            ),
+        ),
+        runId = created.run.id,
+        runStatus = created.run.status,
+        immediate = true,
+    )
+    RunWatchScheduler.watch(
+        context.applicationContext,
+        created.agent.id,
+        created.run.id,
+        created.agent.name,
+        created.run.status,
+    )
+    container.notifier.notifyIfNeeded(
+        created.agent.id,
+        created.agent.name,
+        created.run.id,
+        created.run.status,
+        null,
+    )
 }
 
 @Composable

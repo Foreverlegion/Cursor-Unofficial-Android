@@ -39,15 +39,15 @@ class ApiKeyStore internal constructor(
     private val app = context.applicationContext
     private val primary = secureOpener(app, PREFS)
     private val backup = secureOpener(app, PREFS_BAK)
-    // Plaintext file from builds that fell back to it. Read so nothing is lost, moved into the encrypted
-    // store as soon as that works, and never written to again.
+    // Plaintext fallback: read always; written only while the Keystore-backed store cannot be opened,
+    // then moved into the encrypted store as soon as that works again.
     private val fallback = app.getSharedPreferences(PREFS_FALLBACK, Context.MODE_PRIVATE)
     private val notifyPrefs = app.getSharedPreferences(PREFS_NOTIFY, Context.MODE_PRIVATE)
 
-    // Holds secrets only when the Keystore-backed store cannot be opened. Never written to disk.
+    // Holds secrets for this process when the Keystore-backed store cannot be opened.
     private val memory = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** False when secrets live in memory only, so they are lost when the app closes. */
+    /** False when the Keystore-backed store is unavailable (fallback + memory are used instead). */
     val secureStorage: Boolean = primary != null || backup != null
 
     init {
@@ -157,6 +157,13 @@ class ApiKeyStore internal constructor(
             notifyPrefs.edit { putBoolean(FEEDBACK_NOTICE, value) }
         }
 
+    /** First-run profile rule was built or dismissed. Remind later does not set this. */
+    var profileRuleSeen: Boolean
+        get() = notifyPrefs.getBoolean(PROFILE_RULE_SEEN, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(PROFILE_RULE_SEEN, value) }
+        }
+
     var githubToken: String?
         get() = forges().firstOrNull { it.provider == com.cursorandroid.app.data.repo.ForgeKind.GITHUB.id }?.token
             ?.takeIf { it.isNotBlank() }
@@ -254,11 +261,14 @@ class ApiKeyStore internal constructor(
         val text = value?.takeIf { it.isNotEmpty() }
         val encrypted = listOfNotNull(primary, backup)
         if (encrypted.isEmpty()) {
+            // Secure store unavailable: keep the secret in memory for this process and on disk in the
+            // plaintext fallback so an update / process death does not force another sign-in.
             if (text == null) {
                 memory.remove(name)
                 fallback.edit { remove(name) }
             } else {
                 memory[name] = text
+                fallback.edit { putString(name, text) }
             }
             return
         }
@@ -355,19 +365,26 @@ class ApiKeyStore internal constructor(
 
     companion object {
         private fun openEncrypted(context: Context, name: String): SharedPreferences? {
-            val opened = runCatching { createEncrypted(context, name) }.getOrNull()
-            if (opened != null) return opened
-            setAside(context, name)
+            // Never delete or rename an unreadable prefs file. A transient Keystore / Tink failure on
+            // first launch after an update used to wipe cursor_secure and force another sign-in.
+            // Leave the file alone and fall through to the bak store / plaintext fallback / memory.
             return runCatching { createEncrypted(context, name) }.getOrNull()
         }
 
-        // A file that will not open may only be unreadable to this build, so keep it instead of deleting it.
+        // Kept for tests / call sites that still name it; no longer used by openEncrypted.
         private fun setAside(context: Context, name: String) {
             val file = File(context.applicationInfo.dataDir, "shared_prefs/$name.xml")
             if (!file.exists()) return
-            val kept = File(file.parentFile, "$name.xml.unreadable")
-            if (!kept.exists() && file.renameTo(kept)) return
-            runCatching { context.deleteSharedPreferences(name) }
+            var n = 0
+            while (true) {
+                val kept = File(
+                    file.parentFile,
+                    if (n == 0) "$name.xml.unreadable" else "$name.xml.unreadable.$n",
+                )
+                if (!kept.exists() && file.renameTo(kept)) return
+                n += 1
+                if (n > 20) return
+            }
         }
 
         private fun createEncrypted(context: Context, name: String): SharedPreferences {
@@ -405,6 +422,7 @@ class ApiKeyStore internal constructor(
         private const val BATTERY_ASKED = "battery_asked"
         private const val BATTERY_KNOWN_EXEMPT = "battery_known_exempt"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
+        private const val PROFILE_RULE_SEEN = "profile_rule_seen"
         private const val WHATS_NEW_SEEN = "whats_new_seen_code"
         private const val DEMO_MODE = "demo_mode"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()

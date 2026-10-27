@@ -48,6 +48,23 @@ class AttachmentsTest {
     }
 
     @Test
+    fun imageUrlIsHttpOrHttpsAndCountsTowardTheCap() {
+        val ok = Attachments.imageUrlItem("https://example.com/a.png", 0)
+        assertTrue(ok.ok)
+        assertEquals("https://example.com/a.png", ok.image?.url)
+        assertNull(ok.image?.data)
+        assertNull(ok.image?.mimeType)
+        val ftp = Attachments.imageUrlItem("ftp://example.com/a.png", 0)
+        assertFalse(ftp.ok)
+        assertNull(ftp.image)
+        val capped = Attachments.imageUrlItem("https://example.com/b.png", Attachments.MAX_IMAGES)
+        assertFalse(capped.ok)
+        val prompt = Attachments.prompt("look", listOf(ok))
+        assertEquals("https://example.com/a.png", prompt.images?.single()?.url)
+        assertNull(prompt.images?.single()?.mimeType)
+    }
+
+    @Test
     fun promptOmitsImagesWhenNoneReady() {
         val broken = AttachItem(
             id = "1",
