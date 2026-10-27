@@ -32,6 +32,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import com.cursorandroid.app.data.repo.GroupMove
+import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.moveGroupKey
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,7 +47,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,67 +62,61 @@ internal class RepoGroupActions(
     val onColor: (key: String, color: Int) -> Unit,
     val onOrder: (keys: List<String>) -> Unit,
     val onResetOrder: () -> Unit,
+    val onMoveToFolder: (key: String) -> Unit,
 )
 
 internal fun LazyListScope.cloudAgentBlocks(
-    arrangement: CloudArrangement,
+    laid: FolderedCloud,
+    folderActions: FolderListActions,
+    filtering: Boolean,
     groupActions: RepoGroupActions,
     groupByRepo: Boolean,
     collapsed: Set<String>,
     onToggleGroup: (String) -> Unit,
+    onRenameFolder: (LocalFolder) -> Unit,
+    onDeleteFolder: (LocalFolder) -> Unit,
     revealFinished: Boolean,
     onToggleReveal: () -> Unit,
     agentRow: @Composable (AgentSummary) -> Unit,
 ) {
-    if (arrangement.pinned.isNotEmpty()) {
+    if (laid.pinned.isNotEmpty()) {
         item(key = "hdr-pin") { SectionHeading("Pinned") }
-        itemsKeyed(arrangement.pinned, "pin") { agentRow(it) }
+        itemsKeyed(laid.pinned, "pin") { agentRow(it) }
+    }
+    val visibleFolders = laid.folders.filter { it.shownInList(folderActions.membership, filtering) }
+    visibleFolders.forEach { block ->
+        item(key = "fld-${block.folder.id}") {
+            FolderHeader(
+                folder = block.folder,
+                count = block.count,
+                onToggle = { folderActions.onToggleCollapsed(block.folder.id) },
+                onRename = { onRenameFolder(block.folder) },
+                onDelete = { onDeleteFolder(block.folder) },
+                onToggleFavorite = { folderActions.onToggleFavorite(block.folder.id) },
+            )
+        }
+        if (!block.folder.collapsed) {
+            block.groups.forEach { group ->
+                repoGroupBlock(group, laid, "fld-${block.folder.id}", collapsed, groupActions, onToggleGroup, agentRow)
+            }
+            itemsKeyed(block.chats, "fld-${block.folder.id}-chat") { agentRow(it) }
+        }
     }
     if (groupByRepo) {
-        val displayKeys = arrangement.groups.map { it.key }
-        val favoriteKeys = arrangement.groups.filter { it.favorite }.map { it.key }.toSet()
-        arrangement.groups.forEach { group ->
-            item(key = "repo-${group.key}") {
-                val peers = displayKeys.filter { (it in favoriteKeys) == group.favorite }
-                val at = peers.indexOf(group.key)
-                RepoGroupHeader(
-                    label = group.title,
-                    subtitle = group.path.takeIf { group.customName != null && it.isNotBlank() },
-                    realName = group.path.ifBlank { group.label },
-                    count = group.agents.size,
-                    running = group.running,
-                    expanded = group.key !in collapsed,
-                    favorite = group.favorite,
-                    color = group.color,
-                    renamed = group.customName != null,
-                    canMoveUp = at > 0,
-                    canMoveDown = at in 0 until peers.lastIndex,
-                    manualOrder = groupActions.manualOrder,
-                    onClick = { onToggleGroup(group.key) },
-                    onRename = { groupActions.onRename(group.key, it) },
-                    onFavorite = { groupActions.onFavorite(group.key) },
-                    onColor = { groupActions.onColor(group.key, it) },
-                    onMove = { move ->
-                        groupActions.onOrder(moveGroupKey(displayKeys, favoriteKeys, group.key, move))
-                    },
-                    onResetOrder = groupActions.onResetOrder,
-                )
-            }
-            if (group.key !in collapsed) {
-                itemsKeyed(group.agents, "g-${group.key}") { agentRow(it) }
-            }
+        laid.groups.forEach { group ->
+            repoGroupBlock(group, laid, "root", collapsed, groupActions, onToggleGroup, agentRow)
         }
     } else {
-        if (arrangement.favorites.isNotEmpty()) {
+        if (laid.favorites.isNotEmpty()) {
             item(key = "hdr-fav") { SectionHeading("Favorites") }
-            itemsKeyed(arrangement.favorites, "fav") { agentRow(it) }
+            itemsKeyed(laid.favorites, "fav") { agentRow(it) }
             item(key = "hdr-all") { SectionHeading("All") }
         }
-        itemsKeyed(arrangement.rest, "row") { agentRow(it) }
+        itemsKeyed(laid.rest, "row") { agentRow(it) }
     }
-    if (arrangement.hiddenFinished > 0) {
+    if (laid.hiddenFinished > 0) {
         item(key = "aged") {
-            val count = arrangement.hiddenFinished
+            val count = laid.hiddenFinished
             val label = if (revealFinished) "Hide $count older" else "Show $count hidden"
             Text(
                 label,
@@ -134,6 +128,50 @@ internal fun LazyListScope.cloudAgentBlocks(
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             )
         }
+    }
+}
+
+private fun LazyListScope.repoGroupBlock(
+    group: RepoGroup,
+    laid: FolderedCloud,
+    keyPrefix: String,
+    collapsed: Set<String>,
+    groupActions: RepoGroupActions,
+    onToggleGroup: (String) -> Unit,
+    agentRow: @Composable (AgentSummary) -> Unit,
+) {
+    val all = laid.folders.flatMap { it.groups } + laid.groups
+    val displayKeys = all.map { it.key }
+    val favoriteKeys = all.filter { it.favorite }.map { it.key }.toSet()
+    item(key = "$keyPrefix-repo-${group.key}") {
+        val peers = displayKeys.filter { (it in favoriteKeys) == group.favorite }
+        val at = peers.indexOf(group.key)
+        RepoGroupHeader(
+            label = group.title,
+            subtitle = group.path.takeIf { group.customName != null && it.isNotBlank() },
+            realName = group.path.ifBlank { group.label },
+            count = group.agents.size,
+            running = group.running,
+            expanded = group.key !in collapsed,
+            favorite = group.favorite,
+            color = group.color,
+            renamed = group.customName != null,
+            canMoveUp = at > 0,
+            canMoveDown = at in 0 until peers.lastIndex,
+            manualOrder = groupActions.manualOrder,
+            onClick = { onToggleGroup(group.key) },
+            onRename = { groupActions.onRename(group.key, it) },
+            onFavorite = { groupActions.onFavorite(group.key) },
+            onColor = { groupActions.onColor(group.key, it) },
+            onMove = { move ->
+                groupActions.onOrder(moveGroupKey(displayKeys, favoriteKeys, group.key, move))
+            },
+            onResetOrder = groupActions.onResetOrder,
+            onMoveToFolder = { groupActions.onMoveToFolder(group.key) },
+        )
+    }
+    if (group.key !in collapsed) {
+        itemsKeyed(group.agents, "$keyPrefix-g-${group.key}") { agentRow(it) }
     }
 }
 
@@ -192,6 +230,7 @@ internal fun RepoGroupHeader(
     onColor: (Int) -> Unit,
     onMove: (GroupMove) -> Unit,
     onResetOrder: () -> Unit,
+    onMoveToFolder: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
@@ -293,6 +332,13 @@ internal fun RepoGroupHeader(
                 onClick = {
                     menu = false
                     onFavorite()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Move to folder") },
+                onClick = {
+                    menu = false
+                    onMoveToFolder()
                 },
             )
             DropdownMenuItem(
@@ -427,20 +473,18 @@ internal fun SwipeArchiveRow(
         content()
         return
     }
-    var fired by remember { mutableStateOf(false) }
+    var armed by remember { mutableStateOf(true) }
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart && !fired) {
-                fired = true
+            if (value == SwipeToDismissBoxValue.EndToStart && armed) {
+                armed = false
                 onArchive()
             }
             false
         },
     )
-    LaunchedEffect(fired) {
-        if (!fired) return@LaunchedEffect
-        delay(1_200)
-        fired = false
+    LaunchedEffect(state.currentValue) {
+        if (state.currentValue == SwipeToDismissBoxValue.Settled) armed = true
     }
     SwipeToDismissBox(
         state = state,

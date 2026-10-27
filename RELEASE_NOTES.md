@@ -1,3 +1,10 @@
+# 1.0.32
+
+- Archive, unarchive, delete, pin, favorite, rename, hide, and mute update the list immediately. If the server call fails, the row comes back and a note shows the reason.
+- Archive waits 7 seconds before it calls Cursor. Undo in that window cancels the pending archive and does not call unarchive. The note stays about 5 seconds. Swiping it away does not send or cancel the archive. Each archive keeps its own timer. Pending archives are saved on the phone. Leaving the app sends them. If the app is killed first, the next launch sends them.
+- Local folders group repo groups and chats on this phone only. Nothing is sent to Cursor. They are kept across updates. Deleting a folder leaves the chats in the list. Move to folder is on the long-press menu and in multi-select.
+- A starred repo, and a starred folder, stays at the top and is never moved into Show N hidden, however old its last chat is. Hide still removes a chat you hid yourself. This holds on every filter and in search. Starred rows keep their order.
+
 # 1.0.31
 
 - Fixes being signed out / losing your API key after an app update.

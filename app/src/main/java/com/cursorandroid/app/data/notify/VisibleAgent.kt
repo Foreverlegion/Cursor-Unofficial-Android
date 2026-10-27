@@ -28,6 +28,8 @@ object VisibleAgent {
         started.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
     }
 
+    fun foreground(): Boolean = started.get() > 0
+
     fun isOpenInForeground(agentId: String): Boolean = started.get() > 0 && id.get() == agentId
 
     fun shouldSuppress(agentId: String? = null): Boolean {
