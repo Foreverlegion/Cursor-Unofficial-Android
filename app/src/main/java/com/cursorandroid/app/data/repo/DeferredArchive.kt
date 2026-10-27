@@ -9,8 +9,11 @@ import kotlinx.serialization.json.Json
 /** How long the archive call waits after the tap. Undo during this window never reaches the server. */
 const val ARCHIVE_SEND_DELAY_MS = 7_000L
 
-/** How long the Undo note stays on screen. Dismissing it does not send or cancel the archive. */
-const val ARCHIVE_TOAST_MS = 5_000L
+/**
+ * How long the Undo note stays on screen. It is the send delay, so Undo is still there when the
+ * call fires. Dismissing the note does not send or cancel the archive.
+ */
+const val ARCHIVE_TOAST_MS = ARCHIVE_SEND_DELAY_MS
 
 fun interface ArchiveTask {
     fun cancel()

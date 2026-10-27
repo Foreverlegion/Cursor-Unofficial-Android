@@ -74,17 +74,22 @@ class ArchiveCoordinatorTest {
     }
 
     @Test
-    fun dismissingTheToastDoesNotSendEarlyOrCancel() {
+    fun theUndoNoteStaysUpUntilTheArchiveIsSent() {
         val archives = coordinator()
+        val started = now
         archives.enqueue("a", "FINISHED", "Alpha")
-        assertEquals("Alpha archived", archives.toasts.value.single().message)
+        val toast = archives.toasts.value.single()
+        assertEquals("Alpha archived", toast.message)
+        assertEquals(ARCHIVE_SEND_DELAY_MS, ARCHIVE_TOAST_MS)
+        assertEquals(started + ARCHIVE_SEND_DELAY_MS, toast.until)
+        now += 5_000
+        assertTrue(archives.toasts.value.single().until > now)
         archives.dismissToast("a")
         assertTrue(archives.toasts.value.isEmpty())
         assertEquals(setOf("a"), archives.pendingIds())
-        now += ARCHIVE_TOAST_MS
         fireDue()
         assertTrue(sent.isEmpty())
-        now += ARCHIVE_SEND_DELAY_MS - ARCHIVE_TOAST_MS
+        now = started + ARCHIVE_SEND_DELAY_MS
         fireDue()
         assertEquals(listOf("a"), sent)
         assertEquals(true, catalog.agents().single().archived)

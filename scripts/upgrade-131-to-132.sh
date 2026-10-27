@@ -14,14 +14,14 @@ if [ -n "${ANDROID_SERIAL:-}" ]; then
 fi
 
 write_prefs() {
-  "${adb[@]}" shell run-as "$pkg" mkdir -p shared_prefs
-  "${adb[@]}" shell run-as "$pkg" sh -c "cat > shared_prefs/cursor_secure_fallback.xml" <<EOF
+  "${adb[@]}" shell "run-as $pkg mkdir -p shared_prefs"
+  "${adb[@]}" shell "run-as $pkg sh -c 'cat > shared_prefs/cursor_secure_fallback.xml'" <<EOF
 <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
 <map>
     <string name="api_key">${key}</string>
 </map>
 EOF
-  "${adb[@]}" shell run-as "$pkg" sh -c "cat > shared_prefs/cursor_prefs.xml" <<EOF
+  "${adb[@]}" shell "run-as $pkg sh -c 'cat > shared_prefs/cursor_prefs.xml'" <<EOF
 <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
 <map>
     <boolean name="demo_mode" value="true" />
@@ -44,7 +44,7 @@ sleep 4
 "${adb[@]}" shell am force-stop "$pkg"
 
 echo "upgrade to 1.0.32"
-"${adb[@]}" install -r -d "$new_apk"
+"${adb[@]}" install -r "$new_apk"
 "${adb[@]}" shell am start -n "$pkg/.MainActivity" >/dev/null
 sleep 4
 echo "dump after upgrade"
@@ -54,7 +54,7 @@ echo "seed folder and reinstall 1.0.32"
 "${adb[@]}" shell am broadcast -a com.cursorandroid.app.PROBE_SEED_FOLDER -n "$pkg/.debug.UpgradeProbe" >/dev/null
 sleep 1
 "${adb[@]}" shell am force-stop "$pkg"
-"${adb[@]}" install -r -d "$new_apk"
+"${adb[@]}" install -r "$new_apk"
 "${adb[@]}" shell am start -n "$pkg/.MainActivity" >/dev/null
 sleep 4
 echo "dump after folder reinstall"
