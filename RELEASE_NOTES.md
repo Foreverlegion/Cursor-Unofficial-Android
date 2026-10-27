@@ -1,5 +1,6 @@
 # 1.0.31
 
+- Fixes being signed out / losing your API key after an app update.
 - The agent-working bar and the composer sit on the screen background, so chat text no longer shows through them while you scroll. The bar keeps one height for the whole run.
 - A chat you have scrolled up stays where you left it while the agent streams. At the bottom, the thread follows without jumping back on every token.
 
