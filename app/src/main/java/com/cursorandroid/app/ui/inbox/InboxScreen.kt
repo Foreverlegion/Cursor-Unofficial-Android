@@ -701,6 +701,14 @@ fun InboxScreen(
                                 refreshFolders()
                             }
                         },
+                        onFolderColor = { id, color ->
+                            container.folders.setColor(id, color)
+                            refreshFolders()
+                        },
+                        onFolderIcon = { id, icon ->
+                            container.folders.setIcon(id, icon)
+                            refreshFolders()
+                        },
                         onMoveChats = { ids, folderId ->
                             container.folders.moveChats(ids, folderId)
                             refreshFolders()
@@ -825,6 +833,8 @@ private fun AgentList(
     onDeleteFolder: (String) -> Unit,
     onToggleFolder: (String) -> Unit,
     onToggleFolderFavorite: (String) -> Unit,
+    onFolderColor: (String, Int) -> Unit,
+    onFolderIcon: (String, String) -> Unit,
     onMoveChats: (Set<String>, String?) -> Unit,
     onMoveGroup: (String, String?) -> Unit,
 ) {
@@ -1111,6 +1121,8 @@ private fun AgentList(
                             onDelete = onDeleteFolder,
                             onToggleCollapsed = onToggleFolder,
                             onToggleFavorite = onToggleFolderFavorite,
+                            onColor = onFolderColor,
+                            onIcon = onFolderIcon,
                             onMoveChats = onMoveChats,
                             onMoveGroup = onMoveGroup,
                         ),

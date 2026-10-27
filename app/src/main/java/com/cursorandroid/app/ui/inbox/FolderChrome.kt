@@ -1,17 +1,45 @@
 package com.cursorandroid.app.ui.inbox
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -29,10 +57,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.repo.FolderMembership
 import com.cursorandroid.app.data.repo.LocalFolder
+import com.cursorandroid.app.data.repo.LocalFolderStore
 
 internal class FolderListActions(
     val membership: FolderMembership,
@@ -41,6 +72,8 @@ internal class FolderListActions(
     val onDelete: (String) -> Unit,
     val onToggleCollapsed: (String) -> Unit,
     val onToggleFavorite: (String) -> Unit,
+    val onColor: (String, Int) -> Unit,
+    val onIcon: (String, String) -> Unit,
     val onMoveChats: (Set<String>, String?) -> Unit,
     val onMoveGroup: (String, String?) -> Unit,
 )
@@ -50,7 +83,7 @@ internal sealed class FolderMove {
     data class Group(val key: String) : FolderMove()
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun FolderHeader(
     folder: LocalFolder,
@@ -59,10 +92,15 @@ internal fun FolderHeader(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onColor: (Int) -> Unit,
+    onIcon: (String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    var colorOpen by remember { mutableStateOf(false) }
+    var iconOpen by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val expanded = !folder.collapsed
+    val nameColor = if (folder.color != 0) Color(folder.color) else MaterialTheme.colorScheme.onSurface
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -82,10 +120,16 @@ internal fun FolderHeader(
             contentDescription = if (expanded) "Collapse ${folder.name}" else "Expand ${folder.name}",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Icon(
+            imageVector = folderIcon(folder.icon),
+            contentDescription = null,
+            tint = if (folder.color != 0) nameColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
         Text(
             folder.name,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = nameColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
@@ -120,6 +164,20 @@ internal fun FolderHeader(
                 },
             )
             DropdownMenuItem(
+                text = { Text("Name color") },
+                onClick = {
+                    menu = false
+                    colorOpen = true
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Icon") },
+                onClick = {
+                    menu = false
+                    iconOpen = true
+                },
+            )
+            DropdownMenuItem(
                 text = { Text("Delete folder") },
                 onClick = {
                     menu = false
@@ -127,6 +185,26 @@ internal fun FolderHeader(
                 },
             )
         }
+    }
+    if (colorOpen) {
+        FolderColorDialog(
+            selected = folder.color,
+            onPick = {
+                colorOpen = false
+                onColor(it)
+            },
+            onDismiss = { colorOpen = false },
+        )
+    }
+    if (iconOpen) {
+        FolderIconDialog(
+            selected = folder.icon,
+            onPick = {
+                iconOpen = false
+                onIcon(it)
+            },
+            onDismiss = { iconOpen = false },
+        )
     }
 }
 
@@ -232,6 +310,126 @@ internal fun DeleteFolderDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+internal fun folderIcon(id: String): ImageVector =
+    folderIconChoices().firstOrNull { it.first == id }?.second ?: Icons.Filled.Folder
+
+internal fun folderIconChoices(): List<Pair<String, ImageVector>> = listOf(
+    "" to Icons.Filled.Folder,
+    "work" to Icons.Filled.Work,
+    "code" to Icons.Filled.Code,
+    "bug" to Icons.Filled.BugReport,
+    "build" to Icons.Filled.Build,
+    "cloud" to Icons.Filled.Cloud,
+    "home" to Icons.Filled.Home,
+    "science" to Icons.Filled.Science,
+    "terminal" to Icons.Filled.Terminal,
+    "bookmark" to Icons.Filled.Bookmark,
+    "inventory" to Icons.Filled.Inventory2,
+    "hub" to Icons.Filled.Hub,
+    "memory" to Icons.Filled.Memory,
+    "public" to Icons.Filled.Public,
+    "lock" to Icons.Filled.Lock,
+    "label" to Icons.Filled.Label,
+    "tree" to Icons.Filled.AccountTree,
+    "storage" to Icons.Filled.Storage,
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FolderColorDialog(
+    selected: Int,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Name color") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    LocalFolderStore.NAME_COLORS.forEach { swatch ->
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(swatch))
+                                .border(
+                                    width = if (swatch == selected) 3.dp else 1.dp,
+                                    color = if (swatch == selected) {
+                                        MaterialTheme.colorScheme.onBackground
+                                    } else {
+                                        MaterialTheme.colorScheme.outline
+                                    },
+                                    shape = CircleShape,
+                                )
+                                .clickable { onPick(swatch) },
+                        )
+                    }
+                }
+                TextButton(onClick = { onPick(0) }) {
+                    Text(if (selected == 0) "Default (selected)" else "Default")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FolderIconDialog(
+    selected: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Icon") },
+        text = {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                folderIconChoices().forEach { (id, icon) ->
+                    val picked = id == selected
+                    val label = if (id.isEmpty()) "Default folder" else id
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .border(
+                                width = if (picked) 2.dp else 1.dp,
+                                color = if (picked) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outline
+                                },
+                                shape = CircleShape,
+                            )
+                            .clickable { onPick(id) }
+                            .semantics { contentDescription = label },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
         },
     )
 }

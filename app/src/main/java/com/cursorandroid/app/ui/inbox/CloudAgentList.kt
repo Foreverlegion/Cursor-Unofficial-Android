@@ -93,6 +93,8 @@ internal fun LazyListScope.cloudAgentBlocks(
                 onRename = { onRenameFolder(block.folder) },
                 onDelete = { onDeleteFolder(block.folder) },
                 onToggleFavorite = { folderActions.onToggleFavorite(block.folder.id) },
+                onColor = { folderActions.onColor(block.folder.id, it) },
+                onIcon = { folderActions.onIcon(block.folder.id, it) },
             )
         }
         if (!block.folder.collapsed) {

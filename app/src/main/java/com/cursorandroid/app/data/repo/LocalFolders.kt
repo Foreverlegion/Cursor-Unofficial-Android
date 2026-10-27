@@ -17,6 +17,10 @@ data class LocalFolder(
     @SerialName("createdAt") val createdAt: Long = 0L,
     @SerialName("collapsed") val collapsed: Boolean = false,
     @SerialName("favorite") val favorite: Boolean = false,
+    /** 0 keeps the theme color. Any other value is a preset from LocalFolderStore.NAME_COLORS. */
+    @SerialName("color") val color: Int = 0,
+    /** Empty keeps the folder icon. Any other value is an id from LocalFolderStore.ICON_IDS. */
+    @SerialName("icon") val icon: String = "",
 )
 
 @Serializable
@@ -67,6 +71,19 @@ class LocalFolderStore(
     fun setFavorite(id: String, favorite: Boolean) {
         update(id) { it.copy(favorite = favorite) }
     }
+
+    fun setColor(id: String, color: Int) {
+        if (color != 0 && color !in NAME_COLORS) return
+        update(id) { it.copy(color = color) }
+    }
+
+    fun setIcon(id: String, icon: String) {
+        val next = icon.trim()
+        if (next.isNotEmpty() && next !in ICON_IDS) return
+        update(id) { it.copy(icon = next) }
+    }
+
+    fun replace(value: FolderMembership) = persist(value)
 
     /** Removes the folder. Chats and repo groups go back to the main list. */
     fun delete(id: String) {
@@ -119,6 +136,40 @@ class LocalFolderStore(
 
     companion object {
         const val NAME_MAX = 60
+
+        /** Mid-tone presets so a folder name stays readable on a light or dark background. */
+        val NAME_COLORS = listOf(
+            0xFFEF4444.toInt(),
+            0xFFFB923C.toInt(),
+            0xFFCA8A04.toInt(),
+            0xFF16A34A.toInt(),
+            0xFF0F766E.toInt(),
+            0xFF2563EB.toInt(),
+            0xFF7C3AED.toInt(),
+            0xFFDB2777.toInt(),
+        )
+
+        val ICON_CHOICES = listOf(
+            "work",
+            "code",
+            "bug",
+            "build",
+            "cloud",
+            "home",
+            "science",
+            "terminal",
+            "bookmark",
+            "inventory",
+            "hub",
+            "memory",
+            "public",
+            "lock",
+            "label",
+            "tree",
+            "storage",
+        )
+
+        val ICON_IDS = ICON_CHOICES.toSet()
 
         private fun randomSuffix(): String = (0..4).joinToString("") {
             ('a'..'z').random().toString()

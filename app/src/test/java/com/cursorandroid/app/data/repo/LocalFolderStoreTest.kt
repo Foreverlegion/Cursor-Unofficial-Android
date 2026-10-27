@@ -72,6 +72,8 @@ class LocalFolderStoreTest {
         val v3 = reopen(v2)
         val snap = LocalFolderStore(v3).snapshot()
         assertEquals("Keep", snap.folders.single().name)
+        assertEquals(0, snap.folders.single().color)
+        assertEquals("", snap.folders.single().icon)
         assertEquals("fld-keep", snap.chats["a"])
         assertEquals("fld-keep", snap.groups["acme/app"])
         val pending = PendingArchiveStore(v3).load().single()
@@ -97,6 +99,22 @@ class LocalFolderStoreTest {
         assertEquals(listOf("fld-2"), snap.folders.map { it.id })
         assertTrue(snap.chats.isEmpty())
         assertTrue(snap.groups.isEmpty())
+    }
+
+    @Test
+    fun colorAndIconSurviveReopenAndUnknownValuesAreRejected() {
+        val first = store(ui())
+        first.create("Thermal Nexus")
+        first.setColor("fld-1", 0xFF00FF00.toInt())
+        first.setIcon("fld-1", "nope")
+        assertEquals(0, first.snapshot().folders.single().color)
+        assertEquals("", first.snapshot().folders.single().icon)
+        first.setColor("fld-1", LocalFolderStore.NAME_COLORS[0])
+        first.setIcon("fld-1", "code")
+        val second = LocalFolderStore(reopen(open.single()))
+        assertEquals(LocalFolderStore.NAME_COLORS[0], second.snapshot().folders.single().color)
+        assertEquals("code", second.snapshot().folders.single().icon)
+        assertEquals(LocalFolderStore.ICON_CHOICES.toSet(), LocalFolderStore.ICON_IDS)
     }
 
     @Test
