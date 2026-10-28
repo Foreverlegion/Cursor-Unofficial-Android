@@ -65,6 +65,7 @@ import com.cursorandroid.app.ui.theme.CursorTheme
 import com.cursorandroid.app.ui.theme.Appearance
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
+import com.cursorandroid.app.ui.theme.UiFont
 import com.cursorandroid.app.ui.theme.HomeDensity
 import com.cursorandroid.app.ui.theme.resolveCodeFontFamily
 import com.cursorandroid.app.ui.theme.resolveUiFontFamily

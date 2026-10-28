@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.cursorandroid.app.data.repo.GroupMove
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.moveGroupKey
+import com.cursorandroid.app.ui.theme.ColorPickerDialog
 import com.cursorandroid.app.ui.theme.LocalAppearance
 import com.cursorandroid.app.ui.theme.HomeDensity
 import androidx.compose.material3.ExperimentalMaterial3Api

@@ -72,6 +72,7 @@ import androidx.compose.ui.layout.ContentScale
 import android.graphics.BitmapFactory
 import com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX
 import com.cursorandroid.app.data.repo.CustomFolderIconStore
+import com.cursorandroid.app.ui.theme.ColorPickerDialog
 import com.cursorandroid.app.ui.theme.LocalAppearance
 import com.cursorandroid.app.ui.theme.HomeDensity
 
