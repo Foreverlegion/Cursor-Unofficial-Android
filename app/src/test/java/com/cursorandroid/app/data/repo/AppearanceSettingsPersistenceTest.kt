@@ -52,9 +52,9 @@ class AppearanceSettingsPersistenceTest {
         val ui = UiPrefsStore.open(LegacyUiPrefs(), file).also { open += it }
         val folders = LocalFolderStore(ui) { "fld-1" }
         val created = folders.create("Custom")!!
-        folders.setIcon(created.id, "${CUSTOM_FOLDER_ICON_PREFIX}ico-test.png")
+        folders.setIcon(created.id, "${CUSTOM_FOLDER_ICON_PREFIX}fld-1.webp")
         ui.flush()
         val again = LocalFolderStore(UiPrefsStore.open(LegacyUiPrefs(), file).also { open += it })
-        assertEquals("${CUSTOM_FOLDER_ICON_PREFIX}ico-test.png", again.snapshot().folders.single().icon)
+        assertEquals("${CUSTOM_FOLDER_ICON_PREFIX}fld-1.webp", again.snapshot().folders.single().icon)
     }
 }

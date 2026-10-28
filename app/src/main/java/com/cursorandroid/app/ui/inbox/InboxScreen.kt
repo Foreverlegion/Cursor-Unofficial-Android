@@ -73,7 +73,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.cursorandroid.app.ui.status.PlayColors
+import com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX
+import com.cursorandroid.app.data.repo.FolderIconImportResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.cursorandroid.app.ui.status.StatusPill
 import com.cursorandroid.app.ui.status.agentCardSubtitle
 import com.cursorandroid.app.ui.status.agentLifecycleLabel
@@ -195,6 +199,7 @@ fun InboxScreen(
     var searchExpanded by remember { mutableStateOf(false) }
     var searchFocusPulse by remember { mutableStateOf(false) }
     var iconUploadFolderId by remember { mutableStateOf<String?>(null) }
+    var iconImportBusy by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
@@ -224,19 +229,49 @@ fun InboxScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var reloadJob by remember { mutableStateOf<Job?>(null) }
-    val photoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
+    fun applyFolderIconFromUri(uri: android.net.Uri?) {
         val folderId = iconUploadFolderId
         iconUploadFolderId = null
-        if (folderId == null || uri == null) return@rememberLauncherForActivityResult
-        val iconId = container.folderIcons.importFromUri(context, uri) ?: return@rememberLauncherForActivityResult
-        val old = folders.folders.firstOrNull { it.id == folderId }?.icon
-        if (!old.isNullOrBlank() && old.startsWith(com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX)) {
-            container.folderIcons.delete(old)
+        if (folderId == null || uri == null) return
+        if (iconImportBusy) return
+        iconImportBusy = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                container.folderIcons.importForFolder(context, uri, folderId)
+            }
+            iconImportBusy = false
+            when (result) {
+                is FolderIconImportResult.Success -> {
+                    val old = folders.folders.firstOrNull { it.id == folderId }?.icon
+                    if (!old.isNullOrBlank() && old.startsWith(CUSTOM_FOLDER_ICON_PREFIX) && old != result.iconId) {
+                        container.folderIcons.delete(old)
+                    }
+                    container.folders.setIcon(folderId, result.iconId)
+                    refreshFolders()
+                }
+                is FolderIconImportResult.Failure -> {
+                    snackbar.showSnackbar(result.message, duration = SnackbarDuration.Short)
+                }
+                FolderIconImportResult.Cancelled -> Unit
+            }
         }
-        container.folders.setIcon(folderId, iconId)
-        refreshFolders()
+    }
+    val photoPickerAvailable = remember(context) {
+        ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(context)
+    }
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> applyFolderIconFromUri(uri) }
+    val legacyPhotoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> applyFolderIconFromUri(uri) }
+    fun launchFolderPhotoPicker(folderId: String) {
+        iconUploadFolderId = folderId
+        if (photoPickerAvailable) {
+            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        } else {
+            legacyPhotoPicker.launch("image/*")
+        }
     }
 
     fun mergeInbox(incoming: List<AgentSummary>): List<AgentSummary> =
@@ -814,6 +849,11 @@ fun InboxScreen(
                             ok
                         },
                         onDeleteFolder = { id ->
+                            val folder = folders.folders.firstOrNull { it.id == id }
+                            if (folder?.icon?.startsWith(CUSTOM_FOLDER_ICON_PREFIX) == true) {
+                                container.folderIcons.delete(folder.icon)
+                            }
+                            container.folderIcons.deleteForFolder(id)
                             container.folders.delete(id)
                             refreshFolders()
                         },
@@ -845,8 +885,7 @@ fun InboxScreen(
                         },
                         iconStore = container.folderIcons,
                         onUploadFolderIcon = { folderId ->
-                            iconUploadFolderId = folderId
-                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            if (!iconImportBusy) launchFolderPhotoPicker(folderId)
                         },
                         onMoveChats = { ids, folderId ->
                             container.folders.moveChats(ids, folderId)

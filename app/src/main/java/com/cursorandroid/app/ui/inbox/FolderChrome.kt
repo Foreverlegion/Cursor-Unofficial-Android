@@ -142,12 +142,18 @@ internal fun FolderHeader(
             contentDescription = if (expanded) "Collapse ${folder.name}" else "Expand ${folder.name}",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        FolderIconGlyph(
-            iconId = folder.icon,
-            tint = if (folder.color != 0) nameColor else MaterialTheme.colorScheme.onSurfaceVariant,
-            size = home.folderIconDp.dp,
-            iconStore = iconStore,
-        )
+        Box(modifier = Modifier.size(home.folderIconDp.dp)) {
+            FolderIconGlyph(
+                iconId = folder.icon,
+                tint = if (folder.color != 0) nameColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                size = home.folderIconDp.dp,
+                iconStore = iconStore,
+            )
+            RepoRunningDot(
+                visible = running > 0,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
         Text(
             folder.name,
             style = titleStyle,
@@ -169,7 +175,6 @@ internal fun FolderHeader(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        RepoRunningDot(visible = running > 0)
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
                 text = { Text("Rename") },
@@ -193,12 +198,22 @@ internal fun FolderHeader(
                 },
             )
             DropdownMenuItem(
-                text = { Text("Change icon") },
+                text = { Text(if (folder.icon.isBlank()) "Set icon" else "Change icon") },
                 onClick = {
                     menu = false
                     iconOpen = true
                 },
             )
+            if (folder.icon.startsWith(CUSTOM_FOLDER_ICON_PREFIX)) {
+                DropdownMenuItem(
+                    text = { Text("Remove icon") },
+                    onClick = {
+                        menu = false
+                        iconStore.delete(folder.icon)
+                        onIcon("")
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Delete folder") },
                 onClick = {
@@ -421,8 +436,8 @@ private fun FolderIconDialog(
         title = { Text("Change icon") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onUpload) { Text("Upload image") }
-                TextButton(onClick = onReset) { Text("Reset to default") }
+                TextButton(onClick = onUpload) { Text("From photo") }
+                TextButton(onClick = onReset) { Text("Remove icon") }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),

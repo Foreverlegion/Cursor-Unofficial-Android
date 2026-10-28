@@ -19,6 +19,9 @@ class CursorAndroidApp : Application() {
         registerActivityLifecycleCallbacks(ForegroundCallbacks)
         container = AppContainer(this)
         container.archives.recoverAfterProcessDeath()
+        container.folderIcons.pruneOrphans(
+            container.folders.snapshot().folders.map { it.icon }.filter { it.isNotBlank() }.toSet(),
+        )
         container.notifier.ensureChannel()
         if (container.store.hasKey()) {
             RunWatchScheduler.resume(this)

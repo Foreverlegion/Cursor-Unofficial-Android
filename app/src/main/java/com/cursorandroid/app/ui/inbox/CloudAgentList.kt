@@ -265,10 +265,10 @@ internal val GroupHeaderColors = listOf(
 )
 
 @Composable
-internal fun RepoRunningDot(visible: Boolean) {
+internal fun RepoRunningDot(visible: Boolean, modifier: Modifier = Modifier) {
     if (!visible) return
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(8.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.primary)

@@ -3,6 +3,7 @@
 - Local folders show the same running dot as repo groups when any agent inside the folder (including nested repo groups) is running. The dot stays visible while the folder is collapsed.
 - The Agents home list refreshes about every 10 seconds while you are on that screen, and newly started agents appear on the list right away instead of waiting for the server list to catch up. Background polling is unchanged; status rate limits still apply.
 - Settings, Agent list: Hide agents older than (default Off) folds idle chats out of repo groups and folders by last activity. Running chats, needs-attention, unread bell items, pinned and starred chats, and starred repos or folders stay visible. Per-group Show N older and a list-wide row bring them back; search still finds them. Choices: Off, 1/3/7/14 days, 4/8/12 weeks.
+- Local folders can use a photo as the folder icon: long-press a folder, Set or Change icon, then From photo (Android photo picker, or pick an image on older devices). Photos are center-cropped to a circle, saved as a 256×256 WebP under ~40 KB in app storage, and included in backup. Rejects only images over 50 MB or 100 megapixels. Remove icon restores the default; deleting the folder removes its icon file.
 
 # 1.0.35
 
