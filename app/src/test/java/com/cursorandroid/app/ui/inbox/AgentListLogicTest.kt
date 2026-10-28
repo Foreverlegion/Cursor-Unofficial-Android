@@ -2,7 +2,12 @@ package com.cursorandroid.app.ui.inbox
 
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.GitSnap
+import com.cursorandroid.app.data.api.visibleInbox
+import com.cursorandroid.app.data.repo.FolderMembership
+import com.cursorandroid.app.data.repo.LocalFolder
+import com.cursorandroid.app.data.repo.RepoGroupPrefs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -93,6 +98,167 @@ class AgentListLogicTest {
     }
 
     @Test
+    fun starredRepoIsNeverCollapsedIntoTheAgeOverflow() {
+        val git = mapOf(
+            "star-old" to GitSnap("star-old", repoUrl = "https://github.com/acme/starred"),
+            "star-new" to GitSnap("star-new", repoUrl = "https://github.com/acme/starred"),
+            "plain-old" to GitSnap("plain-old", repoUrl = "https://github.com/acme/plain"),
+            "plain-new" to GitSnap("plain-new", repoUrl = "https://github.com/acme/plain"),
+            "star-run" to GitSnap("star-run", repoUrl = "https://github.com/acme/starred"),
+        )
+        val prefs = RepoGroupPrefs()
+            .withOrder(listOf("acme/starred", "acme/plain"))
+            .withStyle("acme/starred") { it.copy(favorite = true) }
+        val agents = listOf(
+            agent("star-old", updatedAt = "2026-09-01T00:00:00Z"),
+            agent("star-new", updatedAt = "2026-10-10T08:00:00Z"),
+            agent("plain-old", updatedAt = "2026-09-01T00:00:00Z"),
+            agent("plain-new", updatedAt = "2026-10-10T09:00:00Z"),
+            agent("star-run", status = "RUNNING", updatedAt = "2026-08-01T00:00:00Z"),
+        )
+        val all = arrange(agents, git = git, hideDays = 7, group = true, prefs = prefs)
+        assertEquals(listOf("acme/starred", "acme/plain"), all.groups.map { it.key })
+        assertEquals(listOf("star-new", "star-old", "star-run"), all.groups[0].agents.map { it.id })
+        assertEquals(listOf("plain-new"), all.groups[1].agents.map { it.id })
+        assertEquals(1, all.hiddenFinished)
+        assertFalse(all.groups.flatMap { it.agents }.map { it.id }.contains("plain-old"))
+
+        val done = arrange(agents, git = git, filter = CloudFilter.Done, hideDays = 7, group = true, prefs = prefs)
+        assertEquals(listOf("star-new", "star-old"), done.groups.single { it.key == "acme/starred" }.agents.map { it.id })
+        assertEquals(listOf("plain-new"), done.groups.single { it.key == "acme/plain" }.agents.map { it.id })
+        assertTrue(done.hiddenFinished >= 1)
+
+        val running = arrange(agents, git = git, filter = CloudFilter.Running, hideDays = 7, group = true, prefs = prefs)
+        assertEquals(listOf("star-run"), running.groups.single().agents.map { it.id })
+        assertEquals(0, running.hiddenFinished)
+
+        val searched = arrange(
+            agents.filter { it.id == "star-old" || it.id == "plain-old" },
+            git = git,
+            hideDays = 7,
+            group = true,
+            prefs = prefs,
+        )
+        assertEquals(listOf("star-old"), searched.groups.flatMap { it.agents }.map { it.id })
+        assertEquals(1, searched.hiddenFinished)
+
+        val flat = arrange(agents, git = git, hideDays = 7, prefs = prefs)
+        assertEquals(listOf("star-old", "star-new", "star-run", "plain-new"), flat.rest.map { it.id })
+        assertEquals(1, flat.hiddenFinished)
+
+        val attentionGit = git + mapOf(
+            "star-bad" to GitSnap("star-bad", repoUrl = "https://github.com/acme/starred"),
+            "plain-bad" to GitSnap("plain-bad", repoUrl = "https://github.com/acme/plain"),
+        )
+        val attention = arrange(
+            agents + listOf(
+                agent("star-bad", status = "ERROR", updatedAt = "2026-08-01T00:00:00Z"),
+                agent("plain-bad", status = "ERROR", updatedAt = "2026-08-01T00:00:00Z"),
+            ),
+            git = attentionGit,
+            filter = CloudFilter.NeedsAttention,
+            hideDays = 7,
+            group = true,
+            prefs = prefs,
+        )
+        assertEquals(listOf("star-bad"), attention.groups.single { it.key == "acme/starred" }.agents.map { it.id })
+        assertEquals(listOf("plain-bad"), attention.groups.single { it.key == "acme/plain" }.agents.map { it.id })
+        assertEquals(0, attention.hiddenFinished)
+    }
+
+    @Test
+    fun explicitHideStillRemovesAChatInAStarredRepo() {
+        val git = mapOf("star-old" to GitSnap("star-old", repoUrl = "https://github.com/acme/starred"))
+        val prefs = RepoGroupPrefs().withStyle("acme/starred") { it.copy(favorite = true) }
+        val visible = listOf(agent("star-old", updatedAt = "2026-09-01T00:00:00Z"))
+            .visibleInbox(showArchived = false, hiddenIds = setOf("star-old"))
+        val arranged = arrange(visible, git = git, hideDays = 7, group = true, prefs = prefs)
+        assertTrue(arranged.groups.isEmpty())
+        assertEquals(0, arranged.hiddenFinished)
+    }
+
+    @Test
+    fun starredFolderStaysOutOfTheAgeOverflowAndSortsFirst() {
+        val git = mapOf(
+            "old" to GitSnap("old", repoUrl = "https://github.com/acme/thermal-nexus"),
+            "other" to GitSnap("other", repoUrl = "https://github.com/acme/plain"),
+        )
+        val folders = FolderMembership(
+            folders = listOf(
+                LocalFolder(id = "plain", name = "Other", createdAt = 1),
+                LocalFolder(id = "star", name = "Thermal Nexus", createdAt = 2, favorite = true),
+            ),
+            groups = mapOf("acme/thermal-nexus" to "star", "acme/plain" to "plain"),
+        )
+        val agents = listOf(
+            agent("old", updatedAt = "2026-09-01T00:00:00Z"),
+            agent("other", updatedAt = "2026-09-01T00:00:00Z"),
+        )
+        val arranged = arrange(agents, git = git, hideDays = 7, group = true, folders = folders)
+        assertEquals(listOf("old"), arranged.groups.flatMap { it.agents }.map { it.id })
+        assertEquals(1, arranged.hiddenFinished)
+        val laid = applyLocalFolders(arranged, folders, emptySet())
+        assertEquals(listOf("star", "plain"), laid.folders.map { it.folder.id })
+        assertEquals(listOf("old"), laid.folders.first().groups.flatMap { it.agents }.map { it.id })
+        assertTrue(laid.folders[1].groups.isEmpty())
+    }
+
+    @Test
+    fun twoStarredReposKeepTheirOrderAboveANewerUnstarredRepo() {
+        val git = mapOf(
+            "g" to GitSnap("g", repoUrl = "https://github.com/acme/gamma"),
+            "a" to GitSnap("a", repoUrl = "https://github.com/acme/alpha"),
+            "b" to GitSnap("b", repoUrl = "https://github.com/acme/beta"),
+        )
+        val prefs = RepoGroupPrefs()
+            .withOrder(listOf("acme/gamma", "acme/alpha", "acme/beta"))
+            .withStyle("acme/gamma") { it.copy(favorite = true) }
+            .withStyle("acme/alpha") { it.copy(favorite = true) }
+        val arranged = arrange(
+            listOf(
+                agent("g", updatedAt = "2026-09-01T00:00:00Z"),
+                agent("a", updatedAt = "2026-09-02T00:00:00Z"),
+                agent("b", updatedAt = "2026-10-10T00:00:00Z"),
+            ),
+            git = git,
+            hideDays = 7,
+            group = true,
+            prefs = prefs,
+        )
+        assertEquals(listOf("acme/gamma", "acme/alpha", "acme/beta"), arranged.groups.map { it.key })
+        assertEquals(0, arranged.hiddenFinished)
+    }
+
+    @Test
+    fun aChatMovedToAnotherFolderLeavesItsRepoGroup() {
+        val git = mapOf(
+            "in" to GitSnap("in", repoUrl = "https://github.com/acme/app"),
+            "out" to GitSnap("out", repoUrl = "https://github.com/acme/app"),
+        )
+        val folders = FolderMembership(
+            folders = listOf(
+                LocalFolder(id = "home", name = "Home", createdAt = 1),
+                LocalFolder(id = "other", name = "Other", createdAt = 2),
+            ),
+            groups = mapOf("acme/app" to "home"),
+            chats = mapOf("out" to "other"),
+        )
+        val arranged = arrange(
+            listOf(
+                agent("in", updatedAt = "2026-10-10T00:00:00Z"),
+                agent("out", updatedAt = "2026-10-09T00:00:00Z"),
+            ),
+            git = git,
+            group = true,
+            folders = folders,
+        )
+        val laid = applyLocalFolders(arranged, folders, emptySet())
+        assertEquals(listOf("in"), laid.folders.single { it.folder.id == "home" }.groups.flatMap { it.agents }.map { it.id })
+        assertEquals(listOf("out"), laid.folders.single { it.folder.id == "other" }.chats.map { it.id })
+        assertTrue(laid.groups.isEmpty())
+    }
+
+    @Test
     fun missingRepoSharesOneGroup() {
         val arranged = arrange(
             listOf(agent("a", updatedAt = "2026-10-02T00:00:00Z"), agent("b", updatedAt = "2026-10-03T00:00:00Z")),
@@ -115,6 +281,8 @@ class AgentListLogicTest {
         reveal: Boolean = false,
         group: Boolean = false,
         pinnedAt: Map<String, Long> = emptyMap(),
+        prefs: RepoGroupPrefs = RepoGroupPrefs(),
+        folders: FolderMembership = FolderMembership(),
     ): CloudArrangement {
         return arrangeCloudAgents(
             agents = agents,
@@ -127,6 +295,8 @@ class AgentListLogicTest {
             revealFinished = reveal,
             groupByRepo = group,
             nowMillis = now,
+            groupPrefs = prefs,
+            folders = folders,
         )
     }
 

@@ -50,13 +50,29 @@ object InboxPollPolicy {
         return (base shl failures.coerceAtMost(4)).coerceAtMost(MAX_BACKOFF_MS)
     }
 
+    /** Agent list polls are not status calls. Do not fold [StatusGate.remainingMs] into this interval. */
+    fun listIntervalMs(agents: List<AgentSummary>, localActive: Set<String>, failures: Int): Long =
+        intervalMs(agents, localActive, failures)
+
+    /** Timer ticks only refresh the agent list. Status hydration and run lookups run on triggers. */
+    fun hydrateStatusesDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
+
+    /** Walk list cursors on open, resume, and manual refresh so older chats stay merged in. */
+    fun walkAgentPagesDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
+
+    fun resolveReposDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
+
+    fun runChecksDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
+
+    fun runSweepDue(reason: RefreshReason, tick: Int): Boolean =
+        reason != RefreshReason.Tick || tick % 2 == 0
+
+    fun machinesDue(reason: RefreshReason, lastAtMs: Long, nowMs: Long, lastFailed: Boolean = false): Boolean =
+        reason != RefreshReason.Tick || nowMs - lastAtMs >= (if (lastFailed) MACHINES_RETRY_MS else MACHINES_EVERY_MS)
+
     /** Time to wait before polling after [reason]: a tick waits the interval, a trigger only the minimum gap. */
     fun pauseBefore(reason: RefreshReason, sinceLastPollMs: Long): Long =
         if (reason == RefreshReason.Tick) 0 else (MIN_GAP_MS - sinceLastPollMs).coerceAtLeast(0)
-
-    /** Anything but a plain tick (open, resume, pull to refresh) asks again. After a failed listing a tick retries sooner. */
-    fun machinesDue(reason: RefreshReason, lastAtMs: Long, nowMs: Long, lastFailed: Boolean = false): Boolean =
-        reason != RefreshReason.Tick || nowMs - lastAtMs >= (if (lastFailed) MACHINES_RETRY_MS else MACHINES_EVERY_MS)
 }
 
 /**

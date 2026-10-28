@@ -105,6 +105,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
+import com.cursorandroid.app.data.api.actionReason
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.ApiException
@@ -249,6 +250,23 @@ class ThreadViewModel(
         val fromRuns = runs.mapNotNull { item -> item.model?.let { item.id to it } }.toMap()
         if (fromRuns.isEmpty() && detail?.model == null) return
         modelBook = container.runModels.recordApi(agentId, fromRuns, detail?.model)
+    }
+
+    private fun pushLiveRun(
+        runId: String,
+        runStatus: String?,
+        activityHint: String? = null,
+        approvalPending: Boolean = false,
+    ) {
+        container.notifier.updateLiveRun(
+            agentId = agentId,
+            agentName = agent?.name,
+            runId = runId,
+            agentStatus = agent?.status,
+            runStatus = runStatus,
+            activityHint = activityHint,
+            approvalPending = approvalPending,
+        )
     }
 
     fun consumePendingPr() {
@@ -568,28 +586,42 @@ class ThreadViewModel(
     }
 
     fun archive(onDone: () -> Unit) {
-        viewModelScope.launch {
-            try {
-                container.repo.archive(agentId)
-                onDone()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fail(e)
-            }
-        }
+        val name = container.chats.displayName(agentId, agent?.name)
+        container.archives.enqueue(agentId, agent?.status, name)
+        onDone()
     }
 
     fun delete(onDone: () -> Unit) {
+        val snapshot = agent?.let {
+            com.cursorandroid.app.data.api.AgentSummary(
+                id = it.id,
+                name = it.name,
+                status = it.status,
+                env = it.env,
+                url = it.url,
+                createdAt = it.createdAt,
+                updatedAt = it.updatedAt,
+                latestRunId = it.latestRunId,
+                archived = it.archived,
+            )
+        }
+        container.archives.undo(agentId)
+        container.catalog.removeAgents(setOf(agentId))
+        container.signals.drop(agentId)
+        onDone()
         viewModelScope.launch {
             try {
                 container.repo.deleteAgent(agentId)
                 container.forgetLocal(agentId)
-                onDone()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail(e)
+                if (snapshot != null) {
+                    val current = container.catalog.agents().filter { it.id != snapshot.id }
+                    container.catalog.saveAgents(current + snapshot)
+                    container.signals.restore(snapshot)
+                }
+                container.signals.error("Couldn't delete. ${e.actionReason()}")
             }
         }
     }
@@ -1071,6 +1103,7 @@ class ThreadViewModel(
                                 toolCallText(event.name, event.args),
                                 runId,
                             )
+                            pushLiveRun(runId, run?.status, toolCallText(event.name, event.args))
                             container.notifier.notifyApproval(
                                 agentId = agentId,
                                 agentName = agent?.name,
@@ -1083,6 +1116,7 @@ class ThreadViewModel(
                         }
                         is StreamEvent.Status -> {
                             run = run?.copy(status = event.status) ?: run
+                            pushLiveRun(runId, event.status)
                         }
                         is StreamEvent.Result -> {
                             clearApprovals()
@@ -1175,6 +1209,7 @@ class ThreadViewModel(
         }
         if (latest.isActive()) {
             adoptRun(latest)
+            pushLiveRun(latest.id, latest.status)
             return true
         }
         receiving = false
@@ -1228,6 +1263,7 @@ class ThreadViewModel(
                     )
                     break
                 }
+                pushLiveRun(runId, latest.status)
             }
         }
     }

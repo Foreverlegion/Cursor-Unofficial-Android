@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "defaultModel": "model-1.0.24",
+  "autoUpdate": true,
+  "skippedUpdateCode": 124,
+  "chats": {"c124": {"title": "From 1.0.24", "muted": true}},
+  "conversations": {
+    "c124": [{"id": "l1", "kind": "user", "text": "hello from 1.0.24"}]
+  },
+  "drafts": {
+    "c124": {
+      "text": "draft-1.0.24",
+      "workOnBranch": true,
+      "prUrl": "https://github.com/acme/app/pull/4",
+      "extraDraft": true
+    }
+  },
+  "pendingArchives": [{"agentId": "sneaky-124"}],
+  "extraField": "keep-going"
+}

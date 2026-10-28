@@ -1,9 +1,3 @@
-Message times on every chat message, with day separators.
-Forges sync their repo lists automatically, with status in Settings.
-Fixed a crash when importing settings from a backup.
-Sign-in key is never backed up; a banner helps you sign in again if it expires.
-Sign out asks first.
-Fewer status checks, so no more rate-limit errors.
-Chats stay still while you scroll up.
-Machines show status unknown instead of offline when status can't load.
-What's new popup after each update.
+PR URL or #number in search filters agents. Collapsible search on the tab row.
+Home density and larger folder rows. Custom folder icons from photos.
+Import .ttf / .otf app fonts. Code font can use imports too.

@@ -63,12 +63,17 @@ fun parseHexColor(input: String): Int? {
 
 fun formatHexColor(argb: Int): String = "#%06X".format(argb and 0xFFFFFF)
 
+fun bundledUiFontFamily(id: String): FontFamily? = UiFont.fromId(id).family()
+
+fun bundledCodeFontFamily(id: String): FontFamily = CodeFont.fromId(id).family()
+
 @Immutable
 data class Appearance(
-    val uiFont: UiFont = UiFont.System,
-    val codeFont: CodeFont = CodeFont.SystemMono,
+    val uiFontFamily: FontFamily? = null,
+    val codeFontFamily: FontFamily = FontFamily.Monospace,
     val textScalePct: Int = DEFAULT_TEXT_SCALE,
     val density: ChatDensity = ChatDensity.Comfortable,
+    val homeLayout: HomeLayout = HomeLayout(),
 ) {
     val bubblePadH get() = if (density == ChatDensity.Compact) 11 else 14
     val bubblePadV get() = if (density == ChatDensity.Compact) 6 else 10

@@ -7,10 +7,26 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+/**
+ * Settings export. Files from every shipped app since 1.0.2 still parse: missing fields use
+ * their defaults, and unknown fields are ignored. The sign-in key is dropped on read and is never
+ * written. Forge tokens, the legacy GitHub token, and MCP secrets stay out of the plain file
+ * unless the user sets a passphrase, which seals them. A backup never includes pending archives.
+ *
+ * Shipped shapes, all with `"version": 1` until 1.0.28 started writing `"version": 2`:
+ * 1.0.2; 1.0.3–1.0.12 (hidden inbox, auto-update); 1.0.13–1.0.15 (MCP list);
+ * 1.0.16 (install-count flag); 1.0.17–1.0.23 (skipped update); 1.0.24–1.0.25 (no install-count);
+ * 1.0.26–1.0.27 (no auto-update); 1.0.28 (forges, machines, appearance, layout, sealed secrets);
+ * 1.0.29–1.0.31 (transcript time, MCP auth). 1.0.30 was not a separate build.
+ * 1.0.32 adds folders and collapsed repo groups. A file that omits those keys does not clear
+ * folders or collapsed groups already on the phone.
+ * autoUpdate, shareInstallCount, and skippedUpdateCode are ignored. Those switches are gone.
+ */
 object SettingsBackup {
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        coerceInputValues = true
     }
 
     fun export(context: Context, container: AppContainer, uri: Uri, passphrase: CharArray? = null) {
@@ -28,7 +44,13 @@ object SettingsBackup {
         return parse(text)
     }
 
-    /** Files from older builds may carry the Cursor sign-in key. It is dropped here so it can never be applied or staged. */
+    /**
+     * One decoder for every shipped file, from 1.0.2 through the current export.
+     * A missing field takes the default on [SettingsSnapshot] or the nested record.
+     * An unknown or extra field is skipped and does not reject the file or drop the fields we know.
+     * A null where a default exists is coerced to that default.
+     * Files from older builds may carry the Cursor sign-in key. It is dropped here so it can never be applied or staged.
+     */
     fun parse(text: String): SettingsSnapshot? =
         runCatching { json.decodeFromString<SettingsSnapshot>(text) }.getOrNull()?.copy(apiKey = null)
 
@@ -57,9 +79,13 @@ object SettingsBackup {
         return true
     }
 
+    internal fun capture(container: AppContainer): SettingsSnapshot = snapshotOf(container)
+
     private fun snapshotOf(container: AppContainer) = SettingsSnapshot(
+        version = BACKUP_VERSION,
         notifyOnComplete = container.store.notifyOnComplete,
         notifyOnApproval = container.store.notifyOnApproval,
+        liveRunStatus = container.store.liveRunStatus,
         mcpServers = container.store.storedMcps(),
         showThinking = container.store.showThinking,
         showToolCalls = container.store.showToolCalls,
@@ -77,11 +103,17 @@ object SettingsBackup {
         codeFont = container.store.codeFont,
         textScalePct = container.store.textScalePct,
         chatDensity = container.store.chatDensity,
+        homeDensity = container.store.homeDensity,
+        importedFonts = container.importedFonts.list(),
+        importedFontData = container.importedFonts.exportFileData(),
+        customFolderIcons = container.folderIcons.exportBase64(),
         showInboxEnvs = container.store.showInboxEnvs,
         showInboxRemote = container.store.showInboxRemote,
         groupByRepo = container.chats.groupByRepo,
         compactCards = container.chats.compactCards,
         hideFinishedDays = container.chats.hideFinishedDays,
+        collapsedRepos = container.chats.collapsedRepos,
+        folders = container.folders.snapshot(),
         chats = container.chats.snapshot(),
         conversations = container.conversations.exportAll(),
         drafts = container.drafts.exportAll(),
@@ -90,6 +122,7 @@ object SettingsBackup {
     private fun applySnapshot(container: AppContainer, snap: SettingsSnapshot) {
         container.store.notifyOnComplete = snap.notifyOnComplete
         container.store.notifyOnApproval = snap.notifyOnApproval
+        container.store.liveRunStatus = snap.liveRunStatus
         if (snap.mcpServers.isNotEmpty()) {
             container.store.saveStoredMcps(mergeMcpSecrets(container.store.storedMcps(), snap.mcpServers))
         } else if (snap.mcpName.isNotBlank() || snap.mcpUrl.isNotBlank()) {
@@ -127,11 +160,20 @@ object SettingsBackup {
         container.store.codeFont = snap.codeFont
         container.store.textScalePct = snap.textScalePct
         container.store.chatDensity = snap.chatDensity
+        container.store.homeDensity = snap.homeDensity
+        if (snap.importedFonts.isNotEmpty() || snap.importedFontData.isNotEmpty()) {
+            container.importedFonts.restoreFiles(snap.importedFonts, snap.importedFontData)
+        }
+        if (snap.customFolderIcons.isNotEmpty()) {
+            container.folderIcons.restoreFromBackup(snap.customFolderIcons)
+        }
         container.store.showInboxEnvs = snap.showInboxEnvs
         container.store.showInboxRemote = snap.showInboxRemote
         container.chats.groupByRepo = snap.groupByRepo
         container.chats.compactCards = snap.compactCards
         container.chats.hideFinishedDays = snap.hideFinishedDays
+        snap.collapsedRepos?.let { container.chats.collapsedRepos = it }
+        snap.folders?.let { container.folders.replace(it) }
         container.chats.mergeAll(snap.chats)
         if (snap.conversations.isNotEmpty()) {
             container.conversations.importAll(snap.conversations)
@@ -151,6 +193,7 @@ data class SettingsSnapshot(
     val apiKey: String? = null,
     val notifyOnComplete: Boolean = true,
     val notifyOnApproval: Boolean = true,
+    val liveRunStatus: Boolean = true,
     // Read only, for files from before the MCP list. Never written.
     val mcpName: String = "",
     val mcpUrl: String = "",
@@ -174,11 +217,25 @@ data class SettingsSnapshot(
     val codeFont: String = "system_mono",
     val textScalePct: Int = 100,
     val chatDensity: String = "comfortable",
+    val homeDensity: String = "comfortable",
+    val importedFonts: List<ImportedFontRecord> = emptyList(),
+    val importedFontData: Map<String, String> = emptyMap(),
+    val customFolderIcons: Map<String, String> = emptyMap(),
     val showInboxEnvs: Boolean = true,
     val showInboxRemote: Boolean = true,
     val groupByRepo: Boolean = true,
     val compactCards: Boolean = true,
     val hideFinishedDays: Int = 0,
+    /**
+     * Null when the file is from before 1.0.32. Applying a null leaves the groups the phone
+     * already has collapsed. An empty set means the user had none collapsed.
+     */
+    val collapsedRepos: Set<String>? = null,
+    /**
+     * Null when the file is from before 1.0.32. Applying a null leaves folders already on the phone.
+     * Pending archives are never stored here, so a restore cannot send one.
+     */
+    val folders: FolderMembership? = null,
     val chats: Map<String, ChatMeta> = emptyMap(),
     val conversations: Map<String, List<TranscriptLine>> = emptyMap(),
     val drafts: Map<String, ChatDraft> = emptyMap(),

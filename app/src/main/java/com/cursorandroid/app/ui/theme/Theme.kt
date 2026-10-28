@@ -50,7 +50,7 @@ fun CursorTheme(
     val scaled = remember(base, appearance.textScalePct) {
         Density(base.density, base.fontScale * clampTextScale(appearance.textScalePct) / 100f)
     }
-    val typography = remember(appearance.uiFont) { Typography().withFont(appearance.uiFont.family()) }
+    val typography = remember(appearance.uiFontFamily) { Typography().withFont(appearance.uiFontFamily) }
     CompositionLocalProvider(LocalDensity provides scaled, LocalAppearance provides appearance) {
         CursorMaterial(accent, typography, content)
     }

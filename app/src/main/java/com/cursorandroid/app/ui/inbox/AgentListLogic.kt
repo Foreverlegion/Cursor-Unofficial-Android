@@ -3,6 +3,7 @@ package com.cursorandroid.app.ui.inbox
 import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.sortKey
+import com.cursorandroid.app.data.repo.FolderMembership
 import com.cursorandroid.app.data.repo.RepoGroupPrefs
 import com.cursorandroid.app.ui.status.RunIndicator
 import com.cursorandroid.app.ui.status.runIndicator
@@ -105,14 +106,17 @@ fun arrangeCloudAgents(
     groupByRepo: Boolean,
     nowMillis: Long,
     groupPrefs: RepoGroupPrefs = RepoGroupPrefs(),
+    folders: FolderMembership = FolderMembership(),
 ): CloudArrangement {
     val matched = agents.filter { agent ->
         val bucket = cloudBucket(agent, agent.id in approvalIds)
         filter == CloudFilter.All || bucket == filter
     }
     val age = HideFinishedAge.fromDays(hideFinishedDays)
+    // Starred repos and starred folders stay in the list on every filter. Age overflow is not a hide.
+    val protected = ageProtectedIds(matched, git, groupPrefs, folders)
     val aged = matched.filter { agent ->
-        finishedTooOld(agent, agent.id in approvalIds, age, nowMillis)
+        agent.id !in protected && finishedTooOld(agent, agent.id in approvalIds, age, nowMillis)
     }.map { it.id }.toSet()
     val shown = if (revealFinished) matched else matched.filter { it.id !in aged }
     val pinned = shown
@@ -135,11 +139,41 @@ fun arrangeCloudAgents(
         CloudArrangement(
             pinned = pinned,
             groups = emptyList(),
-            favorites = body.filter { it.id in favoriteIds },
-            rest = body.filter { it.id !in favoriteIds },
+            favorites = body.filter { it.id in favoriteIds }.starredFirst(protected),
+            rest = body.filter { it.id !in favoriteIds }.starredFirst(protected),
             hiddenFinished = aged.size,
         )
     }
+}
+
+/**
+ * Chats that belong to a starred repo, or to a starred folder, are not eligible for the
+ * "Show N hidden" age collapse. An explicit Hide on the chat is applied earlier and still wins.
+ */
+internal fun ageProtectedIds(
+    agents: List<AgentSummary>,
+    git: Map<String, GitSnap>,
+    groupPrefs: RepoGroupPrefs,
+    folders: FolderMembership,
+): Set<String> {
+    if (agents.isEmpty()) return emptySet()
+    val starredRepos = groupPrefs.styles.filterValues { it.favorite }.keys
+    val starredFolders = folders.folders.filter { it.favorite }.map { it.id }.toSet()
+    if (starredRepos.isEmpty() && starredFolders.isEmpty()) return emptySet()
+    val knownFolders = folders.folders.map { it.id }.toSet()
+    return agents.mapNotNull { agent ->
+        val repo = repoGroupKey(git[agent.id]?.repoUrl)
+        if (repo in starredRepos) return@mapNotNull agent.id
+        val folder = folders.chats[agent.id]?.takeIf { it in knownFolders }
+            ?: folders.groups[repo]?.takeIf { it in knownFolders }
+        if (folder != null && folder in starredFolders) agent.id else null
+    }.toSet()
+}
+
+private fun List<AgentSummary>.starredFirst(protected: Set<String>): List<AgentSummary> {
+    if (protected.isEmpty()) return this
+    val (hit, miss) = partition { it.id in protected }
+    return hit + miss
 }
 
 fun repoGroups(

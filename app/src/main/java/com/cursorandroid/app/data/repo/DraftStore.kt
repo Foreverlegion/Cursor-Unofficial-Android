@@ -11,7 +11,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class DraftAttach(
     val path: String = "",
-    val name: String,
+    val name: String = "",
     val mime: String = "",
     val url: String = "",
 )

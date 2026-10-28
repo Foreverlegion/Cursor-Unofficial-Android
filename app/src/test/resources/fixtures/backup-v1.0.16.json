@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "defaultModel": "model-1.0.16",
+  "autoUpdate": true,
+  "shareInstallCount": true,
+  "mcpServers": [
+    {"id": "m16", "name": "docs", "url": "https://example.com/mcp"}
+  ],
+  "chats": {"c116": {"title": "From 1.0.16", "muted": true, "hidden": true}},
+  "conversations": {
+    "c116": [{"id": "l1", "kind": "user", "text": "hello from 1.0.16"}]
+  },
+  "drafts": {"c116": {"text": "draft-1.0.16"}},
+  "pendingArchives": [{"agentId": "sneaky-116"}],
+  "extraField": "keep-going"
+}
