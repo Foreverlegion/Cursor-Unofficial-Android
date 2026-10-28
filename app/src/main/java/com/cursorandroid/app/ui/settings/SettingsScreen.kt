@@ -201,7 +201,9 @@ internal fun SettingsScreenContent(
             },
         )
     }
-    val overview = remember(container) { OverviewModel(container.repo, container.catalog) }
+    val overview = remember(container) {
+        OverviewModel(container.repo, container.catalog, container.store, container.dashboardUsage)
+    }
     val overviewScope = rememberCoroutineScope()
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
     var notifyApprovals by remember { mutableStateOf(container.store.notifyOnApproval) }
@@ -271,8 +273,13 @@ internal fun SettingsScreenContent(
             runCatching { GithubRepos.authenticatedLogin(container.store.githubToken) }.getOrNull()
         }
     }
-    LaunchedEffect(page == SettingsPage.About) {
-        if (page == SettingsPage.About) overview.refreshAll()
+    LaunchedEffect(page) {
+        if (page != SettingsPage.About) return@LaunchedEffect
+        overview.refreshAll()
+        while (true) {
+            delay(DASHBOARD_USAGE_POLL_MS)
+            overview.refreshDashboardPeriod()
+        }
     }
     LaunchedEffect(openAccountTick) {
         if (openAccountTick > 0) page = SettingsPage.Feedback
@@ -760,6 +767,9 @@ internal fun SettingsScreenContent(
                             )
                         }
                         val sample = overview.usage
+                        overview.dashboardPeriod?.let { period ->
+                            DashboardUsageBars(usage = period)
+                        }
                         val used = sample?.usage
                         val usageBusy = OverviewRow.Usage in overview.refreshing
                         val usageFailed = OverviewRow.Usage in overview.failed

@@ -10,6 +10,7 @@ import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import com.cursorandroid.app.data.auth.SessionGuard
 import com.cursorandroid.app.data.auth.CursorBrowserLogin
+import com.cursorandroid.app.data.auth.CursorDashboardUsage
 import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
@@ -159,6 +160,8 @@ class AppContainer(context: Context) {
     private val api: CursorApi = DemoCursorApi(store, DemoSession(), liveApi)
 
     val login = CursorBrowserLogin(publicHttp, json)
+
+    val dashboardUsage = CursorDashboardUsage(publicHttp, json)
 
     val statusGate = StatusGate(
         meter = StatusCallMeter(sink = if (debug) { line -> Log.d("StatusCalls", line) } else null),

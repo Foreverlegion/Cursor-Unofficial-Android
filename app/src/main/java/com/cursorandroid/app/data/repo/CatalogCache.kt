@@ -6,6 +6,7 @@ import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
+import com.cursorandroid.app.data.auth.StoredDashboardPeriodUsage
 import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.data.api.MeResponse
 import com.cursorandroid.app.data.api.RepositoryItem
@@ -142,6 +143,19 @@ class CatalogCache(
             next[agentId] = snap
         }
         active().edit { putString("pr_checks", json.encodeToString(next)) }
+    }
+
+    fun dashboardPeriod(): StoredDashboardPeriodUsage? {
+        val raw = active().getString("dashboard_period", null) ?: return null
+        return runCatching { json.decodeFromString<StoredDashboardPeriodUsage>(raw) }.getOrNull()
+    }
+
+    fun saveDashboardPeriod(value: StoredDashboardPeriodUsage?) {
+        if (value == null) {
+            active().edit { remove("dashboard_period") }
+            return
+        }
+        active().edit { putString("dashboard_period", json.encodeToString(value)) }
     }
 
     fun reposFresh(maxAgeMs: Long = REPOS_TTL): Boolean {

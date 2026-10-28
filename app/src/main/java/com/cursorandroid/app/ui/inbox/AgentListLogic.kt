@@ -34,6 +34,7 @@ enum class HideFinishedAge(val days: Int, val label: String) {
     Day3(3, "3 days"),
     Day7(7, "7 days"),
     Day14(14, "14 days"),
+    Week3(21, "3 weeks"),
     Week4(28, "4 weeks"),
     Week8(56, "8 weeks"),
     Week12(84, "12 weeks"),
@@ -43,7 +44,7 @@ enum class HideFinishedAge(val days: Int, val label: String) {
         const val DEFAULT_DAYS = DEFAULT_HIDE_FINISHED_DAYS
 
         val settingsChoices: List<HideFinishedAge> =
-            listOf(Off, Day1, Day3, Day7, Day14, Week4, Week8, Week12)
+            listOf(Off, Day1, Day3, Day7, Day14, Week3, Week4, Week8, Week12)
 
         fun fromDays(days: Int): HideFinishedAge {
             val normalized = normalizeHideFinishedDays(days)
