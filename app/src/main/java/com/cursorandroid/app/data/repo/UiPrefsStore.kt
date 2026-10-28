@@ -42,6 +42,8 @@ object UiKeys {
     val hideFinishedDays = intPreferencesKey("agent_hide_finished_days")
     val collapsedRepos = stringSetPreferencesKey("agent_collapsed_repos")
     val repoGroupPrefs = stringPreferencesKey("agent_repo_group_prefs")
+    val agentFolders = stringPreferencesKey("agent_folders")
+    val pendingArchives = stringPreferencesKey("pending_archives")
     val chatMeta = stringPreferencesKey("chat_meta")
     val chatMetaUnreadable = stringPreferencesKey("chat_meta_unreadable")
     val showInboxEnvs = booleanPreferencesKey("show_inbox_envs")
@@ -70,7 +72,7 @@ class LegacyUiPrefs(
  */
 class UiMigrationStep(val from: Int, val run: (MutablePreferences, LegacyUiPrefs) -> Unit)
 
-const val UI_SCHEMA_VERSION = 2
+const val UI_SCHEMA_VERSION = 3
 
 private fun <T> MutablePreferences.seed(key: Preferences.Key<T>, value: Any?) {
     if (contains(key)) return
@@ -106,7 +108,16 @@ internal val schemaOneToTwo = UiMigrationStep(1) { p, _ ->
     p.seed(UiKeys.machinePrefs, "{}")
 }
 
-internal val uiMigrationSteps: List<UiMigrationStep> = listOf(schemaZeroToOne, schemaOneToTwo)
+/**
+ * Local folders and the deferred-archive queue. Seeds only when the key is missing, so a record
+ * written before this step (or by a newer build) is left alone.
+ */
+internal val schemaTwoToThree = UiMigrationStep(2) { p, _ ->
+    p.seed(UiKeys.agentFolders, """{"folders":[],"chats":{},"groups":{}}""")
+    p.seed(UiKeys.pendingArchives, "[]")
+}
+
+internal val uiMigrationSteps: List<UiMigrationStep> = listOf(schemaZeroToOne, schemaOneToTwo, schemaTwoToThree)
 
 internal class UiPrefsMigration(
     private val legacy: LegacyUiPrefs,

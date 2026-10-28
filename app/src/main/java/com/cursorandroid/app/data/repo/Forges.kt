@@ -67,7 +67,7 @@ data class ForgeConnection(
 
 @Serializable
 data class RepoDefault(
-    val repoUrl: String,
+    val repoUrl: String = "",
     val modelId: String = "",
     val modelParams: List<ModelParam> = emptyList(),
     val branch: String = "",

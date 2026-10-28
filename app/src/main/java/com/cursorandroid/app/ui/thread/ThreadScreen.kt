@@ -105,6 +105,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
+import com.cursorandroid.app.data.api.actionReason
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.ApiException
@@ -568,28 +569,42 @@ class ThreadViewModel(
     }
 
     fun archive(onDone: () -> Unit) {
-        viewModelScope.launch {
-            try {
-                container.repo.archive(agentId)
-                onDone()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fail(e)
-            }
-        }
+        val name = container.chats.displayName(agentId, agent?.name)
+        container.archives.enqueue(agentId, agent?.status, name)
+        onDone()
     }
 
     fun delete(onDone: () -> Unit) {
+        val snapshot = agent?.let {
+            com.cursorandroid.app.data.api.AgentSummary(
+                id = it.id,
+                name = it.name,
+                status = it.status,
+                env = it.env,
+                url = it.url,
+                createdAt = it.createdAt,
+                updatedAt = it.updatedAt,
+                latestRunId = it.latestRunId,
+                archived = it.archived,
+            )
+        }
+        container.archives.undo(agentId)
+        container.catalog.removeAgents(setOf(agentId))
+        container.signals.drop(agentId)
+        onDone()
         viewModelScope.launch {
             try {
                 container.repo.deleteAgent(agentId)
                 container.forgetLocal(agentId)
-                onDone()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail(e)
+                if (snapshot != null) {
+                    val current = container.catalog.agents().filter { it.id != snapshot.id }
+                    container.catalog.saveAgents(current + snapshot)
+                    container.signals.restore(snapshot)
+                }
+                container.signals.error("Couldn't delete. ${e.actionReason()}")
             }
         }
     }

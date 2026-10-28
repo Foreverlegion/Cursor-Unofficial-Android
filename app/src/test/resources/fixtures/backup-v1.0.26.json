@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "defaultModel": "model-1.0.26",
+  "showThinking": true,
+  "hideThinking": true,
+  "showToolCalls": true,
+  "hideTools": true,
+  "chats": {"c126": {"title": "From 1.0.26", "muted": true}},
+  "conversations": {
+    "c126": [{"id": "l1", "kind": "user", "text": "hello from 1.0.26"}]
+  },
+  "drafts": {"c126": {"text": "draft-1.0.26"}},
+  "pendingArchives": [{"agentId": "sneaky-126"}],
+  "extraField": "keep-going"
+}
