@@ -21,7 +21,7 @@ class FolderIconStore(context: Context) {
         if (!isCustom(icon)) return null
         val id = icon.removePrefix(PREFIX)
         if (id.isBlank()) return null
-        return File(dir, "$id.webp")
+        return File(dir, "$id.png")
     }
 
     fun loadBitmap(icon: String): Bitmap? {
@@ -81,7 +81,7 @@ class FolderIconStore(context: Context) {
             val bytes = runCatching { android.util.Base64.decode(b64, android.util.Base64.NO_WRAP) }.getOrNull()
                 ?: return@forEach
             if (bytes.isEmpty()) return@forEach
-            FileOutputStream(File(dir, "$id.webp")).use { it.write(bytes) }
+            FileOutputStream(File(dir, "$id.png")).use { it.write(bytes) }
         }
     }
 
