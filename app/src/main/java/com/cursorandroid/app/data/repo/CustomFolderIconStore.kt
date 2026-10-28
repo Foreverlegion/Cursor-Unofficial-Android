@@ -105,7 +105,7 @@ class CustomFolderIconStore(context: Context) {
         }
     }
 
-    internal fun decodeAndCompress(context: Context, uri: Uri, bounds: ImageBounds): ByteArray? {
+    private fun decodeAndCompress(context: Context, uri: Uri, bounds: ImageBounds): ByteArray? {
         val decoded = decodeDownsampled(context, uri, bounds) ?: return null
         val square = centerCrop(decoded)
         if (square !== decoded) decoded.recycle()
