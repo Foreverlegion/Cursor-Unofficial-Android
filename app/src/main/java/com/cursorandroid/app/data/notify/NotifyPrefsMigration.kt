@@ -7,7 +7,7 @@ import androidx.core.content.edit
 internal fun migrateNotifyLiveDefaults(prefs: SharedPreferences) {
     if (prefs.getBoolean(NOTIFY_LIVE_DEFAULTS_MIGRATED, false)) return
     prefs.edit {
-        if (!contains(LIVE_RUN_STATUS_KEY)) {
+        if (!prefs.contains(LIVE_RUN_STATUS_KEY)) {
             putBoolean(LIVE_RUN_STATUS_KEY, false)
         }
         putBoolean(NOTIFY_LIVE_DEFAULTS_MIGRATED, true)
