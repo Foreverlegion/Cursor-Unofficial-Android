@@ -2,6 +2,7 @@
 
 - Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.
 - Custom folder colors you pick are saved and still import from backup the same way as preset colors.
+- Inbox foreground polling no longer waits out a status rate-limit pause before calling the agent list again. Timer ticks are list-only (no status hydration on every 20 s). Resume triggers an immediate list refresh with the usual status follow-up.
 
 # 1.0.33
 
