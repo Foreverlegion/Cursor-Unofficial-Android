@@ -44,6 +44,8 @@ enum class HideFinishedAge(val days: Int, val label: String) {
 
         val settingsChoices: List<HideFinishedAge> =
             listOf(Off, Day1, Day3, Day7, Day14, Week4, Week8, Week12)
+
+        fun fromDays(days: Int): HideFinishedAge {
             val normalized = normalizeHideFinishedDays(days)
             return entries.firstOrNull { it.days == normalized } ?: Off
         }
