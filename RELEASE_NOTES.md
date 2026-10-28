@@ -1,4 +1,4 @@
-# 1.0.32
+# 1.0.33
 
 - Archive, unarchive, delete, pin, favorite, rename, hide, and mute update the list immediately. If the server call fails, the row comes back and a note shows the reason.
 - Archive waits 7 seconds before it calls Cursor. Undo in that window cancels the pending archive and does not call unarchive. The note stays for those same 7 seconds. Swiping it away does not send or cancel the archive. Each archive keeps its own timer. Pending archives are saved on the phone. Leaving the app sends them. If the app is killed first, the next launch sends them.
