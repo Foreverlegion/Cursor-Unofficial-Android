@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX
 import com.cursorandroid.app.data.repo.FolderIconImportResult
+import com.cursorandroid.app.ui.status.PlayColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

@@ -202,7 +202,7 @@ class CustomFolderIconStore(context: Context) {
         }
     }
 
-    internal fun compressUnderBudget(bitmap: Bitmap): ByteArray? {
+    private fun compressUnderBudget(bitmap: Bitmap): ByteArray? {
         var quality = FolderIconLimits.WEBP_QUALITY
         var smallest: ByteArray? = null
         repeat(6) {
