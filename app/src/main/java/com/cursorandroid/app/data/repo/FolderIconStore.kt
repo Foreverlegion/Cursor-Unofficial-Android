@@ -56,9 +56,9 @@ class FolderIconStore(context: Context) {
             } else {
                 square
             }
-            val out = File(dir, "$folderId.webp")
+            val out = File(dir, "$folderId.png")
             FileOutputStream(out).use { fos ->
-                scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 88, fos)
+                scaled.compress(Bitmap.CompressFormat.PNG, 92, fos)
             }
             scaled.recycle()
         }
