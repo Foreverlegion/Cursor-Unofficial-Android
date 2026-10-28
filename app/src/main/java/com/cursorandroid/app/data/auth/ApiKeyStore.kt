@@ -130,6 +130,10 @@ class ApiKeyStore internal constructor(
         get() = ui[UiKeys.chatDensity] ?: "comfortable"
         set(value) = ui.put(UiKeys.chatDensity, value)
 
+    var homeDensity: String
+        get() = ui[UiKeys.homeDensity] ?: "comfortable"
+        set(value) = ui.put(UiKeys.homeDensity, value)
+
     var showInboxEnvs: Boolean
         get() = ui[UiKeys.showInboxEnvs] ?: true
         set(value) = ui.put(UiKeys.showInboxEnvs, value)

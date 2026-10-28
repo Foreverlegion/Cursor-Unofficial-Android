@@ -1,3 +1,11 @@
+# 1.0.35
+
+- Agents home search is one field: type a PR URL, GitLab or Origin merge request link, or #number to filter by pull request the same way the old PR box did. Anything else still searches titles, repos, and branches locally.
+- Search collapses to a magnifying-glass icon on the Cloud / Remote tab row. It opens below the tabs with the keyboard, hides when you scroll or go back with an empty query, and shows a dot when a filter is active with the query collapsed.
+- Settings, Appearance: Home density (Compact / Comfortable / Large) scales folder rows and icons on the agent list. Comfortable is the default and uses the space saved by the slimmer search header.
+- Folders: long-press or edit, Change icon, then pick a preset, upload a photo, or Reset to default. Custom icons are stored on the phone, survive updates, and export in backup.
+- Settings, Appearance: App font adds Import font for .ttf / .otf files (validated on import). Several imports are kept with delete. Code font can use the same imports. Missing files fall back to the system font.
+
 # 1.0.34
 
 - Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.

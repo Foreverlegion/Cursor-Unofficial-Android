@@ -118,6 +118,12 @@ import com.cursorandroid.app.data.repo.ChatShare
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.withPendingArchives
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.cursorandroid.app.ui.theme.HomeDensity
+import com.cursorandroid.app.ui.theme.HomeLayout
+import com.cursorandroid.app.ui.theme.LocalHomeLayout
+import com.cursorandroid.app.data.repo.FolderIconStore
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -187,7 +193,10 @@ fun InboxScreen(
     var git by remember { mutableStateOf(loadGit()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
-    var prUrlFilter by remember { mutableStateOf("") }
+    var searchExpanded by remember { mutableStateOf(false) }
+    val inboxSearch = remember(query) { parseInboxSearchQuery(query) }
+    val apiPrUrl = inboxSearch.apiPrUrl?.takeIf { it.isNotBlank() }
+    val textNeedle = inboxSearch.textNeedle
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
     var workingOnly by remember { mutableStateOf(container.chats.inboxWorkingOnly) }
@@ -236,7 +245,7 @@ fun InboxScreen(
             if (showSpinner) refreshing = true
             error = null
             try {
-                val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
+                val page = container.repo.listAgentsPage(includeArchived = true, prUrl = apiPrUrl)
                 ensureActive()
                 val incoming = container.repo.hydrateStatuses(page.entries())
                 var latest = mergeInboxAgents(mirror.items, incoming)
@@ -259,14 +268,14 @@ fun InboxScreen(
                 var cursor = page.nextCursor
                 while (!cursor.isNullOrBlank()) {
                     ensureActive()
-                    val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
+                    val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = apiPrUrl)
                     if (more.entries().isEmpty()) break
                     latest = mergeInboxAgents(latest, more.entries())
                     applyAgents(latest, more.nextCursor, watch = false)
                     cursor = more.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
                 }
                 val marked = runCatching {
-                    val active = container.repo.listAllAgents(includeArchived = false, prUrl = prUrlFilter)
+                    val active = container.repo.listAllAgents(includeArchived = false, prUrl = apiPrUrl)
                     markCloudArchived(latest, active.entries())
                 }.getOrNull()
                 if (marked != null) {
@@ -310,7 +319,7 @@ fun InboxScreen(
         groupPrefs = container.chats.repoGroupPrefs
         revealFinished = false
     }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(apiPrUrl) {
         reload(showSpinner = items.isEmpty())
     }
     val newestNotice = notices.maxByOrNull { it.at }?.id
@@ -348,7 +357,7 @@ fun InboxScreen(
                     if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
                     val walkPages = InboxPollPolicy.walkAgentPagesDue(reason)
-                    val page = container.repo.listAgentsForInboxPoll(walkPages, prUrlFilter)
+                    val page = container.repo.listAgentsForInboxPoll(walkPages, apiPrUrl)
                     val fresh = page.entries()
                     val checks = if (InboxPollPolicy.runChecksDue(reason)) {
                         runCheckTargets(mirror.items, fresh, container.runSettle.settled.value)
@@ -563,11 +572,40 @@ fun InboxScreen(
                     }
                 }
             }
-            InboxTabStrip(
+            InboxSearchSection(
+                query = query,
+                onQueryChange = { query = it },
+                expanded = searchExpanded,
+                onExpandedChange = { searchExpanded = it },
+                cloud = tab == InboxTab.Agents,
+                cloudFilter = cloudFilter,
+                onCloudFilter = { cloudFilter = it },
+                workingOnly = workingOnly,
+                onWorkingOnly = {
+                    workingOnly = it
+                    container.chats.inboxWorkingOnly = it
+                },
+                showArchived = showArchived,
+                onShowArchived = {
+                    showArchived = it
+                    container.chats.inboxShowArchived = it
+                },
+                showHidden = showHidden,
+                onShowHidden = {
+                    showHidden = it
+                    container.chats.inboxShowHidden = it
+                },
                 tabs = tabs,
-                selected = tab,
-                onSelect = { selectedTab = it },
+                selectedTab = tab,
+                onSelectTab = { selectedTab = it },
             )
+            if (searchExpanded && query.isBlank()) {
+                BackHandler { searchExpanded = false }
+            }
+            val homeLayout = remember(settingsEpoch) {
+                HomeLayout(HomeDensity.fromId(container.store.homeDensity))
+            }
+            CompositionLocalProvider(LocalHomeLayout provides homeLayout) {
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = { reload(showSpinner = true) },
@@ -586,12 +624,11 @@ fun InboxScreen(
                         git = git,
                         live = live,
                         query = query,
+                        textNeedle = textNeedle,
                         onQueryChange = { query = it },
-                        prUrl = prUrlFilter,
-                        onApplyPrUrl = { next ->
-                            prUrlFilter = next.trim()
-                            reload()
-                        },
+                        searchExpanded = searchExpanded,
+                        onSearchExpandedChange = { searchExpanded = it },
+                        folderIcons = container.folderIcons,
                         showArchived = showArchived,
                         onShowArchived = {
                             showArchived = it
@@ -612,7 +649,7 @@ fun InboxScreen(
                             val cursor = nextCursor ?: return@AgentList
                             scope.launch {
                                 val page = runCatching {
-                                    container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
+                                    container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = apiPrUrl)
                                 }.getOrNull() ?: return@launch
                                 publish(mergeInboxAgents(mirror.items, page.entries()))
                                 nextCursor = page.nextCursor
@@ -723,6 +760,10 @@ fun InboxScreen(
                             refreshFolders()
                         },
                         onFolderIcon = { id, icon ->
+                            val previous = folders.folders.firstOrNull { it.id == id }?.icon
+                            if (previous != null && container.folderIcons.isCustom(previous) && previous != icon) {
+                                container.folderIcons.delete(previous)
+                            }
                             container.folders.setIcon(id, icon)
                             refreshFolders()
                         },
@@ -736,6 +777,7 @@ fun InboxScreen(
                         },
                     )
                 }
+            }
             }
         }
     }
@@ -805,9 +847,11 @@ private fun AgentList(
     git: Map<String, GitSnap>,
     live: Map<String, String>,
     query: String,
+    textNeedle: String,
     onQueryChange: (String) -> Unit,
-    prUrl: String,
-    onApplyPrUrl: (String) -> Unit,
+    searchExpanded: Boolean,
+    onSearchExpandedChange: (Boolean) -> Unit,
+    folderIcons: FolderIconStore,
     showArchived: Boolean,
     onShowArchived: (Boolean) -> Unit,
     showHidden: Boolean,
@@ -879,7 +923,7 @@ private fun AgentList(
         checkedIds = emptySet()
         bulkMenu = false
     }
-    val needle = query.trim()
+    val needle = textNeedle.trim()
     val favoriteIds = metas.filter { it.value.favorite }.keys
     val newest = items
         .map { overlayWorking(it, live) }
@@ -921,7 +965,7 @@ private fun AgentList(
     val favorites = arranged?.favorites ?: newest.filter { it.id in favoriteIds }
     val rest = arranged?.rest ?: newest.filter { it.id !in favoriteIds }
     val laid = arranged?.let { applyLocalFolders(it, folders, approvalIds) }
-    val filtering = needle.isNotBlank() || (cloud && cloudFilter != CloudFilter.All)
+    val filtering = needle.isNotBlank() || (cloud && cloudFilter != CloudFilter.All) || query.trim().isNotBlank()
     val visibleFolderCount = laid?.folders?.count { it.shownInList(folders, filtering) } ?: 0
     val cloudEmpty = laid != null &&
         laid.pinned.isEmpty() &&
@@ -930,170 +974,18 @@ private fun AgentList(
         laid.favorites.isEmpty() &&
         laid.rest.isEmpty() &&
         laid.hiddenFinished == 0
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
-    ) {
-        item(key = "search") {
-            Box(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Search chats") },
-                        singleLine = true,
-                    )
-                    var prDraft by remember(prUrl) { mutableStateOf(prUrl) }
-                    OutlinedTextField(
-                        value = prDraft,
-                        onValueChange = { prDraft = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        label = { Text("Filter by PR URL") },
-                        placeholder = { Text("https://github.com/org/repo/pull/1") },
-                        singleLine = true,
-                        trailingIcon = {
-                            TextButton(
-                                onClick = { onApplyPrUrl(prDraft) },
-                            ) { Text(if (prDraft.isBlank()) "Clear" else "Filter") }
-                        },
-                    )
-                    if (cloud) {
-                        FlowRow(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CloudFilter.entries.forEach { item ->
-                                FilterChip(
-                                    selected = cloudFilter == item,
-                                    onClick = { onCloudFilter(item) },
-                                    label = { Text(item.label) },
-                                )
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            FilterChip(
-                                selected = workingOnly,
-                                onClick = { onWorkingOnly(!workingOnly) },
-                                label = { Text("Working") },
-                            )
-                            FilterChip(
-                                selected = showArchived,
-                                onClick = { onShowArchived(!showArchived) },
-                                label = { Text("Archived") },
-                            )
-                            FilterChip(
-                                selected = showHidden,
-                                onClick = { onShowHidden(!showHidden) },
-                                label = { Text("Hidden") },
-                            )
-                        }
-                    }
-                }
-                if (selecting) {
-                    Surface(
-                        modifier = Modifier.matchParentSize(),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 6.dp,
-                        shadowElevation = 6.dp,
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = { stopSelecting() }) {
-                                Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
-                            }
-                            Text(
-                                if (checkedIds.isEmpty()) "Select chats" else "${checkedIds.size} selected",
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Box {
-                                TextButton(
-                                    onClick = { bulkMenu = true },
-                                    enabled = checkedIds.isNotEmpty(),
-                                ) { Text("Bulk actions") }
-                                DropdownMenu(expanded = bulkMenu, onDismissRequest = { bulkMenu = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Favorite") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onFavoriteIds(checkedIds, true)
-                                            stopSelecting()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Unfavorite") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onFavoriteIds(checkedIds, false)
-                                            stopSelecting()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Hide") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onHideIds(checkedIds, true)
-                                            stopSelecting()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Unhide") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onHideIds(checkedIds, false)
-                                            stopSelecting()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Archive") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onArchiveIds(checkedIds, true)
-                                            stopSelecting()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Unarchive") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onArchiveIds(checkedIds, false)
-                                            stopSelecting()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Move to folder") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            moveTarget = FolderMove.Chats(checkedIds)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Delete") },
-                                        onClick = {
-                                            bulkMenu = false
-                                            onDeleteIds(checkedIds)
-                                            stopSelecting()
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && shouldCollapseInboxSearch(searchExpanded, query)) {
+            onSearchExpandedChange(false)
         }
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
         when {
             error != null && items.isEmpty() -> {
                 item(key = "error") {
@@ -1143,6 +1035,7 @@ private fun AgentList(
                             onMoveChats = onMoveChats,
                             onMoveGroup = onMoveGroup,
                         ),
+                        folderIcons = folderIcons,
                         filtering = filtering,
                         groupActions = RepoGroupActions(
                             manualOrder = groupPrefs.order.isNotEmpty(),
@@ -1274,6 +1167,102 @@ private fun AgentList(
                     onClick = onLoadMore,
                     modifier = Modifier.padding(16.dp),
                 ) { Text("Load older chats") }
+            }
+        }
+    }
+        if (selecting) {
+            Surface(
+                modifier = Modifier.matchParentSize(),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                shadowElevation = 6.dp,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { stopSelecting() }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
+                    }
+                    Text(
+                        if (checkedIds.isEmpty()) "Select chats" else "${checkedIds.size} selected",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box {
+                        TextButton(
+                            onClick = { bulkMenu = true },
+                            enabled = checkedIds.isNotEmpty(),
+                        ) { Text("Bulk actions") }
+                        DropdownMenu(expanded = bulkMenu, onDismissRequest = { bulkMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Favorite") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onFavoriteIds(checkedIds, true)
+                                    stopSelecting()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Unfavorite") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onFavoriteIds(checkedIds, false)
+                                    stopSelecting()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Hide") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onHideIds(checkedIds, true)
+                                    stopSelecting()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Unhide") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onHideIds(checkedIds, false)
+                                    stopSelecting()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Archive") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onArchiveIds(checkedIds, true)
+                                    stopSelecting()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Unarchive") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onArchiveIds(checkedIds, false)
+                                    stopSelecting()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Move to folder") },
+                                onClick = {
+                                    bulkMenu = false
+                                    moveTarget = FolderMove.Chats(checkedIds)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                onClick = {
+                                    bulkMenu = false
+                                    onDeleteIds(checkedIds)
+                                    stopSelecting()
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1697,43 +1686,6 @@ internal fun AgentRow(
                     onDelete()
                 },
             )
-        }
-    }
-}
-
-@Composable
-private fun InboxTabStrip(
-    tabs: List<InboxTab>,
-    selected: InboxTab,
-    onSelect: (InboxTab) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(22.dp),
-    ) {
-        tabs.forEach { item ->
-            val active = item == selected
-            Column(
-                modifier = Modifier
-                    .clickable { onSelect(item) }
-                    .padding(top = 4.dp, bottom = 8.dp),
-            ) {
-                Text(
-                    item.title,
-                    color = if (active) PlayColors.Teal else PlayColors.Muted,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .height(2.dp)
-                        .width(if (active) 28.dp else 0.dp)
-                        .background(PlayColors.Teal),
-                )
-            }
         }
     }
 }

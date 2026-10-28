@@ -45,7 +45,7 @@ class LocalFolderStoreTest {
         )
 
         val v3 = reopen(v2)
-        assertEquals(3, v3.schemaVersion)
+        assertEquals(4, v3.schemaVersion)
         val snap = LocalFolderStore(v3).snapshot()
         assertEquals("Thermal Nexus", snap.folders.single().name)
         assertTrue(snap.folders.single().favorite)

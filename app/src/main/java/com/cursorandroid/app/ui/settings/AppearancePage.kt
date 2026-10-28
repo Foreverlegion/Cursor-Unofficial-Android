@@ -34,7 +34,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.ui.theme.HomeDensity
 import com.cursorandroid.app.ui.status.PlayColors
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
@@ -49,7 +52,7 @@ import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.theme.formatHexColor
 import com.cursorandroid.app.ui.thread.MessageText
 
-private enum class AppearanceDialog { Font, CodeFont, Density, AccentColor }
+private enum class AppearanceDialog { Font, CodeFont, ChatDensity, HomeDensity, AccentColor }
 
 private const val PREVIEW_TEXT =
     "Here is the fix. Run the check below, then open the PR.\n```\n./gradlew assembleRelease\n```"
@@ -62,6 +65,9 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
     var uiFont by remember { mutableStateOf(UiFont.fromId(store.uiFont)) }
     var codeFont by remember { mutableStateOf(CodeFont.fromId(store.codeFont)) }
     var density by remember { mutableStateOf(ChatDensity.fromId(store.chatDensity)) }
+    var homeDensity by remember { mutableStateOf(HomeDensity.fromId(store.homeDensity)) }
+    var imported by remember { mutableStateOf(container.importedFonts.list()) }
+    var fontError by remember { mutableStateOf<String?>(null) }
     var scale by remember { mutableFloatStateOf(clampTextScale(store.textScalePct).toFloat()) }
     var dialog by remember { mutableStateOf<AppearanceDialog?>(null) }
 
@@ -101,19 +107,24 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
     HorizontalDivider()
 
     SettingsChoiceRow(
-        title = "Font",
-        summary = uiFont.label,
+        title = "App font",
+        summary = fontSummary(store.uiFont, imported),
         onClick = { dialog = AppearanceDialog.Font },
     )
     SettingsChoiceRow(
         title = "Code font",
-        summary = codeFont.label,
+        summary = fontSummary(store.codeFont, imported, bundled = CodeFont.entries.map { it.id to it.label }),
         onClick = { dialog = AppearanceDialog.CodeFont },
     )
     SettingsChoiceRow(
         title = "Chat density",
         summary = "${density.label} · ${density.summary}",
-        onClick = { dialog = AppearanceDialog.Density },
+        onClick = { dialog = AppearanceDialog.ChatDensity },
+    )
+    SettingsChoiceRow(
+        title = "Home density",
+        summary = "${homeDensity.label} · ${homeDensity.summary}",
+        onClick = { dialog = AppearanceDialog.HomeDensity },
     )
 
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -166,31 +177,100 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
             },
             onDismiss = { dialog = null },
         )
-        AppearanceDialog.Font -> ChoiceDialog(
-            title = "Font",
-            selected = uiFont.id,
-            options = UiFont.entries.map { it.id to it.label },
-            onDismiss = { dialog = null },
-            onPick = { id ->
+        AppearanceDialog.Font -> AppFontPickerDialog(
+            title = "App font",
+            selected = store.uiFont,
+            imported = imported,
+            error = fontError,
+            onDismiss = {
+                fontError = null
+                dialog = null
+            },
+            onPickBundled = { id ->
                 uiFont = UiFont.fromId(id)
                 store.uiFont = uiFont.id
+                fontError = null
                 dialog = null
                 onChanged()
             },
+            onPickImported = { id ->
+                store.uiFont = container.importedFonts.ref(id)
+                uiFont = UiFont.System
+                fontError = null
+                dialog = null
+                onChanged()
+            },
+            onImport = { uri, name ->
+                container.importedFonts.importFromUri(uri, name).fold(
+                    onSuccess = {
+                        imported = container.importedFonts.list()
+                        store.uiFont = container.importedFonts.ref(it.id)
+                        fontError = null
+                        dialog = null
+                        onChanged()
+                    },
+                    onFailure = { fontError = it.message ?: "Could not import font" },
+                )
+            },
+            onDeleteImported = { id ->
+                if (container.importedFonts.isImportRef(store.uiFont) &&
+                    container.importedFonts.importId(store.uiFont) == id
+                ) {
+                    store.uiFont = UiFont.System.id
+                }
+                container.importedFonts.delete(id)
+                imported = container.importedFonts.list()
+                onChanged()
+            },
         )
-        AppearanceDialog.CodeFont -> ChoiceDialog(
+        AppearanceDialog.CodeFont -> AppFontPickerDialog(
             title = "Code font",
-            selected = codeFont.id,
-            options = CodeFont.entries.map { it.id to it.label },
-            onDismiss = { dialog = null },
-            onPick = { id ->
+            selected = store.codeFont,
+            imported = imported,
+            error = fontError,
+            bundled = CodeFont.entries.map { it.id to it.label },
+            onDismiss = {
+                fontError = null
+                dialog = null
+            },
+            onPickBundled = { id ->
                 codeFont = CodeFont.fromId(id)
                 store.codeFont = codeFont.id
+                fontError = null
                 dialog = null
                 onChanged()
             },
+            onPickImported = { id ->
+                store.codeFont = container.importedFonts.ref(id)
+                codeFont = CodeFont.SystemMono
+                fontError = null
+                dialog = null
+                onChanged()
+            },
+            onImport = { uri, name ->
+                container.importedFonts.importFromUri(uri, name).fold(
+                    onSuccess = {
+                        imported = container.importedFonts.list()
+                        store.codeFont = container.importedFonts.ref(it.id)
+                        fontError = null
+                        dialog = null
+                        onChanged()
+                    },
+                    onFailure = { fontError = it.message ?: "Could not import font" },
+                )
+            },
+            onDeleteImported = { id ->
+                if (container.importedFonts.isImportRef(store.codeFont) &&
+                    container.importedFonts.importId(store.codeFont) == id
+                ) {
+                    store.codeFont = CodeFont.SystemMono.id
+                }
+                container.importedFonts.delete(id)
+                imported = container.importedFonts.list()
+                onChanged()
+            },
         )
-        AppearanceDialog.Density -> ChoiceDialog(
+        AppearanceDialog.ChatDensity -> ChoiceDialog(
             title = "Chat density",
             selected = density.id,
             options = ChatDensity.entries.map { it.id to "${it.label} · ${it.summary}" },
@@ -202,8 +282,97 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
                 onChanged()
             },
         )
+        AppearanceDialog.HomeDensity -> ChoiceDialog(
+            title = "Home density",
+            selected = homeDensity.id,
+            options = HomeDensity.entries.map { it.id to "${it.label} · ${it.summary}" },
+            onDismiss = { dialog = null },
+            onPick = { id ->
+                homeDensity = HomeDensity.fromId(id)
+                store.homeDensity = homeDensity.id
+                dialog = null
+                onChanged()
+            },
+        )
         null -> Unit
     }
+}
+
+private fun fontSummary(
+    selected: String,
+    imported: List<com.cursorandroid.app.data.repo.ImportedFontRecord>,
+    bundled: List<Pair<String, String>> = UiFont.entries.map { it.id to it.label },
+): String {
+    val importId = selected.removePrefix(com.cursorandroid.app.data.repo.ImportedFontStore.PREFIX)
+    if (selected.startsWith(com.cursorandroid.app.data.repo.ImportedFontStore.PREFIX)) {
+        return imported.firstOrNull { it.id == importId }?.label ?: "Imported font"
+    }
+    return bundled.firstOrNull { it.first == selected }?.second ?: selected
+}
+
+@Composable
+private fun AppFontPickerDialog(
+    title: String,
+    selected: String,
+    imported: List<com.cursorandroid.app.data.repo.ImportedFontRecord>,
+    error: String?,
+    bundled: List<Pair<String, String>> = UiFont.entries.map { it.id to it.label },
+    onDismiss: () -> Unit,
+    onPickBundled: (String) -> Unit,
+    onPickImported: (String) -> Unit,
+    onImport: (android.net.Uri, String?) -> Unit,
+    onDeleteImported: (String) -> Unit,
+) {
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) onImport(uri, uri.lastPathSegment)
+    }
+    ChoiceDialog(
+        title = title,
+        selected = if (selected.startsWith(com.cursorandroid.app.data.repo.ImportedFontStore.PREFIX)) {
+            selected
+        } else {
+            selected
+        },
+        options = bundled +
+            imported.map { com.cursorandroid.app.data.repo.ImportedFontStore.PREFIX + it.id to it.label },
+        onDismiss = onDismiss,
+        onPick = { id ->
+            if (id.startsWith(com.cursorandroid.app.data.repo.ImportedFontStore.PREFIX)) {
+                onPickImported(id.removePrefix(com.cursorandroid.app.data.repo.ImportedFontStore.PREFIX))
+            } else {
+                onPickBundled(id)
+            }
+        },
+        footer = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (!error.isNullOrBlank()) {
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        picker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/x-font-otf"))
+                    },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) { Text("Import font…") }
+                imported.forEach { record ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(record.label, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { onDeleteImported(record.id) }) { Text("Delete") }
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable

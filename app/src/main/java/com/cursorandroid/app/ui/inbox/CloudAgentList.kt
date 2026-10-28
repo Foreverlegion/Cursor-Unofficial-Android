@@ -33,6 +33,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import com.cursorandroid.app.data.repo.GroupMove
+import com.cursorandroid.app.data.repo.FolderIconStore
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.moveGroupKey
 import com.cursorandroid.app.ui.theme.ColorPickerDialog
@@ -70,6 +71,7 @@ internal class RepoGroupActions(
 internal fun LazyListScope.cloudAgentBlocks(
     laid: FolderedCloud,
     folderActions: FolderListActions,
+    folderIcons: FolderIconStore?,
     filtering: Boolean,
     groupActions: RepoGroupActions,
     groupByRepo: Boolean,
@@ -91,6 +93,7 @@ internal fun LazyListScope.cloudAgentBlocks(
             FolderHeader(
                 folder = block.folder,
                 count = block.count,
+                iconStore = folderIcons,
                 onToggle = { folderActions.onToggleCollapsed(block.folder.id) },
                 onRename = { onRenameFolder(block.folder) },
                 onDelete = { onDeleteFolder(block.folder) },

@@ -65,7 +65,17 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.repo.FolderMembership
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.LocalFolderStore
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import com.cursorandroid.app.data.repo.FolderIconStore
 import com.cursorandroid.app.ui.theme.ColorPickerDialog
+import com.cursorandroid.app.ui.theme.LocalHomeLayout
 
 internal class FolderListActions(
     val membership: FolderMembership,
@@ -90,6 +100,7 @@ internal sealed class FolderMove {
 internal fun FolderHeader(
     folder: LocalFolder,
     count: Int,
+    iconStore: FolderIconStore?,
     onToggle: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -102,7 +113,14 @@ internal fun FolderHeader(
     var iconOpen by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val expanded = !folder.collapsed
+    val layout = LocalHomeLayout.current
     val nameColor = if (folder.color != 0) Color(folder.color) else MaterialTheme.colorScheme.onSurface
+    val titleStyle = MaterialTheme.typography.titleSmall.copy(
+        fontSize = MaterialTheme.typography.titleSmall.fontSize * layout.folderTitleScale,
+    )
+    val countStyle = MaterialTheme.typography.labelLarge.copy(
+        fontSize = MaterialTheme.typography.labelLarge.fontSize * layout.folderCountScale,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -113,24 +131,24 @@ internal fun FolderHeader(
                     menu = true
                 },
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = layout.folderRowPadV),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(layout.folderRowGap),
     ) {
         Icon(
             imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
             contentDescription = if (expanded) "Collapse ${folder.name}" else "Expand ${folder.name}",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Icon(
-            imageVector = folderIcon(folder.icon),
-            contentDescription = null,
+        FolderIconGlyph(
+            folder = folder,
+            iconStore = iconStore,
             tint = if (folder.color != 0) nameColor else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
+            size = layout.folderIconSize,
         )
         Text(
             folder.name,
-            style = MaterialTheme.typography.titleSmall,
+            style = titleStyle,
             color = nameColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -146,7 +164,7 @@ internal fun FolderHeader(
         }
         Text(
             count.toString(),
-            style = MaterialTheme.typography.labelLarge,
+            style = countStyle,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
@@ -173,7 +191,7 @@ internal fun FolderHeader(
                 },
             )
             DropdownMenuItem(
-                text = { Text("Icon") },
+                text = { Text("Change icon") },
                 onClick = {
                     menu = false
                     iconOpen = true
@@ -204,7 +222,9 @@ internal fun FolderHeader(
     }
     if (iconOpen) {
         FolderIconDialog(
+            folderId = folder.id,
             selected = folder.icon,
+            iconStore = iconStore,
             onPick = {
                 iconOpen = false
                 onIcon(it)
@@ -212,6 +232,36 @@ internal fun FolderHeader(
             onDismiss = { iconOpen = false },
         )
     }
+}
+
+@Composable
+private fun FolderIconGlyph(
+    folder: LocalFolder,
+    iconStore: FolderIconStore?,
+    tint: Color,
+    size: androidx.compose.ui.unit.Dp,
+) {
+    val custom = folder.icon.takeIf { iconStore?.isCustom(it) == true }
+    if (custom != null && iconStore != null) {
+        val bitmap = remember(custom) { iconStore.loadBitmap(custom)?.asImageBitmap() }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size)
+                    .clip(CircleShape),
+            )
+            return
+        }
+    }
+    Icon(
+        imageVector = folderIcon(folder.icon),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(size),
+    )
 }
 
 @Composable
@@ -347,48 +397,68 @@ internal fun folderIconChoices(): List<Pair<String, ImageVector>> = listOf(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FolderIconDialog(
+    folderId: String,
     selected: String,
+    iconStore: FolderIconStore?,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null || iconStore == null) return@rememberLauncherForActivityResult
+        val ref = iconStore.importForFolder(folderId, uri) ?: return@rememberLauncherForActivityResult
+        onPick(ref)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Icon") },
+        title = { Text("Change icon") },
         text = {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                folderIconChoices().forEach { (id, icon) ->
-                    val picked = id == selected
-                    val label = if (id.isEmpty()) "Default folder" else id
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .border(
-                                width = if (picked) 2.dp else 1.dp,
-                                color = if (picked) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.outline
-                                },
-                                shape = CircleShape,
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    folderIconChoices().forEach { (id, icon) ->
+                        val picked = id == selected
+                        val label = if (id.isEmpty()) "Default folder" else id
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    width = if (picked) 2.dp else 1.dp,
+                                    color = if (picked) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outline
+                                    },
+                                    shape = CircleShape,
+                                )
+                                .clickable { onPick(id) }
+                                .semantics { contentDescription = label },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
                             )
-                            .clickable { onPick(id) }
-                            .semantics { contentDescription = label },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                        )
+                        }
                     }
+                }
+                if (iconStore != null) {
+                    TextButton(
+                        onClick = {
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                    ) { Text("Upload image") }
                 }
             }
         },
         confirmButton = {
+            TextButton(onClick = { onPick("") }) { Text("Reset to default") }
+        },
+        dismissButton = {
             TextButton(onClick = onDismiss) { Text("Close") }
         },
     )

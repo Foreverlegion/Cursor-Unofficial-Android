@@ -30,6 +30,8 @@ import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.ForgeSyncStore
 import com.cursorandroid.app.data.repo.ForgeSyncer
 import com.cursorandroid.app.data.repo.InboxRefreshHub
+import com.cursorandroid.app.data.repo.FolderIconStore
+import com.cursorandroid.app.data.repo.ImportedFontStore
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
 import com.cursorandroid.app.data.repo.RunSettleHub
@@ -182,6 +184,8 @@ class AppContainer(context: Context) {
 
     val signals = InboxSignals()
     val folders = LocalFolderStore(ui)
+    val folderIcons = FolderIconStore(context.applicationContext)
+    val importedFonts = ImportedFontStore(ui, context.applicationContext)
     val archives = ArchiveCoordinator(
         store = PendingArchiveStore(ui),
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),

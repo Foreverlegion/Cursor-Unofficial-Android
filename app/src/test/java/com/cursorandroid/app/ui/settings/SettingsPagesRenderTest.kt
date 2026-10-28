@@ -26,7 +26,8 @@ import com.cursorandroid.app.ui.theme.Appearance
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
 import com.cursorandroid.app.ui.theme.CursorTheme
-import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.bundledCodeFontFamily
+import com.cursorandroid.app.ui.theme.bundledUiFontFamily
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import org.junit.Before
@@ -101,8 +102,8 @@ class SettingsPagesRenderTest {
         c.store.chatDensity = "compact"
         compose.setContent {
             val appearance = Appearance(
-                uiFont = UiFont.fromId(c.store.uiFont),
-                codeFont = CodeFont.fromId(c.store.codeFont),
+                uiFontFamily = bundledUiFontFamily(c.store.uiFont),
+                codeFontFamily = bundledCodeFontFamily(c.store.codeFont),
                 textScalePct = c.store.textScalePct,
                 density = ChatDensity.fromId(c.store.chatDensity),
             )
@@ -118,7 +119,7 @@ class SettingsPagesRenderTest {
         }
         compose.waitForIdle()
         compose.onNodeWithText("Preview").assertIsDisplayed()
-        compose.onNodeWithText("Font").assertExists()
+        compose.onNodeWithText("App font").assertExists()
     }
 
     @Test

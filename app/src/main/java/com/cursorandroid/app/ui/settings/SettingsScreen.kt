@@ -1035,6 +1035,7 @@ internal fun ChoiceDialog(
     options: List<Pair<String, String>>,
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
+    footer: @Composable (() -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1060,6 +1061,7 @@ internal fun ChoiceDialog(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
+                footer?.invoke()
             }
         },
         confirmButton = {

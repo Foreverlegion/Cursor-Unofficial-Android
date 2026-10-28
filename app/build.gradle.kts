@@ -50,8 +50,8 @@ android {
         applicationId = "com.cursorandroid.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 134
-        versionName = "1.0.34"
+        versionCode = 135
+        versionName = "1.0.35"
         buildConfigField(
             "String",
             "APP_ISSUES_TOKEN",
