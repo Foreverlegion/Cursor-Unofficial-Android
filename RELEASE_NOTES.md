@@ -5,6 +5,7 @@
 - Settings, Appearance: Home density (Compact, Comfortable, Large) scales folder and repo rows on the agent list. Comfortable defaults are roomier now that search takes less space.
 - Folder Change icon keeps every built-in icon and adds Upload image (photo picker, no storage permission). Images are cropped square, saved on the phone, and survive updates and backup.
 - Settings, Appearance: App font adds Import font for `.ttf` and `.otf` files (validated on import). Pick among imported fonts or delete them. Code font can use an imported face too. Missing files fall back to the system font.
+- Live run status uses one notification per agent (stable id and tag). Updates replace it instead of stacking duplicates. No empty progress bar on Android 16; elapsed time shows in the body when known.
 
 # 1.0.34
 

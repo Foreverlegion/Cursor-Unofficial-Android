@@ -13,7 +13,12 @@ object RunWatchStore {
     }
 
     fun add(context: Context, item: WatchItem) {
-        val next = all(context).filterNot { it.runId == item.runId } + item
+        val now = System.currentTimeMillis()
+        val normalized = item.copy(
+            startedAtMs = item.startedAtMs.takeIf { it > 0L } ?: now,
+        )
+        val next = all(context)
+            .filterNot { it.agentId == normalized.agentId || it.runId == normalized.runId } + normalized
         save(context, next)
     }
 
@@ -48,4 +53,5 @@ data class WatchItem(
     val agentId: String,
     val runId: String,
     val agentName: String? = null,
+    val startedAtMs: Long = 0L,
 )

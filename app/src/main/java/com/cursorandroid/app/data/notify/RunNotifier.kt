@@ -128,7 +128,7 @@ class RunNotifier(
         val title = chatTitle(agentId, agentName)
         val fresh = notices.record(agentId, title, runId, status, result)
         val terminal = status?.uppercase() in TERMINAL
-        if (terminal) clearLiveRun(runId)
+        if (terminal) clearLiveRun(agentId, runId)
         if (!store.notifyOnComplete) return
         if (!terminal) return
         if (!fresh) return
@@ -171,10 +171,13 @@ class RunNotifier(
     ) {
         if (!store.liveRunStatus) return
         if (skipShade(agentId)) {
-            clearLiveRun(runId)
+            clearLiveRun(agentId, runId)
             return
         }
         if (!NotifyPermission.granted(context)) return
+        cancelLegacyLiveSlots(agentId, runId)
+        val slot = liveNotificationSlot(agentId)
+        val watch = RunWatchStore.all(context).firstOrNull { it.agentId == agentId }
         val title = chatTitle(agentId, agentName)
         val content = liveRunNotificationContent(
             chatTitle = title,
@@ -182,14 +185,14 @@ class RunNotifier(
             runStatus = runStatus,
             activityHint = activityHint,
             approvalPending = approvalPending,
+            startedAtMs = watch?.startedAtMs ?: 0L,
         ) ?: run {
-            clearLiveRun(runId)
+            clearLiveRun(agentId, runId)
             return
         }
         ensureChannel()
-        val notifyId = liveNotifyId(runId)
-        val notification = buildLiveNotification(agentId, runId, notifyId, content)
-        NotifyShade.post(context, notifyId, notification)
+        val notification = buildLiveNotification(agentId, runId, slot, content)
+        NotifyShade.post(context, slot.id, notification, slot.tag)
     }
 
     fun syncLiveFromWatchList(agents: List<AgentSummary>) {
@@ -219,22 +222,39 @@ class RunNotifier(
         }
     }
 
-    fun clearLiveRun(runId: String) {
-        NotifyShade.cancel(context, liveNotifyId(runId))
+    fun clearLiveRun(agentId: String, runId: String? = null) {
+        val slot = liveNotificationSlot(agentId)
+        NotifyShade.cancel(context, slot.id, slot.tag)
+        cancelLegacyLiveSlots(agentId, runId)
     }
 
     fun clearAllLiveRuns() {
-        RunWatchStore.all(context).forEach { clearLiveRun(it.runId) }
+        RunWatchStore.all(context).forEach { clearLiveRun(it.agentId, it.runId) }
+    }
+
+    private fun cancelLegacyLiveSlots(agentId: String, runId: String?) {
+        runId?.let { legacy ->
+            val legacySlot = legacyLiveNotificationSlot(legacy)
+            NotifyShade.cancel(context, legacySlot.id, legacySlot.tag)
+            NotifyShade.cancel(context, legacySlot.id)
+        }
+        RunWatchStore.all(context)
+            .filter { it.agentId == agentId && runId != null && it.runId != runId }
+            .forEach { item ->
+                val old = legacyLiveNotificationSlot(item.runId)
+                NotifyShade.cancel(context, old.id, old.tag)
+                NotifyShade.cancel(context, old.id)
+            }
     }
 
     @SuppressLint("NewApi")
     private fun buildLiveNotification(
         agentId: String,
         runId: String,
-        notifyId: Int,
+        slot: LiveNotificationSlot,
         content: LiveRunNotificationContent,
     ): Notification {
-        val open = openChat(context, agentId, runId, notifyId)
+        val open = openChat(context, agentId, runId, slot.id)
         val promote = Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API &&
             store.liveRunStatus &&
             context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
@@ -246,7 +266,6 @@ class RunNotifier(
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(open)
-                .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
             if (promote) {
                 builder.setRequestPromotedOngoing(true)
                 builder.setShortCriticalText(content.shortCriticalText)

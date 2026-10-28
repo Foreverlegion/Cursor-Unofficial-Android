@@ -7,13 +7,27 @@ import androidx.core.app.NotificationManagerCompat
 
 object NotifyShade {
     @SuppressLint("MissingPermission")
-    fun post(context: Context, id: Int, notification: Notification) {
+    fun post(context: Context, id: Int, notification: Notification, tag: String? = null) {
         if (!NotifyPermission.granted(context)) return
-        runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
+        val manager = NotificationManagerCompat.from(context)
+        runCatching {
+            if (tag.isNullOrBlank()) {
+                manager.notify(id, notification)
+            } else {
+                manager.notify(tag, id, notification)
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
-    fun cancel(context: Context, id: Int) {
-        runCatching { NotificationManagerCompat.from(context).cancel(id) }
+    fun cancel(context: Context, id: Int, tag: String? = null) {
+        val manager = NotificationManagerCompat.from(context)
+        runCatching {
+            if (tag.isNullOrBlank()) {
+                manager.cancel(id)
+            } else {
+                manager.cancel(tag, id)
+            }
+        }
     }
 }

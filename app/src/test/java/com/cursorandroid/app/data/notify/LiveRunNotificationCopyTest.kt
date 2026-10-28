@@ -1,6 +1,7 @@
 package com.cursorandroid.app.data.notify
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -68,8 +69,42 @@ class LiveRunNotificationCopyTest {
     }
 
     @Test
-    fun liveNotifyIdIsStable() {
-        assertEquals(liveNotifyId("run-1"), liveNotifyId("run-1"))
-        assert(liveNotifyId("run-1") != liveNotifyId("run-2"))
+    fun liveNotificationSlotIsStablePerAgent() {
+        val first = liveNotificationSlot("agent-1")
+        val second = liveNotificationSlot("agent-1")
+        assertEquals(first, second)
+        assertEquals(LIVE_RUN_NOTIFICATION_TAG, first.tag)
+        assertNotEquals(first, liveNotificationSlot("agent-2"))
+    }
+
+    @Test
+    fun workerAndInboxPathsShareOneSlotPerAgent() {
+        val agentId = "bc-agent-9"
+        val fromWorker = liveNotificationSlot(agentId)
+        val fromInboxSync = liveNotificationSlot(agentId)
+        assertEquals(fromWorker.tag, fromInboxSync.tag)
+        assertEquals(fromWorker.id, fromInboxSync.id)
+        assertNotEquals(
+            fromWorker.id,
+            legacyLiveNotificationSlot("run-old").id,
+        )
+    }
+
+    @Test
+    fun elapsedTimeAppendsToBody() {
+        val content = liveRunNotificationContent(
+            chatTitle = "Job",
+            agentStatus = "ACTIVE",
+            runStatus = "RUNNING",
+            startedAtMs = 5_000L,
+            nowMs = 125_000L,
+        )
+        requireNotNull(content)
+        assertEquals("Active · Running · 2m", content.body)
+    }
+
+    @Test
+    fun liveNotifyIdLegacyAliasMatchesRunKeyedSlot() {
+        assertEquals(legacyLiveNotificationSlot("run-1").id, liveNotifyId("run-1"))
     }
 }
