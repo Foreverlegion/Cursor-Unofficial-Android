@@ -35,7 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.cursorandroid.app.data.repo.GroupMove
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.moveGroupKey
-import com.cursorandroid.app.ui.theme.ColorPickerDialog
+import com.cursorandroid.app.ui.theme.LocalAppearance
+import com.cursorandroid.app.ui.theme.HomeDensity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -91,12 +92,14 @@ internal fun LazyListScope.cloudAgentBlocks(
             FolderHeader(
                 folder = block.folder,
                 count = block.count,
+                iconStore = folderActions.iconStore,
                 onToggle = { folderActions.onToggleCollapsed(block.folder.id) },
                 onRename = { onRenameFolder(block.folder) },
                 onDelete = { onDeleteFolder(block.folder) },
                 onToggleFavorite = { folderActions.onToggleFavorite(block.folder.id) },
                 onColor = { folderActions.onColor(block.folder.id, it) },
                 onIcon = { folderActions.onIcon(block.folder.id, it) },
+                onUploadIcon = { folderActions.onUploadIcon(block.folder.id) },
             )
         }
         if (!block.folder.collapsed) {
@@ -240,7 +243,13 @@ internal fun RepoGroupHeader(
     var renameOpen by remember { mutableStateOf(false) }
     var colorOpen by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
+    val home = LocalAppearance.current.homeDensity
     val nameColor = if (color != 0) Color(color) else MaterialTheme.colorScheme.onSurface
+    val titleStyle = when (home) {
+        HomeDensity.Large -> MaterialTheme.typography.titleLarge
+        HomeDensity.Compact -> MaterialTheme.typography.titleSmall
+        HomeDensity.Comfortable -> MaterialTheme.typography.titleMedium
+    }
     Box {
         Row(
             modifier = Modifier
@@ -252,7 +261,7 @@ internal fun RepoGroupHeader(
                         menu = true
                     },
                 )
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = home.repoRowPadV.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -268,7 +277,7 @@ internal fun RepoGroupHeader(
                 ) {
                     Text(
                         label,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = titleStyle,
                         color = nameColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

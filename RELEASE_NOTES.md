@@ -1,3 +1,11 @@
+# 1.0.35
+
+- Inbox search is one field: type a chat keyword or paste a pull-request URL (GitHub, GitLab, or Origin) or `#123` to filter by PR. The separate PR URL box is gone.
+- Search collapses to a magnifying-glass icon beside the Cloud and Remote tabs. Tap to expand; it hides when you scroll, go back, or tap away if the query is empty. An active query keeps the filter and shows a dot on the icon.
+- Settings, Appearance: Home density (Compact, Comfortable, Large) scales folder and repo rows on the agent list. Comfortable defaults are roomier now that search takes less space.
+- Folder Change icon keeps every built-in icon and adds Upload image (photo picker, no storage permission). Images are cropped square, saved on the phone, and survive updates and backup.
+- Settings, Appearance: App font adds Import font for `.ttf` and `.otf` files (validated on import). Pick among imported fonts or delete them. Code font can use an imported face too. Missing files fall back to the system font.
+
 # 1.0.34
 
 - Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.

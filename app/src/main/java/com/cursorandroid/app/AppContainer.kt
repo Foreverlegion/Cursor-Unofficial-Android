@@ -15,7 +15,8 @@ import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
 import com.cursorandroid.app.data.repo.ArchiveCoordinator
 import com.cursorandroid.app.data.repo.InboxSignals
-import com.cursorandroid.app.data.repo.LocalFolderStore
+import com.cursorandroid.app.data.repo.CustomFolderIconStore
+import com.cursorandroid.app.data.repo.ImportedFontStore
 import com.cursorandroid.app.data.repo.PendingArchiveStore
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
 import com.cursorandroid.app.data.repo.StagedRestore
@@ -182,6 +183,8 @@ class AppContainer(context: Context) {
 
     val signals = InboxSignals()
     val folders = LocalFolderStore(ui)
+    val folderIcons = CustomFolderIconStore(context)
+    val importedFonts = ImportedFontStore(context, ui)
     val archives = ArchiveCoordinator(
         store = PendingArchiveStore(ui),
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),

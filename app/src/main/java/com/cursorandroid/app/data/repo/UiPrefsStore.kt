@@ -54,6 +54,8 @@ object UiKeys {
     val codeFont = stringPreferencesKey("code_font")
     val textScalePct = intPreferencesKey("text_scale_pct")
     val chatDensity = stringPreferencesKey("chat_density")
+    val homeDensity = stringPreferencesKey("home_density")
+    val importedFonts = stringPreferencesKey("imported_fonts")
 
     val machinePrefs = stringPreferencesKey("machine_prefs")
     val machinePrefsUnreadable = stringPreferencesKey("machine_prefs_unreadable")
@@ -98,6 +100,7 @@ internal val schemaZeroToOne = UiMigrationStep(0) { p, legacy ->
     p.seed(UiKeys.codeFont, old["code_font"])
     p.seed(UiKeys.textScalePct, old["text_scale_pct"])
     p.seed(UiKeys.chatDensity, old["chat_density"])
+    p.seed(UiKeys.homeDensity, old["home_density"])
     val collapsed = (old["agent_collapsed_repos"] as? Set<*>)?.filterIsInstance<String>()?.toSet()
     if (collapsed != null) p.seed(UiKeys.collapsedRepos, collapsed)
     p.seed(UiKeys.chatMeta, legacy.chatMetaJson)

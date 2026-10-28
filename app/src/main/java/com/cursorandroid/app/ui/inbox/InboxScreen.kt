@@ -5,6 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -187,7 +191,12 @@ fun InboxScreen(
     var git by remember { mutableStateOf(loadGit()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
+    val searchParsed = remember(query) { InboxSearch.parse(query) }
     var prUrlFilter by remember { mutableStateOf("") }
+    var searchExpanded by remember { mutableStateOf(false) }
+    var searchFocusPulse by remember { mutableStateOf(false) }
+    var iconUploadFolderId by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
     var workingOnly by remember { mutableStateOf(container.chats.inboxWorkingOnly) }
@@ -215,6 +224,20 @@ fun InboxScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var reloadJob by remember { mutableStateOf<Job?>(null) }
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        val folderId = iconUploadFolderId
+        iconUploadFolderId = null
+        if (folderId == null || uri == null) return@rememberLauncherForActivityResult
+        val iconId = container.folderIcons.importFromUri(context, uri) ?: return@rememberLauncherForActivityResult
+        val old = folders.folders.firstOrNull { it.id == folderId }?.icon
+        if (!old.isNullOrBlank() && old.startsWith(com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX)) {
+            container.folderIcons.delete(old)
+        }
+        container.folders.setIcon(folderId, iconId)
+        refreshFolders()
+    }
 
     fun applyAgents(incoming: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
         val agents = settleAgents(incoming, container.runSettle.settled.value, container.runSettle.liveRuns.value)
@@ -282,6 +305,22 @@ fun InboxScreen(
         }
         scope.launch {
             runCatching { container.repo.repositories() }
+        }
+    }
+
+    LaunchedEffect(searchParsed.prUrlForApi) {
+        val next = searchParsed.prUrlForApi.orEmpty()
+        if (next != prUrlFilter) {
+            prUrlFilter = next
+            reload()
+        }
+    }
+    BackHandler(enabled = searchExpanded) {
+        searchExpanded = false
+    }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && query.isBlank()) {
+            searchExpanded = false
         }
     }
 
@@ -563,11 +602,73 @@ fun InboxScreen(
                     }
                 }
             }
-            InboxTabStrip(
+            InboxTabStripWithSearch(
                 tabs = tabs,
                 selected = tab,
                 onSelect = { selectedTab = it },
+                searchExpanded = searchExpanded,
+                onToggleSearch = {
+                    if (searchExpanded && query.isBlank()) {
+                        searchExpanded = false
+                    } else {
+                        searchExpanded = true
+                        searchFocusPulse = true
+                    }
+                },
+                searchActive = query.isNotBlank(),
             )
+            InboxSearchField(
+                expanded = searchExpanded,
+                query = query,
+                onQueryChange = { query = it },
+                requestFocus = searchFocusPulse,
+                onFocusConsumed = { searchFocusPulse = false },
+            )
+            if (tab == InboxTab.Agents) {
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CloudFilter.entries.forEach { item ->
+                        FilterChip(
+                            selected = cloudFilter == item,
+                            onClick = { cloudFilter = item },
+                            label = { Text(item.label) },
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = workingOnly,
+                        onClick = {
+                            workingOnly = !workingOnly
+                            container.chats.inboxWorkingOnly = workingOnly
+                        },
+                        label = { Text("Working") },
+                    )
+                    FilterChip(
+                        selected = showArchived,
+                        onClick = {
+                            showArchived = !showArchived
+                            container.chats.inboxShowArchived = showArchived
+                        },
+                        label = { Text("Archived") },
+                    )
+                    FilterChip(
+                        selected = showHidden,
+                        onClick = {
+                            showHidden = !showHidden
+                            container.chats.inboxShowHidden = showHidden
+                        },
+                        label = { Text("Hidden") },
+                    )
+                }
+            }
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = { reload(showSpinner = true) },
@@ -587,11 +688,7 @@ fun InboxScreen(
                         live = live,
                         query = query,
                         onQueryChange = { query = it },
-                        prUrl = prUrlFilter,
-                        onApplyPrUrl = { next ->
-                            prUrlFilter = next.trim()
-                            reload()
-                        },
+                        listState = listState,
                         showArchived = showArchived,
                         onShowArchived = {
                             showArchived = it
@@ -723,8 +820,17 @@ fun InboxScreen(
                             refreshFolders()
                         },
                         onFolderIcon = { id, icon ->
+                            val old = folders.folders.firstOrNull { it.id == id }?.icon
+                            if (!old.isNullOrBlank() && old.startsWith(com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX) && old != icon) {
+                                container.folderIcons.delete(old)
+                            }
                             container.folders.setIcon(id, icon)
                             refreshFolders()
+                        },
+                        iconStore = container.folderIcons,
+                        onUploadFolderIcon = { folderId ->
+                            iconUploadFolderId = folderId
+                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
                         onMoveChats = { ids, folderId ->
                             container.folders.moveChats(ids, folderId)
@@ -806,8 +912,7 @@ private fun AgentList(
     live: Map<String, String>,
     query: String,
     onQueryChange: (String) -> Unit,
-    prUrl: String,
-    onApplyPrUrl: (String) -> Unit,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     showArchived: Boolean,
     onShowArchived: (Boolean) -> Unit,
     showHidden: Boolean,
@@ -852,6 +957,8 @@ private fun AgentList(
     onToggleFolderFavorite: (String) -> Unit,
     onFolderColor: (String, Int) -> Unit,
     onFolderIcon: (String, String) -> Unit,
+    iconStore: com.cursorandroid.app.data.repo.CustomFolderIconStore,
+    onUploadFolderIcon: (String) -> Unit,
     onMoveChats: (Set<String>, String?) -> Unit,
     onMoveGroup: (String, String?) -> Unit,
 ) {
@@ -879,12 +986,17 @@ private fun AgentList(
         checkedIds = emptySet()
         bulkMenu = false
     }
-    val needle = query.trim()
+    val parsed = remember(query) { InboxSearch.parse(query) }
+    val needle = parsed.textNeedle
     val favoriteIds = metas.filter { it.value.favorite }.keys
     val newest = items
         .map { overlayWorking(it, live) }
         .filter { agent ->
             if (!cloud && workingOnly && !agent.isWorking()) return@filter false
+            if (parsed.prNumber != null) {
+                val snap = git[agent.id]
+                if (!InboxSearch.matchesPrNumber(snap?.prUrl, parsed.prNumber)) return@filter false
+            }
             if (needle.isBlank()) return@filter true
             val title = metas[agent.id]?.title
             val snap = git[agent.id]
@@ -921,7 +1033,7 @@ private fun AgentList(
     val favorites = arranged?.favorites ?: newest.filter { it.id in favoriteIds }
     val rest = arranged?.rest ?: newest.filter { it.id !in favoriteIds }
     val laid = arranged?.let { applyLocalFolders(it, folders, approvalIds) }
-    val filtering = needle.isNotBlank() || (cloud && cloudFilter != CloudFilter.All)
+    val filtering = parsed.hasPrFilter || needle.isNotBlank() || (cloud && cloudFilter != CloudFilter.All)
     val visibleFolderCount = laid?.folders?.count { it.shownInList(folders, filtering) } ?: 0
     val cloudEmpty = laid != null &&
         laid.pinned.isEmpty() &&
@@ -932,84 +1044,23 @@ private fun AgentList(
         laid.hiddenFinished == 0
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        item(key = "search") {
-            Box(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Search chats") },
-                        singleLine = true,
-                    )
-                    var prDraft by remember(prUrl) { mutableStateOf(prUrl) }
-                    OutlinedTextField(
-                        value = prDraft,
-                        onValueChange = { prDraft = it },
+        if (selecting) {
+            item(key = "select-bar") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 6.dp,
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        label = { Text("Filter by PR URL") },
-                        placeholder = { Text("https://github.com/org/repo/pull/1") },
-                        singleLine = true,
-                        trailingIcon = {
-                            TextButton(
-                                onClick = { onApplyPrUrl(prDraft) },
-                            ) { Text(if (prDraft.isBlank()) "Clear" else "Filter") }
-                        },
-                    )
-                    if (cloud) {
-                        FlowRow(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CloudFilter.entries.forEach { item ->
-                                FilterChip(
-                                    selected = cloudFilter == item,
-                                    onClick = { onCloudFilter(item) },
-                                    label = { Text(item.label) },
-                                )
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            FilterChip(
-                                selected = workingOnly,
-                                onClick = { onWorkingOnly(!workingOnly) },
-                                label = { Text("Working") },
-                            )
-                            FilterChip(
-                                selected = showArchived,
-                                onClick = { onShowArchived(!showArchived) },
-                                label = { Text("Archived") },
-                            )
-                            FilterChip(
-                                selected = showHidden,
-                                onClick = { onShowHidden(!showHidden) },
-                                label = { Text("Hidden") },
-                            )
-                        }
-                    }
-                }
-                if (selecting) {
-                    Surface(
-                        modifier = Modifier.matchParentSize(),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 6.dp,
-                        shadowElevation = 6.dp,
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
                             IconButton(onClick = { stopSelecting() }) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
                             }
@@ -1093,7 +1144,6 @@ private fun AgentList(
                     }
                 }
             }
-        }
         when {
             error != null && items.isEmpty() -> {
                 item(key = "error") {
@@ -1133,6 +1183,7 @@ private fun AgentList(
                         laid = laid,
                         folderActions = FolderListActions(
                             membership = folders,
+                            iconStore = iconStore,
                             onCreate = onCreateFolder,
                             onRename = onRenameFolder,
                             onDelete = onDeleteFolder,
@@ -1140,6 +1191,7 @@ private fun AgentList(
                             onToggleFavorite = onToggleFolderFavorite,
                             onColor = onFolderColor,
                             onIcon = onFolderIcon,
+                            onUploadIcon = onUploadFolderIcon,
                             onMoveChats = onMoveChats,
                             onMoveGroup = onMoveGroup,
                         ),

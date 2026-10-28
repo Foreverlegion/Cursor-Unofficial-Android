@@ -65,7 +65,9 @@ import com.cursorandroid.app.ui.theme.CursorTheme
 import com.cursorandroid.app.ui.theme.Appearance
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
-import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.HomeDensity
+import com.cursorandroid.app.ui.theme.resolveCodeFontFamily
+import com.cursorandroid.app.ui.theme.resolveUiFontFamily
 import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +81,9 @@ private fun readAppearance(container: AppContainer) = Appearance(
     codeFont = CodeFont.fromId(container.store.codeFont),
     textScalePct = clampTextScale(container.store.textScalePct),
     density = ChatDensity.fromId(container.store.chatDensity),
+    homeDensity = HomeDensity.fromId(container.store.homeDensity),
+    importedUiFont = resolveUiFontFamily(container.store, container.importedFonts),
+    importedCodeFont = resolveCodeFontFamily(container.store, container.importedFonts),
 )
 
 @Composable

@@ -103,6 +103,9 @@ object SettingsBackup {
         codeFont = container.store.codeFont,
         textScalePct = container.store.textScalePct,
         chatDensity = container.store.chatDensity,
+        homeDensity = container.store.homeDensity,
+        importedFonts = container.importedFonts.exportForBackup(),
+        folderIcons = container.folderIcons.exportForBackup(container.folders.snapshot()),
         showInboxEnvs = container.store.showInboxEnvs,
         showInboxRemote = container.store.showInboxRemote,
         groupByRepo = container.chats.groupByRepo,
@@ -156,6 +159,8 @@ object SettingsBackup {
         container.store.codeFont = snap.codeFont
         container.store.textScalePct = snap.textScalePct
         container.store.chatDensity = snap.chatDensity
+        container.store.homeDensity = snap.homeDensity
+        container.importedFonts.restoreFromBackup(snap.importedFonts)
         container.store.showInboxEnvs = snap.showInboxEnvs
         container.store.showInboxRemote = snap.showInboxRemote
         container.chats.groupByRepo = snap.groupByRepo
@@ -163,6 +168,7 @@ object SettingsBackup {
         container.chats.hideFinishedDays = snap.hideFinishedDays
         snap.collapsedRepos?.let { container.chats.collapsedRepos = it }
         snap.folders?.let { container.folders.replace(it) }
+        container.folderIcons.restoreFromBackup(snap.folderIcons)
         container.chats.mergeAll(snap.chats)
         if (snap.conversations.isNotEmpty()) {
             container.conversations.importAll(snap.conversations)
@@ -206,6 +212,9 @@ data class SettingsSnapshot(
     val codeFont: String = "system_mono",
     val textScalePct: Int = 100,
     val chatDensity: String = "comfortable",
+    val homeDensity: String = "comfortable",
+    val importedFonts: List<ImportedFontBackup> = emptyList(),
+    val folderIcons: List<FolderIconBackup> = emptyList(),
     val showInboxEnvs: Boolean = true,
     val showInboxRemote: Boolean = true,
     val groupByRepo: Boolean = true,

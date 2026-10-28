@@ -60,7 +60,7 @@ internal fun MessageText(text: String, color: Color) {
                 Text(
                     segment.text,
                     color = color,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = appearance.codeFont.family()),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = appearance.codeFontFamily()),
                     softWrap = false,
                     modifier = Modifier
                         .fillMaxWidth()

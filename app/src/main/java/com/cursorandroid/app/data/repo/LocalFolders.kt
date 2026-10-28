@@ -79,7 +79,7 @@ class LocalFolderStore(
 
     fun setIcon(id: String, icon: String) {
         val next = icon.trim()
-        if (next.isNotEmpty() && next !in ICON_IDS) return
+        if (next.isNotEmpty() && next !in ICON_IDS && !next.startsWith(CUSTOM_FOLDER_ICON_PREFIX)) return
         update(id) { it.copy(icon = next) }
     }
 
