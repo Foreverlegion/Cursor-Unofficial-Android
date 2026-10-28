@@ -107,7 +107,7 @@ class LocalFolderStoreTest {
         first.create("Thermal Nexus")
         first.setColor("fld-1", 0xFF00FF00.toInt())
         first.setIcon("fld-1", "nope")
-        assertEquals(0, first.snapshot().folders.single().color)
+        assertEquals(0xFF00FF00.toInt(), first.snapshot().folders.single().color)
         assertEquals("", first.snapshot().folders.single().icon)
         first.setColor("fld-1", LocalFolderStore.NAME_COLORS[0])
         first.setIcon("fld-1", "code")

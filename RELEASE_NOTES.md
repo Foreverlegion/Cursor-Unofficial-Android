@@ -1,3 +1,8 @@
+# 1.0.34
+
+- Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.
+- Custom folder colors you pick are saved and still import from backup the same way as preset colors.
+
 # 1.0.33
 
 - Archive, unarchive, delete, pin, favorite, rename, hide, and mute update the list immediately. If the server call fails, the row comes back and a note shows the reason.

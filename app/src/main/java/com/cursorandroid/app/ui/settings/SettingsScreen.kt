@@ -81,7 +81,6 @@ import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.inbox.HideFinishedAge
 import com.cursorandroid.app.ui.scaffoldBars
-import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext

@@ -17,7 +17,7 @@ data class LocalFolder(
     @SerialName("createdAt") val createdAt: Long = 0L,
     @SerialName("collapsed") val collapsed: Boolean = false,
     @SerialName("favorite") val favorite: Boolean = false,
-    /** 0 keeps the theme color. Any other value is a preset from LocalFolderStore.NAME_COLORS. */
+    /** 0 keeps the theme color. Any other value is an opaque ARGB accent for the folder name. */
     @SerialName("color") val color: Int = 0,
     /** Empty keeps the folder icon. Any other value is an id from LocalFolderStore.ICON_IDS. */
     @SerialName("icon") val icon: String = "",
@@ -73,7 +73,7 @@ class LocalFolderStore(
     }
 
     fun setColor(id: String, color: Int) {
-        if (color != 0 && color !in NAME_COLORS) return
+        if (color != 0 && (color ushr 24) == 0) return
         update(id) { it.copy(color = color) }
     }
 

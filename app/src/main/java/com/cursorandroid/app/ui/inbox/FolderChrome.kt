@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.repo.FolderMembership
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.LocalFolderStore
+import com.cursorandroid.app.ui.theme.ColorPickerDialog
 
 internal class FolderListActions(
     val membership: FolderMembership,
@@ -187,9 +189,13 @@ internal fun FolderHeader(
         }
     }
     if (colorOpen) {
-        FolderColorDialog(
-            selected = folder.color,
-            onPick = {
+        ColorPickerDialog(
+            title = "Name color",
+            initialColor = folder.color,
+            presetColors = LocalFolderStore.NAME_COLORS,
+            allowDefault = true,
+            defaultPreviewColor = MaterialTheme.colorScheme.onSurface.toArgb(),
+            onConfirm = {
                 colorOpen = false
                 onColor(it)
             },
@@ -337,52 +343,6 @@ internal fun folderIconChoices(): List<Pair<String, ImageVector>> = listOf(
     "tree" to Icons.Filled.AccountTree,
     "storage" to Icons.Filled.Storage,
 )
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun FolderColorDialog(
-    selected: Int,
-    onPick: (Int) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Name color") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    LocalFolderStore.NAME_COLORS.forEach { swatch ->
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(swatch))
-                                .border(
-                                    width = if (swatch == selected) 3.dp else 1.dp,
-                                    color = if (swatch == selected) {
-                                        MaterialTheme.colorScheme.onBackground
-                                    } else {
-                                        MaterialTheme.colorScheme.outline
-                                    },
-                                    shape = CircleShape,
-                                )
-                                .clickable { onPick(swatch) },
-                        )
-                    }
-                }
-                TextButton(onClick = { onPick(0) }) {
-                    Text(if (selected == 0) "Default (selected)" else "Default")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        },
-    )
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
