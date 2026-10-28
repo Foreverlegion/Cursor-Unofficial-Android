@@ -15,4 +15,11 @@
     <string name="settings_live_run_status_summary">Status bar chip on Android 16 when an agent is running</string>
     <string name="settings_promoted_notifications">Live update permission</string>
     <string name="settings_promoted_notifications_summary">Open system settings for this app</string>
+    <string name="settings_max_live_promoted">Max live status notifications</string>
+    <string name="settings_max_live_promoted_summary">Recent agents get status bar chips; others stack in one grouped entry</string>
+    <string name="notify_agent_runs_summary_line">%1$s — %2$s</string>
+    <plurals name="notify_agent_runs_summary_title">
+        <item quantity="one">%d agent running</item>
+        <item quantity="other">%d agents running</item>
+    </plurals>
 </resources>

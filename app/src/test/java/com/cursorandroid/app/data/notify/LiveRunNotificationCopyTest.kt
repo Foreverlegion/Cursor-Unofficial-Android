@@ -2,6 +2,7 @@ package com.cursorandroid.app.data.notify
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -106,5 +107,28 @@ class LiveRunNotificationCopyTest {
     @Test
     fun liveNotifyIdLegacyAliasMatchesRunKeyedSlot() {
         assertEquals(legacyLiveNotificationSlot("run-1").id, liveNotifyId("run-1"))
+    }
+
+    @Test
+    fun creatingThenRunningKeepsSameNotificationSlot() {
+        val agentId = "agent-status-flow"
+        val creating = liveNotificationSlot(agentId)
+        val running = liveNotificationSlot(agentId)
+        assertEquals(creating.id, running.id)
+        assertEquals(creating.tag, running.tag)
+        assertNotNull(
+            liveRunNotificationContent(
+                chatTitle = "Ship",
+                agentStatus = "ACTIVE",
+                runStatus = "CREATING",
+            ),
+        )
+        assertNotNull(
+            liveRunNotificationContent(
+                chatTitle = "Ship",
+                agentStatus = "ACTIVE",
+                runStatus = "RUNNING",
+            ),
+        )
     }
 }

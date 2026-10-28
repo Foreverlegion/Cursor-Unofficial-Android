@@ -5,7 +5,8 @@
 - Settings, Appearance: Home density (Compact, Comfortable, Large) scales folder and repo rows on the agent list. Comfortable defaults are roomier now that search takes less space.
 - Folder Change icon keeps every built-in icon and adds Upload image (photo picker, no storage permission). Images are cropped square, saved on the phone, and survive updates and backup.
 - Settings, Appearance: App font adds Import font for `.ttf` and `.otf` files (validated on import). Pick among imported fonts or delete them. Code font can use an imported face too. Missing files fall back to the system font.
-- Live run status uses one notification per agent (stable id and tag). Updates replace it instead of stacking duplicates. No empty progress bar on Android 16; elapsed time shows in the body when known.
+- Live run status uses one notification per agent (stable id and tag). Creating, running, and other in-run states update that same entry instead of stacking duplicates. No empty progress bar on Android 16; elapsed time shows in the body when known.
+- Run, live, and completion alerts share one notification group with a summary when several agents run at once. Only the most recent agents (Settings, Notifications: Max live status notifications, default 2) get ungrouped live status chips on Android 16; the rest stay in the collapsed group. Live status for running agents is off by default on new installs; upgrading from 1.0.34 keeps a choice you already saved and turns live status off if you never changed it.
 
 # 1.0.34
 

@@ -29,6 +29,8 @@ class SettingsSnapshotTest {
         assertTrue(snap.compactCards)
         assertEquals(0, snap.hideFinishedDays)
         assertEquals("comfortable", snap.homeDensity)
+        assertEquals(2, snap.maxLivePromoted)
+        assertEquals(false, snap.liveRunStatus)
         assertTrue(snap.importedFonts.isEmpty())
         assertTrue(snap.folderIcons.isEmpty())
         assertTrue(snap.forges.isEmpty())

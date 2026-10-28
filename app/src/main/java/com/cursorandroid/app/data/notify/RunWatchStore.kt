@@ -12,10 +12,30 @@ object RunWatchStore {
         encodeDefaults = true
     }
 
+    fun touchActivity(context: Context, agentId: String, runId: String = "") {
+        val now = System.currentTimeMillis()
+        val current = all(context)
+        if (current.none { it.agentId == agentId }) return
+        save(
+            context,
+            current.map { item ->
+                if (item.agentId == agentId) {
+                    item.copy(
+                        lastActiveMs = now,
+                        runId = runId.ifBlank { item.runId },
+                    )
+                } else {
+                    item
+                }
+            },
+        )
+    }
+
     fun add(context: Context, item: WatchItem) {
         val now = System.currentTimeMillis()
         val normalized = item.copy(
             startedAtMs = item.startedAtMs.takeIf { it > 0L } ?: now,
+            lastActiveMs = item.lastActiveMs.takeIf { it > 0L } ?: now,
         )
         val next = all(context)
             .filterNot { it.agentId == normalized.agentId || it.runId == normalized.runId } + normalized
@@ -54,4 +74,5 @@ data class WatchItem(
     val runId: String,
     val agentName: String? = null,
     val startedAtMs: Long = 0L,
+    val lastActiveMs: Long = 0L,
 )

@@ -3,6 +3,7 @@ package com.cursorandroid.app.data.repo
 import android.content.Context
 import android.net.Uri
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.data.notify.DEFAULT_MAX_LIVE_PROMOTED
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -86,6 +87,7 @@ object SettingsBackup {
         notifyOnComplete = container.store.notifyOnComplete,
         notifyOnApproval = container.store.notifyOnApproval,
         liveRunStatus = container.store.liveRunStatus,
+        maxLivePromoted = container.store.maxLivePromoted,
         mcpServers = container.store.storedMcps(),
         showThinking = container.store.showThinking,
         showToolCalls = container.store.showToolCalls,
@@ -122,6 +124,7 @@ object SettingsBackup {
         container.store.notifyOnComplete = snap.notifyOnComplete
         container.store.notifyOnApproval = snap.notifyOnApproval
         container.store.liveRunStatus = snap.liveRunStatus
+        container.store.maxLivePromoted = snap.maxLivePromoted
         if (snap.mcpServers.isNotEmpty()) {
             container.store.saveStoredMcps(mergeMcpSecrets(container.store.storedMcps(), snap.mcpServers))
         } else if (snap.mcpName.isNotBlank() || snap.mcpUrl.isNotBlank()) {
@@ -188,7 +191,8 @@ data class SettingsSnapshot(
     val apiKey: String? = null,
     val notifyOnComplete: Boolean = true,
     val notifyOnApproval: Boolean = true,
-    val liveRunStatus: Boolean = true,
+    val liveRunStatus: Boolean = false,
+    val maxLivePromoted: Int = DEFAULT_MAX_LIVE_PROMOTED,
     // Read only, for files from before the MCP list. Never written.
     val mcpName: String = "",
     val mcpUrl: String = "",

@@ -93,6 +93,7 @@ class CustomFolderIconStore(context: Context) {
     }
 }
 
+@Serializable
 data class FolderIconBackup(
     @SerialName("iconId") val iconId: String,
     @SerialName("fileName") val fileName: String,

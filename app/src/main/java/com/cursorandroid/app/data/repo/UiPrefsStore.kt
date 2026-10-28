@@ -55,7 +55,6 @@ object UiKeys {
     val textScalePct = intPreferencesKey("text_scale_pct")
     val chatDensity = stringPreferencesKey("chat_density")
     val homeDensity = stringPreferencesKey("home_density")
-    val importedFonts = stringPreferencesKey("imported_fonts")
 
     val machinePrefs = stringPreferencesKey("machine_prefs")
     val machinePrefsUnreadable = stringPreferencesKey("machine_prefs_unreadable")

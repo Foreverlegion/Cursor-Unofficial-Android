@@ -31,6 +31,7 @@ class RunNotifier(
     private val refresh: InboxRefreshHub? = null,
 ) {
     private val seen = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val liveOverrides = mutableMapOf<String, LiveRunOverride>()
 
     fun ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -96,6 +97,7 @@ class RunNotifier(
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setGroup(AGENT_RUN_NOTIFICATION_GROUP)
             .setContentIntent(openChat(context, agentId, noticeId, notifyId))
             .setDeleteIntent(dismissShade(context, noticeId, notifyId))
             .build()
@@ -128,7 +130,10 @@ class RunNotifier(
         val title = chatTitle(agentId, agentName)
         val fresh = notices.record(agentId, title, runId, status, result)
         val terminal = status?.uppercase() in TERMINAL
-        if (terminal) clearLiveRun(agentId, runId)
+        if (terminal) {
+            liveOverrides.remove(agentId)
+            clearLiveRun(agentId, runId)
+        }
         if (!store.notifyOnComplete) return
         if (!terminal) return
         if (!fresh) return
@@ -153,6 +158,7 @@ class RunNotifier(
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setGroup(AGENT_RUN_NOTIFICATION_GROUP)
             .setContentIntent(openChat(context, agentId, runId, notifyId))
             .setDeleteIntent(dismissShade(context, runId, notifyId))
         openUrl(context, prUrl, notifyId xor PR_ACTION_SALT)?.let { builder.addAction(0, "Open PR", it) }
@@ -169,67 +175,215 @@ class RunNotifier(
         activityHint: String? = null,
         approvalPending: Boolean = false,
     ) {
-        if (!store.liveRunStatus) return
         if (skipShade(agentId)) {
+            liveOverrides.remove(agentId)
             clearLiveRun(agentId, runId)
             return
         }
-        if (!NotifyPermission.granted(context)) return
-        cancelLegacyLiveSlots(agentId, runId)
-        val slot = liveNotificationSlot(agentId)
-        val watch = RunWatchStore.all(context).firstOrNull { it.agentId == agentId }
-        val title = chatTitle(agentId, agentName)
-        val content = liveRunNotificationContent(
-            chatTitle = title,
+        RunWatchStore.touchActivity(context, agentId, runId)
+        liveOverrides[agentId] = LiveRunOverride(
+            agentName = agentName,
+            runId = runId,
             agentStatus = agentStatus,
             runStatus = runStatus,
             activityHint = activityHint,
             approvalPending = approvalPending,
-            startedAtMs = watch?.startedAtMs ?: 0L,
-        ) ?: run {
-            clearLiveRun(agentId, runId)
-            return
-        }
-        ensureChannel()
-        val notification = buildLiveNotification(agentId, runId, slot, content)
-        NotifyShade.post(context, slot.id, notification, slot.tag)
+        )
+        refreshLiveRunShade()
     }
 
     fun syncLiveFromWatchList(agents: List<AgentSummary>) {
         if (!store.liveRunStatus) return
+        val byId = agents.associateBy { it.id }
         val watches = RunWatchStore.all(context)
         if (watches.isEmpty()) return
-        val byId = agents.associateBy { it.id }
         for (watch in watches) {
             val agent = byId[watch.agentId]
             if (agent != null && watch.runId == agent.latestRunId) {
-                updateLiveRun(
-                    agentId = watch.agentId,
+                liveOverrides[watch.agentId] = LiveRunOverride(
                     agentName = watch.agentName ?: agent.name,
                     runId = watch.runId,
                     agentStatus = agent.status,
                     runStatus = agent.runStatus ?: agent.status,
                 )
-            } else {
-                updateLiveRun(
-                    agentId = watch.agentId,
-                    agentName = watch.agentName,
-                    runId = watch.runId,
-                    agentStatus = null,
-                    runStatus = "RUNNING",
-                )
             }
+        }
+        refreshLiveRunShade()
+    }
+
+    /** Rebuilds promoted, grouped, and summary live notifications from watches and overrides. */
+    fun refreshLiveRunShade() {
+        if (!store.liveRunStatus) {
+            clearAllLiveRuns()
+            return
+        }
+        if (!NotifyPermission.granted(context)) return
+        val watches = RunWatchStore.all(context)
+        if (watches.isEmpty()) {
+            clearAllLiveRunShadeOnly()
+            return
+        }
+        ensureChannel()
+        val promotionAllowed = canPromoteLive()
+        val rows = watches.mapNotNull { watch -> shadeRow(watch) }
+        val plan = planLiveRunShade(
+            running = rows,
+            maxPromoted = store.maxLivePromoted,
+            liveStatusEnabled = store.liveRunStatus,
+            promotionAllowed = promotionAllowed,
+        )
+        val activeIds = rows.map { it.agentId }.toSet()
+        watches.filter { it.agentId !in activeIds }.forEach { clearLiveRun(it.agentId, it.runId) }
+        val promotedSet = plan.promotedAgentIds.toSet()
+        val groupedSet = plan.groupedRows.map { it.agentId }.toSet()
+        for (row in rows) {
+            cancelLegacyLiveSlots(row.agentId, row.runId)
+            val slot = liveNotificationSlot(row.agentId)
+            when {
+                row.agentId in promotedSet -> {
+                    val notification = buildLiveNotification(
+                        agentId = row.agentId,
+                        runId = row.runId,
+                        slot = slot,
+                        content = row.toContent(),
+                        promoted = true,
+                        grouped = false,
+                    )
+                    NotifyShade.post(context, slot.id, notification, slot.tag)
+                }
+                row.agentId in groupedSet -> {
+                    val notification = buildLiveNotification(
+                        agentId = row.agentId,
+                        runId = row.runId,
+                        slot = slot,
+                        content = row.toContent(),
+                        promoted = false,
+                        grouped = true,
+                    )
+                    NotifyShade.post(context, slot.id, notification, slot.tag)
+                }
+                else -> clearLiveRun(row.agentId, row.runId)
+            }
+        }
+        if (plan.showsSummary) {
+            val summarySlot = agentRunSummarySlot()
+            val summary = buildRunGroupSummary(plan.groupedRows)
+            NotifyShade.post(context, summarySlot.id, summary, summarySlot.tag)
+        } else {
+            cancelRunGroupSummary()
         }
     }
 
     fun clearLiveRun(agentId: String, runId: String? = null) {
+        liveOverrides.remove(agentId)
         val slot = liveNotificationSlot(agentId)
         NotifyShade.cancel(context, slot.id, slot.tag)
         cancelLegacyLiveSlots(agentId, runId)
+        maybeClearSummaryAfterAgentRemoved()
     }
 
     fun clearAllLiveRuns() {
-        RunWatchStore.all(context).forEach { clearLiveRun(it.agentId, it.runId) }
+        liveOverrides.clear()
+        clearAllLiveRunShadeOnly()
+    }
+
+    private fun clearAllLiveRunShadeOnly() {
+        RunWatchStore.all(context).forEach { watch ->
+            val slot = liveNotificationSlot(watch.agentId)
+            NotifyShade.cancel(context, slot.id, slot.tag)
+            cancelLegacyLiveSlots(watch.agentId, watch.runId)
+        }
+        cancelRunGroupSummary()
+    }
+
+    private fun maybeClearSummaryAfterAgentRemoved() {
+        if (!store.liveRunStatus) {
+            cancelRunGroupSummary()
+            return
+        }
+        val watches = RunWatchStore.all(context)
+        val rows = watches.mapNotNull { shadeRow(it) }
+        val plan = planLiveRunShade(
+            running = rows,
+            maxPromoted = store.maxLivePromoted,
+            liveStatusEnabled = store.liveRunStatus,
+            promotionAllowed = canPromoteLive(),
+        )
+        if (plan.showsSummary) {
+            val summarySlot = agentRunSummarySlot()
+            NotifyShade.post(context, summarySlot.id, buildRunGroupSummary(plan.groupedRows), summarySlot.tag)
+        } else {
+            cancelRunGroupSummary()
+        }
+    }
+
+    private fun cancelRunGroupSummary() {
+        val slot = agentRunSummarySlot()
+        NotifyShade.cancel(context, slot.id, slot.tag)
+    }
+
+    private fun shadeRow(watch: WatchItem): RunningAgentShadeRow? {
+        if (skipShade(watch.agentId)) return null
+        val override = liveOverrides[watch.agentId]
+        val runId = override?.runId?.takeIf { it.isNotBlank() } ?: watch.runId
+        val title = chatTitle(watch.agentId, override?.agentName ?: watch.agentName)
+        val content = liveRunNotificationContent(
+            chatTitle = title,
+            agentStatus = override?.agentStatus,
+            runStatus = override?.runStatus ?: "RUNNING",
+            activityHint = override?.activityHint,
+            approvalPending = override?.approvalPending == true,
+            startedAtMs = watch.startedAtMs,
+        ) ?: return null
+        return RunningAgentShadeRow(
+            agentId = watch.agentId,
+            runId = runId,
+            title = content.title,
+            body = content.body,
+            shortCriticalText = content.shortCriticalText,
+            lastActiveMs = watch.lastActiveMs,
+        )
+    }
+
+    private fun RunningAgentShadeRow.toContent() = LiveRunNotificationContent(
+        title = title,
+        body = body,
+        shortCriticalText = shortCriticalText,
+    )
+
+    private fun buildRunGroupSummary(grouped: List<RunningAgentShadeRow>): Notification {
+        val count = grouped.size
+        val title = context.resources.getQuantityString(
+            R.plurals.notify_agent_runs_summary_title,
+            count,
+            count,
+        )
+        val style = NotificationCompat.InboxStyle()
+            .setBigContentTitle(title)
+        grouped.forEach { row ->
+            style.addLine(context.getString(R.string.notify_agent_runs_summary_line, row.title, row.summaryStatus()))
+        }
+        return NotificationCompat.Builder(context, LIVE_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_agent)
+            .setContentTitle(title)
+            .setContentText(title)
+            .setStyle(style)
+            .setGroup(AGENT_RUN_NOTIFICATION_GROUP)
+            .setGroupSummary(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    private fun RunningAgentShadeRow.summaryStatus(): String {
+        val parts = body.split('·').map { it.trim() }
+        return parts.firstOrNull()?.ifBlank { shortCriticalText } ?: shortCriticalText
+    }
+
+    private fun canPromoteLive(): Boolean {
+        return Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API &&
+            store.liveRunStatus &&
+            context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
     }
 
     private fun cancelLegacyLiveSlots(agentId: String, runId: String?) {
@@ -253,11 +407,11 @@ class RunNotifier(
         runId: String,
         slot: LiveNotificationSlot,
         content: LiveRunNotificationContent,
+        promoted: Boolean,
+        grouped: Boolean,
     ): Notification {
         val open = openChat(context, agentId, runId, slot.id)
-        val promote = Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API &&
-            store.liveRunStatus &&
-            context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        val requestPromote = promoted && canPromoteLive()
         if (Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API) {
             val builder = Notification.Builder(context, LIVE_CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_agent)
@@ -266,13 +420,16 @@ class RunNotifier(
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(open)
-            if (promote) {
+            if (requestPromote) {
                 builder.setRequestPromotedOngoing(true)
                 builder.setShortCriticalText(content.shortCriticalText)
             }
+            if (grouped) {
+                builder.setGroup(AGENT_RUN_NOTIFICATION_GROUP)
+            }
             return builder.build()
         }
-        return NotificationCompat.Builder(context, LIVE_CHANNEL)
+        val compat = NotificationCompat.Builder(context, LIVE_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_agent)
             .setContentTitle(content.title)
             .setContentText(content.body)
@@ -282,7 +439,10 @@ class RunNotifier(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(open)
             .setProgress(0, 0, true)
-            .build()
+        if (grouped) {
+            compat.setGroup(AGENT_RUN_NOTIFICATION_GROUP)
+        }
+        return compat.build()
     }
 
     private fun skipShade(agentId: String): Boolean {
@@ -322,6 +482,15 @@ class RunNotifier(
             else -> status ?: "Updated"
         }
     }
+
+    private data class LiveRunOverride(
+        val agentName: String? = null,
+        val runId: String = "",
+        val agentStatus: String? = null,
+        val runStatus: String? = null,
+        val activityHint: String? = null,
+        val approvalPending: Boolean = false,
+    )
 
     companion object {
         const val CHANNEL = "agent_complete"

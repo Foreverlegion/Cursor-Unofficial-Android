@@ -56,6 +56,7 @@ class RunWatchWorker(
                 run.isActive() -> {
                     RunWatchStore.add(applicationContext, WatchItem(agentId, run.id, agentName))
                     ApprovalStreamHub.attach(applicationContext, agentId, run.id, agentName)
+                    RunWatchStore.touchActivity(applicationContext, agentId, run.id)
                     app.container.notifier.updateLiveRun(
                         agentId = agentId,
                         agentName = agentName,

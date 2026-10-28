@@ -40,6 +40,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -50,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -69,6 +71,9 @@ import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.R
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.notify.PromotedNotificationSettings
+import com.cursorandroid.app.data.notify.MAX_MAX_LIVE_PROMOTED
+import com.cursorandroid.app.data.notify.MIN_MAX_LIVE_PROMOTED
+import com.cursorandroid.app.data.notify.clampMaxLivePromoted
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
@@ -201,6 +206,9 @@ internal fun SettingsScreenContent(
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
     var notifyApprovals by remember { mutableStateOf(container.store.notifyOnApproval) }
     var liveRunStatus by remember { mutableStateOf(container.store.liveRunStatus) }
+    var maxLivePromoted by remember {
+        mutableFloatStateOf(container.store.maxLivePromoted.toFloat())
+    }
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var defaultModel by remember { mutableStateOf(container.store.defaultModel) }
@@ -241,6 +249,7 @@ internal fun SettingsScreenContent(
         notify = container.store.notifyOnComplete
         notifyApprovals = container.store.notifyOnApproval
         liveRunStatus = container.store.liveRunStatus
+        maxLivePromoted = container.store.maxLivePromoted.toFloat()
         showTools = container.store.showToolCalls
         showThinking = container.store.showThinking
         defaultModel = container.store.defaultModel
@@ -552,9 +561,49 @@ internal fun SettingsScreenContent(
                                 liveRunStatus = on
                                 container.store.liveRunStatus = on
                                 if (!on) container.notifier.clearAllLiveRuns()
-                                else RunWatchScheduler.resume(context.applicationContext)
+                                else {
+                                    RunWatchScheduler.resume(context.applicationContext)
+                                    container.notifier.refreshLiveRunShade()
+                                }
                             },
                         )
+                        if (liveRunStatus) {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            stringResource(R.string.settings_max_live_promoted),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                        )
+                                        Text(
+                                            stringResource(R.string.settings_max_live_promoted_summary),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        maxLivePromoted.toInt().toString(),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                                Slider(
+                                    value = maxLivePromoted,
+                                    onValueChange = { maxLivePromoted = it },
+                                    onValueChangeFinished = {
+                                        val capped = clampMaxLivePromoted(maxLivePromoted.toInt())
+                                        maxLivePromoted = capped.toFloat()
+                                        container.store.maxLivePromoted = capped
+                                        container.notifier.refreshLiveRunShade()
+                                    },
+                                    valueRange = MIN_MAX_LIVE_PROMOTED.toFloat()..MAX_MAX_LIVE_PROMOTED.toFloat(),
+                                    steps = MAX_MAX_LIVE_PROMOTED - MIN_MAX_LIVE_PROMOTED - 1,
+                                )
+                            }
+                        }
                         if (Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API) {
                             val promotedIntent = remember(context) { PromotedNotificationSettings.settingsIntent(context) }
                             if (promotedIntent != null) {
