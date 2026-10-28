@@ -33,14 +33,20 @@ enum class HideFinishedAge(val days: Int, val label: String) {
     Day1(1, "1 day"),
     Day3(3, "3 days"),
     Day7(7, "7 days"),
-    Week3(DEFAULT_HIDE_FINISHED_DAYS, "3 weeks"),
+    Day14(14, "14 days"),
+    Week4(28, "4 weeks"),
+    Week8(56, "8 weeks"),
+    Week12(84, "12 weeks"),
     ;
 
     companion object {
         const val DEFAULT_DAYS = DEFAULT_HIDE_FINISHED_DAYS
 
-        fun fromDays(days: Int): HideFinishedAge =
-            entries.firstOrNull { it.days == days } ?: Week3
+        val settingsChoices: List<HideFinishedAge> =
+            listOf(Off, Day1, Day3, Day7, Day14, Week4, Week8, Week12)
+            val normalized = normalizeHideFinishedDays(days)
+            return entries.firstOrNull { it.days == normalized } ?: Off
+        }
 
         fun normalizeDays(days: Int): Int = normalizeHideFinishedDays(days)
     }
@@ -51,6 +57,7 @@ data class RepoGroup(
     val label: String,
     val agents: List<AgentSummary>,
     val running: Int,
+    val hiddenOlder: List<AgentSummary> = emptyList(),
     val path: String = "",
     val customName: String? = null,
     val favorite: Boolean = false,
@@ -115,33 +122,57 @@ fun arrangeCloudAgents(
     nowMillis: Long,
     groupPrefs: RepoGroupPrefs = RepoGroupPrefs(),
     folders: FolderMembership = FolderMembership(),
+    unreadAgentIds: Set<String> = emptySet(),
+    applyAgeFilter: Boolean = true,
 ): CloudArrangement {
     val matched = agents.filter { agent ->
         val bucket = cloudBucket(agent, agent.id in approvalIds)
         filter == CloudFilter.All || bucket == filter
     }
     val age = HideFinishedAge.fromDays(hideFinishedDays)
+    val pinnedIds = pinnedAt.keys
     // Starred repos and starred folders stay in the list on every filter. Age overflow is not a hide.
     val protected = ageProtectedIds(matched, git, groupPrefs, folders)
-    val aged = matched.filter { agent ->
-        agent.id !in protected && finishedTooOld(agent, agent.id in approvalIds, age, nowMillis)
-    }.map { it.id }.toSet()
-    val shown = if (revealFinished) matched else matched.filter { it.id !in aged }
+    fun tooOld(agent: AgentSummary): Boolean {
+        if (!applyAgeFilter || age == HideFinishedAge.Off) return false
+        if (agent.id in protected) return false
+        return agentTooOldForList(
+            agent = agent,
+            needsApproval = agent.id in approvalIds,
+            age = age,
+            nowMillis = nowMillis,
+            pinnedIds = pinnedIds,
+            favoriteIds = favoriteIds,
+            unreadAgentIds = unreadAgentIds,
+        )
+    }
+    val aged = matched.filter(::tooOld).map { it.id }.toSet()
+    val revealAged = revealFinished || !applyAgeFilter
+    val shown = if (revealAged) matched else matched.filter { it.id !in aged }
     val pinned = shown
         .filter { it.id in pinnedAt }
         .sortedWith(
             compareByDescending<AgentSummary> { pinnedAt[it.id] ?: 0L }
                 .thenByDescending { it.sortKey() },
         )
-    val pinnedIds = pinned.map { it.id }.toSet()
-    val body = shown.filter { it.id !in pinnedIds }
+    val pinnedShownIds = pinned.map { it.id }.toSet()
+    val body = shown.filter { it.id !in pinnedShownIds }
+    val bodyAll = matched.filter { it.id !in pinnedShownIds }
     return if (groupByRepo) {
+        val groups = repoGroups(
+            agents = if (revealAged) body else bodyAll,
+            git = git,
+            approvalIds = approvalIds,
+            prefs = groupPrefs,
+            tooOld = if (revealAged) { _ -> false } else ::tooOld,
+        )
+        val hiddenFinished = if (revealAged) 0 else groups.sumOf { it.hiddenOlder.size }
         CloudArrangement(
             pinned = pinned,
-            groups = repoGroups(body, git, approvalIds, groupPrefs),
+            groups = groups,
             favorites = emptyList(),
             rest = emptyList(),
-            hiddenFinished = aged.size,
+            hiddenFinished = hiddenFinished,
         )
     } else {
         CloudArrangement(
@@ -149,7 +180,7 @@ fun arrangeCloudAgents(
             groups = emptyList(),
             favorites = body.filter { it.id in favoriteIds }.starredFirst(protected),
             rest = body.filter { it.id !in favoriteIds }.starredFirst(protected),
-            hiddenFinished = aged.size,
+            hiddenFinished = if (revealAged) 0 else aged.size,
         )
     }
 }
@@ -189,6 +220,7 @@ fun repoGroups(
     git: Map<String, GitSnap>,
     approvalIds: Set<String>,
     prefs: RepoGroupPrefs = RepoGroupPrefs(),
+    tooOld: (AgentSummary) -> Boolean = { false },
 ): List<RepoGroup> {
     val buckets = LinkedHashMap<String, MutableList<AgentSummary>>()
     for (agent in agents) {
@@ -197,19 +229,24 @@ fun repoGroups(
     }
     val byActivity = buckets.map { (key, members) ->
         val sorted = members.sortedByDescending { it.sortKey() }
+        val visible = sorted.filterNot(tooOld)
+        val hiddenOlder = sorted.filter(tooOld)
         val url = git[sorted.first().id]?.repoUrl
         val style = prefs.style(key)
         RepoGroup(
             key = key,
             label = repoGroupLabel(url),
-            agents = sorted,
-            running = sorted.count { cloudBucket(it, it.id in approvalIds) == CloudFilter.Running },
+            agents = visible,
+            hiddenOlder = hiddenOlder,
+            running = visible.count { cloudBucket(it, it.id in approvalIds) == CloudFilter.Running },
             path = shortRepo(url).orEmpty(),
             customName = style.name?.takeIf { it.isNotBlank() },
             favorite = style.favorite,
             color = style.color,
         )
-    }.sortedByDescending { group -> group.agents.maxOf { it.sortKey() } }
+    }.sortedByDescending { group ->
+        (group.agents + group.hiddenOlder).maxOfOrNull { it.sortKey() } ?: 0L
+    }
     val manual = if (prefs.order.isEmpty()) {
         byActivity
     } else {
@@ -219,19 +256,33 @@ fun repoGroups(
     return manual.filter { it.favorite } + manual.filterNot { it.favorite }
 }
 
-internal fun finishedTooOld(
+internal fun agentActivityMillis(agent: AgentSummary): Long? {
+    val iso = agent.updatedAt ?: agent.createdAt ?: return null
+    return runCatching { Instant.parse(iso).toEpochMilli() }.getOrNull()
+}
+
+internal fun agentTooOldForList(
     agent: AgentSummary,
     needsApproval: Boolean,
     age: HideFinishedAge,
     nowMillis: Long,
+    pinnedIds: Set<String>,
+    favoriteIds: Set<String>,
+    unreadAgentIds: Set<String>,
 ): Boolean {
     if (age == HideFinishedAge.Off) return false
-    if (cloudBucket(agent, needsApproval) != CloudFilter.Done) return false
-    val iso = agent.updatedAt ?: agent.createdAt
-    val then = runCatching { Instant.parse(iso).toEpochMilli() }.getOrNull() ?: return false
+    if (agent.id in pinnedIds) return false
+    if (agent.id in favoriteIds) return false
+    if (agent.id in unreadAgentIds) return false
+    when (cloudBucket(agent, needsApproval)) {
+        CloudFilter.Running, CloudFilter.NeedsAttention -> return false
+        else -> Unit
+    }
+    val then = agentActivityMillis(agent) ?: return false
     val cutoff = nowMillis - age.days * 86_400_000L
     return then < cutoff
 }
+
 
 internal fun cloudEmptyCopy(
     filter: CloudFilter,

@@ -310,9 +310,9 @@ internal fun SettingsScreenContent(
     }
     if (hideFinishedMenu) {
         ChoiceDialog(
-            title = "Hide finished older than",
+            title = "Hide agents older than",
             selected = hideFinishedDays.toString(),
-            options = HideFinishedAge.entries.map { it.days.toString() to it.label },
+            options = HideFinishedAge.settingsChoices.map { it.days.toString() to it.label },
             onDismiss = { hideFinishedMenu = false },
             onPick = { id ->
                 val days = id.toIntOrNull() ?: 0
@@ -419,7 +419,7 @@ internal fun SettingsScreenContent(
                             },
                         )
                         SettingsChoiceRow(
-                            title = "Hide finished older than",
+                            title = "Hide agents older than",
                             summary = HideFinishedAge.fromDays(hideFinishedDays).label,
                             onClick = { hideFinishedMenu = true },
                         )

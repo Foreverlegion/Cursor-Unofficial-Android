@@ -210,6 +210,7 @@ fun InboxScreen(
     }
     var cloudFilter by remember { mutableStateOf(CloudFilter.All) }
     var revealFinished by remember { mutableStateOf(false) }
+    var revealedOlderGroups by remember { mutableStateOf(setOf<String>()) }
     val snackbar = remember { SnackbarHostState() }
     val hiddenIds = metas.filter { it.value.hidden }.keys
     var nextCursor by remember { mutableStateOf<String?>(null) }
@@ -350,6 +351,7 @@ fun InboxScreen(
         collapsedRepos = container.chats.collapsedRepos
         groupPrefs = container.chats.repoGroupPrefs
         revealFinished = false
+        revealedOlderGroups = emptySet()
     }
     LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
@@ -455,6 +457,9 @@ fun InboxScreen(
     val approvalIds = notices.mapNotNull { notice ->
         notice.agentId.takeIf { notice.kind == "approval" }
     }.toSet()
+    val unreadAgentIds = remember(notices) {
+        notices.filter { !it.read && !it.dismissed }.mapNotNull { it.agentId }.toSet()
+    }
     fun archiveWithUndo(agent: AgentSummary) {
         if (agent.isArchived()) return
         val name = container.chats.displayName(agent.id, agent.name)
@@ -773,6 +778,15 @@ fun InboxScreen(
                         onCloudFilter = { cloudFilter = it },
                         revealFinished = revealFinished,
                         onRevealFinished = { revealFinished = !revealFinished },
+                        revealedOlderGroups = revealedOlderGroups,
+                        onToggleRevealGroup = { key ->
+                            revealedOlderGroups = if (key in revealedOlderGroups) {
+                                revealedOlderGroups - key
+                            } else {
+                                revealedOlderGroups + key
+                            }
+                        },
+                        unreadAgentIds = unreadAgentIds,
                         groupPrefs = groupPrefs,
                         onGroupPrefs = { next ->
                             groupPrefs = next
@@ -946,6 +960,9 @@ private fun AgentList(
     onCloudFilter: (CloudFilter) -> Unit,
     revealFinished: Boolean,
     onRevealFinished: () -> Unit,
+    revealedOlderGroups: Set<String>,
+    onToggleRevealGroup: (String) -> Unit,
+    unreadAgentIds: Set<String>,
     groupPrefs: RepoGroupPrefs,
     onGroupPrefs: (RepoGroupPrefs) -> Unit,
     collapsedRepos: Set<String>,
@@ -1015,6 +1032,7 @@ private fun AgentList(
         }
         .sortedByDescending { it.sortKey() }
     val arranged = if (cloud) {
+        val applyAgeFilter = needle.isBlank() && parsed.prNumber == null
         arrangeCloudAgents(
             agents = newest,
             git = git,
@@ -1028,6 +1046,8 @@ private fun AgentList(
             nowMillis = System.currentTimeMillis(),
             groupPrefs = groupPrefs,
             folders = folders,
+            unreadAgentIds = unreadAgentIds,
+            applyAgeFilter = applyAgeFilter,
         )
     } else {
         null
@@ -1220,6 +1240,8 @@ private fun AgentList(
                         onDeleteFolder = { deleteFolder = it },
                         revealFinished = revealFinished,
                         onToggleReveal = onRevealFinished,
+                        revealedOlderGroups = revealedOlderGroups,
+                        onToggleRevealGroup = onToggleRevealGroup,
                     ) { agent ->
                         SwipeArchiveRow(
                             enabled = !selecting && !agent.isArchived(),

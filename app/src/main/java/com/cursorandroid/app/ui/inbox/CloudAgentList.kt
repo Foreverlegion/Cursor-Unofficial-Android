@@ -81,6 +81,8 @@ internal fun LazyListScope.cloudAgentBlocks(
     onDeleteFolder: (LocalFolder) -> Unit,
     revealFinished: Boolean,
     onToggleReveal: () -> Unit,
+    revealedOlderGroups: Set<String>,
+    onToggleRevealGroup: (String) -> Unit,
     agentRow: @Composable (AgentSummary) -> Unit,
 ) {
     if (laid.pinned.isNotEmpty()) {
@@ -106,14 +108,36 @@ internal fun LazyListScope.cloudAgentBlocks(
         }
         if (!block.folder.collapsed) {
             block.groups.forEach { group ->
-                repoGroupBlock(group, laid, "fld-${block.folder.id}", collapsed, groupActions, onToggleGroup, agentRow)
+                repoGroupBlock(
+                    group,
+                    laid,
+                    "fld-${block.folder.id}",
+                    collapsed,
+                    groupActions,
+                    onToggleGroup,
+                    revealFinished,
+                    revealedOlderGroups,
+                    onToggleRevealGroup,
+                    agentRow,
+                )
             }
             itemsKeyed(block.chats, "fld-${block.folder.id}-chat") { agentRow(it) }
         }
     }
     if (groupByRepo) {
         laid.groups.forEach { group ->
-            repoGroupBlock(group, laid, "root", collapsed, groupActions, onToggleGroup, agentRow)
+            repoGroupBlock(
+                group,
+                laid,
+                "root",
+                collapsed,
+                groupActions,
+                onToggleGroup,
+                revealFinished,
+                revealedOlderGroups,
+                onToggleRevealGroup,
+                agentRow,
+            )
         }
     } else {
         if (laid.favorites.isNotEmpty()) {
@@ -126,7 +150,7 @@ internal fun LazyListScope.cloudAgentBlocks(
     if (laid.hiddenFinished > 0) {
         item(key = "aged") {
             val count = laid.hiddenFinished
-            val label = if (revealFinished) "Hide $count older" else "Show $count hidden"
+            val label = if (revealFinished) "Hide $count older" else "Show $count older"
             Text(
                 label,
                 color = MaterialTheme.colorScheme.primary,
@@ -147,6 +171,9 @@ private fun LazyListScope.repoGroupBlock(
     collapsed: Set<String>,
     groupActions: RepoGroupActions,
     onToggleGroup: (String) -> Unit,
+    revealFinished: Boolean,
+    revealedOlderGroups: Set<String>,
+    onToggleRevealGroup: (String) -> Unit,
     agentRow: @Composable (AgentSummary) -> Unit,
 ) {
     val all = laid.folders.flatMap { it.groups } + laid.groups
@@ -181,6 +208,25 @@ private fun LazyListScope.repoGroupBlock(
     }
     if (group.key !in collapsed) {
         itemsKeyed(group.agents, "$keyPrefix-g-${group.key}") { agentRow(it) }
+        val hidden = group.hiddenOlder
+        if (hidden.isNotEmpty()) {
+            val expanded = revealFinished || group.key in revealedOlderGroups
+            if (!expanded) {
+                item(key = "$keyPrefix-older-${group.key}") {
+                    Text(
+                        "Show ${hidden.size} older",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleRevealGroup(group.key) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+            } else {
+                itemsKeyed(hidden, "$keyPrefix-gh-${group.key}") { agentRow(it) }
+            }
+        }
     }
 }
 

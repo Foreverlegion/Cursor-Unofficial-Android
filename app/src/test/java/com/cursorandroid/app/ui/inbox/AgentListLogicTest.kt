@@ -120,8 +120,8 @@ class AgentListLogicTest {
         assertEquals(listOf("acme/starred", "acme/plain"), all.groups.map { it.key })
         assertEquals(listOf("star-new", "star-old", "star-run"), all.groups[0].agents.map { it.id })
         assertEquals(listOf("plain-new"), all.groups[1].agents.map { it.id })
+        assertEquals(listOf("plain-old"), all.groups[1].hiddenOlder.map { it.id })
         assertEquals(1, all.hiddenFinished)
-        assertFalse(all.groups.flatMap { it.agents }.map { it.id }.contains("plain-old"))
 
         val done = arrange(agents, git = git, filter = CloudFilter.Done, hideDays = 7, group = true, prefs = prefs)
         assertEquals(listOf("star-new", "star-old"), done.groups.single { it.key == "acme/starred" }.agents.map { it.id })
@@ -281,14 +281,17 @@ class AgentListLogicTest {
         reveal: Boolean = false,
         group: Boolean = false,
         pinnedAt: Map<String, Long> = emptyMap(),
+        favoriteIds: Set<String> = emptySet(),
         prefs: RepoGroupPrefs = RepoGroupPrefs(),
         folders: FolderMembership = FolderMembership(),
+        applyAgeFilter: Boolean = true,
+        unreadAgentIds: Set<String> = emptySet(),
     ): CloudArrangement {
         return arrangeCloudAgents(
             agents = agents,
             git = git,
             pinnedAt = pinnedAt,
-            favoriteIds = emptySet(),
+            favoriteIds = favoriteIds,
             approvalIds = approval,
             filter = filter,
             hideFinishedDays = hideDays,
@@ -297,7 +300,82 @@ class AgentListLogicTest {
             nowMillis = now,
             groupPrefs = prefs,
             folders = folders,
+            unreadAgentIds = unreadAgentIds,
+            applyAgeFilter = applyAgeFilter,
         )
+    }
+
+    @Test
+    fun offKeepsOldAgentsVisible() {
+        val old = agent("old", status = "FINISHED", updatedAt = "2026-09-01T00:00:00Z")
+        val arranged = arrange(listOf(old), hideDays = 0, group = true)
+        assertEquals(listOf("old"), arranged.groups.single().agents.map { it.id })
+        assertEquals(0, arranged.hiddenFinished)
+    }
+
+    @Test
+    fun pinnedFavoriteAndUnreadSkipAgeHide() {
+        val old = agent("old", status = "FINISHED", updatedAt = "2026-09-01T00:00:00Z")
+        val pinned = arrange(
+            listOf(old),
+            hideDays = 7,
+            pinnedAt = mapOf("old" to 1L),
+        )
+        assertEquals(listOf("old"), pinned.pinned.map { it.id })
+        assertEquals(0, pinned.hiddenFinished)
+
+        val starred = arrange(
+            listOf(old),
+            hideDays = 7,
+            favoriteIds = setOf("old"),
+        )
+        assertEquals(listOf("old"), starred.rest.map { it.id })
+        assertEquals(0, starred.hiddenFinished)
+
+        val unread = arrangeCloudAgents(
+            agents = listOf(old),
+            git = emptyMap(),
+            pinnedAt = emptyMap(),
+            favoriteIds = emptySet(),
+            approvalIds = emptySet(),
+            filter = CloudFilter.All,
+            hideFinishedDays = 7,
+            revealFinished = false,
+            groupByRepo = false,
+            nowMillis = now,
+            unreadAgentIds = setOf("old"),
+        )
+        assertEquals(listOf("old"), unread.rest.map { it.id })
+        assertEquals(0, unread.hiddenFinished)
+    }
+
+    @Test
+    fun searchBypassesAgeFilter() {
+        val old = agent("old", status = "FINISHED", updatedAt = "2026-09-01T00:00:00Z")
+        val arranged = arrangeCloudAgents(
+            agents = listOf(old),
+            git = emptyMap(),
+            pinnedAt = emptyMap(),
+            favoriteIds = emptySet(),
+            approvalIds = emptySet(),
+            filter = CloudFilter.All,
+            hideFinishedDays = 7,
+            revealFinished = false,
+            groupByRepo = true,
+            nowMillis = now,
+            applyAgeFilter = false,
+        )
+        assertEquals(listOf("old"), arranged.groups.single().agents.map { it.id })
+        assertEquals(0, arranged.hiddenFinished)
+    }
+
+    @Test
+    fun activityBoundaryUsesStrictlyOlderThanWindow() {
+        val cutoff = agent("edge", status = "FINISHED", updatedAt = "2026-10-03T12:00:00Z")
+        val hidden = agent("past", status = "FINISHED", updatedAt = "2026-10-02T12:00:00Z")
+        val arranged = arrange(listOf(cutoff, hidden), hideDays = 7)
+        assertEquals(listOf("edge"), arranged.rest.map { it.id })
+        assertEquals(1, arranged.hiddenFinished)
     }
 
     private fun agent(

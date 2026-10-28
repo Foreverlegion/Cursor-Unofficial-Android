@@ -2,7 +2,7 @@
 
 - Local folders show the same running dot as repo groups when any agent inside the folder (including nested repo groups) is running. The dot stays visible while the folder is collapsed.
 - The Agents home list refreshes about every 10 seconds while you are on that screen, and newly started agents appear on the list right away instead of waiting for the server list to catch up. Background polling is unchanged; status rate limits still apply.
-- Settings, Chats and threads: Hide agents older than defaults to 3 weeks (Off, 1 day, 3 days, 7 days, and 3 weeks remain available). Your saved choice is kept across restarts and backup.
+- Settings, Agent list: Hide agents older than (default Off) folds idle chats out of repo groups and folders by last activity. Running chats, needs-attention, unread bell items, pinned and starred chats, and starred repos or folders stay visible. Per-group Show N older and a list-wide row bring them back; search still finds them. Choices: Off, 1/3/7/14 days, 4/8/12 weeks.
 
 # 1.0.35
 

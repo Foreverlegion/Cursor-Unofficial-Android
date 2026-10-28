@@ -103,7 +103,7 @@ class UiPrefsStoreTest {
         assertEquals(UI_SCHEMA_VERSION, ui.schemaVersion)
         assertTrue(chats.groupByRepo)
         assertTrue(chats.compactCards)
-        assertEquals(21, chats.hideFinishedDays)
+        assertEquals(0, chats.hideFinishedDays)
         assertTrue(chats.collapsedRepos.isEmpty())
         assertTrue(chats.repoGroupPrefs.isEmpty)
         assertTrue(chats.snapshot().isEmpty())

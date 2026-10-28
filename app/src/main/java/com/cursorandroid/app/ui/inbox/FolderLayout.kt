@@ -55,7 +55,7 @@ fun applyLocalFolders(
     for (group in arrangement.groups) {
         val home = groupFolder(group.key)
         val stay = mutableListOf<AgentSummary>()
-        for (agent in group.agents) {
+        for (agent in group.agents + group.hiddenOlder) {
             if (agent.id in pinnedIds) continue
             val own = chatFolder(agent.id)
             when {
@@ -64,9 +64,13 @@ fun applyLocalFolders(
             }
         }
         if (stay.isEmpty()) continue
+        val hiddenIds = group.hiddenOlder.map { it.id }.toSet()
+        val stayVisible = stay.filter { it.id !in hiddenIds }
+        val stayHidden = stay.filter { it.id in hiddenIds }
         val next = group.copy(
-            agents = stay,
-            running = stay.count { cloudBucket(it, it.id in approvalIds) == CloudFilter.Running },
+            agents = stayVisible,
+            hiddenOlder = stayHidden,
+            running = stayVisible.count { cloudBucket(it, it.id in approvalIds) == CloudFilter.Running },
         )
         if (home != null) grouped.getOrPut(home) { mutableListOf() }.add(next) else plain += next
     }

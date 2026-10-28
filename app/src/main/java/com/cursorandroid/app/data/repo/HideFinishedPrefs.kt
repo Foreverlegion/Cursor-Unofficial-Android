@@ -1,8 +1,12 @@
 package com.cursorandroid.app.data.repo
 
-const val DEFAULT_HIDE_FINISHED_DAYS = 21
+const val DEFAULT_HIDE_FINISHED_DAYS = 0
 
-private val VALID_HIDE_FINISHED_DAYS = setOf(0, 1, 3, 7, 21)
+val VALID_HIDE_FINISHED_DAYS = setOf(0, 1, 3, 7, 14, 28, 56, 84)
 
 fun normalizeHideFinishedDays(days: Int): Int =
-    if (days in VALID_HIDE_FINISHED_DAYS) days else DEFAULT_HIDE_FINISHED_DAYS
+    when {
+        days in VALID_HIDE_FINISHED_DAYS -> days
+        days == 21 -> 28
+        else -> DEFAULT_HIDE_FINISHED_DAYS
+    }
