@@ -579,6 +579,9 @@ class AgentRepository(
         catalog.savePrCheck(agentId, snap.takeIf { it.showChip })
     }
 
+    @Volatile
+    private var modelCache: Pair<Long, List<ModelItem>>? = null
+
     suspend fun models(): List<ModelItem> {
         val now = System.currentTimeMillis()
         modelCache?.let { (at, items) -> if (now - at < MODELS_TTL_MS && items.isNotEmpty()) return items }
