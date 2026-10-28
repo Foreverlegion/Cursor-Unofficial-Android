@@ -120,12 +120,12 @@ class LocalChatStore(private val ui: UiPrefsStore) {
 
     var hideFinishedDays: Int
         get() {
-            val days = ui[UiKeys.hideFinishedDays] ?: 0
-            return if (days == 1 || days == 3 || days == 7) days else 0
+            val stored = ui[UiKeys.hideFinishedDays]
+            if (stored == null) return DEFAULT_HIDE_FINISHED_DAYS
+            return normalizeHideFinishedDays(stored)
         }
         set(value) {
-            val days = if (value == 1 || value == 3 || value == 7) value else 0
-            ui.put(UiKeys.hideFinishedDays, days)
+            ui.put(UiKeys.hideFinishedDays, normalizeHideFinishedDays(value))
         }
 
     var collapsedRepos: Set<String>

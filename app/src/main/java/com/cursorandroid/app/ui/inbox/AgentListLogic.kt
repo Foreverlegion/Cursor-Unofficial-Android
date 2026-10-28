@@ -5,6 +5,8 @@ import com.cursorandroid.app.data.api.GitSnap
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.repo.FolderMembership
 import com.cursorandroid.app.data.repo.RepoGroupPrefs
+import com.cursorandroid.app.data.repo.DEFAULT_HIDE_FINISHED_DAYS
+import com.cursorandroid.app.data.repo.normalizeHideFinishedDays
 import com.cursorandroid.app.ui.status.RunIndicator
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.shortRepo
@@ -31,10 +33,16 @@ enum class HideFinishedAge(val days: Int, val label: String) {
     Day1(1, "1 day"),
     Day3(3, "3 days"),
     Day7(7, "7 days"),
+    Week3(DEFAULT_HIDE_FINISHED_DAYS, "3 weeks"),
     ;
 
     companion object {
-        fun fromDays(days: Int): HideFinishedAge = entries.firstOrNull { it.days == days } ?: Off
+        const val DEFAULT_DAYS = DEFAULT_HIDE_FINISHED_DAYS
+
+        fun fromDays(days: Int): HideFinishedAge =
+            entries.firstOrNull { it.days == days } ?: Week3
+
+        fun normalizeDays(days: Int): Int = normalizeHideFinishedDays(days)
     }
 }
 

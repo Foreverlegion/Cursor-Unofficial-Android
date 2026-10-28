@@ -27,7 +27,7 @@ class SettingsSnapshotTest {
         assertTrue(snap.showInboxRemote)
         assertTrue(snap.groupByRepo)
         assertTrue(snap.compactCards)
-        assertEquals(0, snap.hideFinishedDays)
+        assertEquals(21, snap.hideFinishedDays)
         assertEquals("comfortable", snap.homeDensity)
         assertEquals(2, snap.maxLivePromoted)
         assertEquals(false, snap.liveRunStatus)

@@ -223,7 +223,7 @@ data class SettingsSnapshot(
     val showInboxRemote: Boolean = true,
     val groupByRepo: Boolean = true,
     val compactCards: Boolean = true,
-    val hideFinishedDays: Int = 0,
+    val hideFinishedDays: Int = DEFAULT_HIDE_FINISHED_DAYS,
     /**
      * Null when the file is from before 1.0.32. Applying a null leaves the groups the phone
      * already has collapsed. An empty set means the user had none collapsed.
