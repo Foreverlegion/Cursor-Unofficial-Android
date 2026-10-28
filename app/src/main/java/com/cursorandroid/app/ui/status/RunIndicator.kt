@@ -84,9 +84,9 @@ fun runIndicator(
     val agentKey = normalizeStatus(agentStatus)
     val runLive = runKey.isNotEmpty() && runKey != "ACTIVE" && (isLiveStatus(runKey) || isCreatingStatus(runKey))
     if (runLive) return RunIndicator.Running
+    if (isLiveStatus(agentStatus) || isCreatingStatus(agentStatus)) return RunIndicator.Running
     if (runKey in FAILED) return RunIndicator.Failed
     if (runKey == "FINISHED") return RunIndicator.Done
-    if (isLiveStatus(agentStatus) || isCreatingStatus(agentStatus)) return RunIndicator.Running
     if (agentKey in FAILED) return RunIndicator.Failed
     return RunIndicator.Done
 }

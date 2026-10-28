@@ -337,6 +337,7 @@ class CloudApiGapsTest {
     fun agentIdleIsNotARunFailure() {
         assertEquals(RunIndicator.Done, runIndicator("IDLE", "FINISHED"))
         assertEquals(RunIndicator.Failed, runIndicator("IDLE", "ERROR"))
+        assertEquals(RunIndicator.Running, runIndicator("ACTIVE", "ERROR"))
         assertEquals(RunIndicator.Done, runIndicator("ACTIVE", "FINISHED"))
         assertEquals(RunIndicator.Running, runIndicator("ACTIVE", "RUNNING"))
         assertEquals(RunIndicator.Running, runIndicator("ACTIVE"))

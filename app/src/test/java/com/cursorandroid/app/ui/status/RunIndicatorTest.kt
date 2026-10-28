@@ -15,6 +15,7 @@ class RunIndicatorTest {
         assertEquals(RunIndicator.Running, runIndicator("CREATING"))
         assertEquals(RunIndicator.Running, runIndicator("ACTIVE", "RUNNING"))
         assertEquals(RunIndicator.Running, runIndicator("ERROR", "RUNNING"))
+        assertEquals(RunIndicator.Running, runIndicator("ACTIVE", "ERROR"))
         assertEquals(RunIndicator.Failed, runIndicator("ERROR"))
         assertEquals(RunIndicator.Failed, runIndicator("EXPIRED"))
         assertEquals(RunIndicator.Failed, runIndicator("CANCELLED"))

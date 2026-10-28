@@ -171,7 +171,10 @@ import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.ui.status.PlayColors
+import com.cursorandroid.app.ui.status.PrCheckChip
+import com.cursorandroid.app.ui.status.StatusPill
 import com.cursorandroid.app.ui.status.foreground
+import com.cursorandroid.app.ui.status.prChecksOpenUrl
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.repoNameOnly
 import com.cursorandroid.app.ui.status.shortRepo
@@ -243,6 +246,8 @@ class ThreadViewModel(
         private set
     var pendingPrUrl by mutableStateOf<String?>(null)
         private set
+    var prCheckSnap by mutableStateOf<com.cursorandroid.app.ui.status.PrCheckSnap?>(null)
+        private set
     var modelBook by mutableStateOf(container.runModels.load(agentId))
         private set
 
@@ -293,6 +298,10 @@ class ThreadViewModel(
     private var streamedRunId: String? = null
     private val pendingApprovals = HashSet<String>()
     private val outbound = ArrayList<QueuedOutbound>()
+
+    init {
+        prCheckSnap = container.catalog.prCheckSnaps()[agentId]?.takeIf { it.showChip }
+    }
     private var sendingId: String? = null
     private var appContext: android.content.Context? = null
     private val refreshLock = Mutex()
@@ -457,6 +466,12 @@ class ThreadViewModel(
                                 GitSnap(agentId, git.branch, git.prUrl, git.repoUrl),
                             )
                             container.chats.claimFinishedPr(container.catalog.gitSnaps())?.let { pendingPrUrl = it }
+                            if (!git.prUrl.isNullOrBlank()) {
+                                container.repo.refreshPrCheck(agentId, git.prUrl, git.repoUrl)
+                                prCheckSnap = container.catalog.prCheckSnaps()[agentId]?.takeIf { it.showChip }
+                            } else {
+                                prCheckSnap = null
+                            }
                         }
                         usage = container.repo.usage(agentId)
                         adoptRun(latest)
@@ -1451,7 +1466,6 @@ fun ThreadScreen(
         ?: repoNameOnly(container.catalog.gitSnaps()[agentId]?.repoUrl)
         ?: repoNameOnly(vm.agent?.repos?.firstOrNull()?.url)
         ?: vm.agent?.env?.name?.takeIf { it.isNotBlank() }
-    val subtitle = threadSubtitle(repoLabel, threadStatusLine(agentStatus, vm.run?.status, indicator))
     val latestTool = vm.lines.lastOrNull { it.kind == "tool" }?.let { toolCallParts(it.text).first }
     val activity = workActivityLine(
         receiving = vm.receiving,
@@ -1615,15 +1629,28 @@ fun ThreadScreen(
                     scrolledContainerColor = MaterialTheme.colorScheme.background,
                 ),
                 title = {
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
-                        Text(
-                            subtitle,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = indicator.foreground(),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            StatusPill(indicator)
+                            vm.prCheckSnap?.let { snap ->
+                                PrCheckChip(snap) {
+                                    SafeLinks.open(context, prChecksOpenUrl(snap.prUrl))
+                                }
+                            }
+                            Text(
+                                threadSubtitle(repoLabel, threadStatusLine(agentStatus, vm.run?.status, indicator)),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = PlayColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 },
                 navigationIcon = {

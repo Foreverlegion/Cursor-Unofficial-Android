@@ -1,6 +1,7 @@
 package com.cursorandroid.app.ui.status
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -54,5 +55,35 @@ fun StatusPill(indicator: RunIndicator, modifier: Modifier = Modifier) {
             .clip(RoundedCornerShape(50))
             .background(indicator.background())
             .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+fun PrCheckChipKind.foreground(): Color = when (this) {
+    PrCheckChipKind.ChecksRunning -> PlayColors.Muted
+    else -> PlayColors.FailFg
+}
+
+fun PrCheckChipKind.background(): Color = when (this) {
+    PrCheckChipKind.ChecksRunning -> Color(0xFF2A2A32)
+    else -> PlayColors.FailBg
+}
+
+@Composable
+fun PrCheckChip(
+    snap: PrCheckSnap,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val kind = snap.chipKind ?: return
+    Text(
+        snap.label.ifBlank { kind.label },
+        color = kind.foreground(),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Medium,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(kind.background())
+            .clickable(onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 2.dp),
     )
 }

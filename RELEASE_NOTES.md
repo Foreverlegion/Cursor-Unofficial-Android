@@ -1,5 +1,7 @@
 # 1.0.36
 
+- Agent list and chat header status pills always show the agent's live run state (Running, Needs approval, Done, Failed). A running agent no longer shows Failed because an older run or PR CI failed.
+- When a GitHub pull request's latest checks fail on the agent's head commit, a smaller secondary chip appears beside the status pill (Build failed, Tests failed, Checks failed, or a count). Tapping it opens the PR checks page. Checks refresh on the slower inbox poll cadence, about once a minute, not on every list tick.
 - Local folders show the same running dot as repo groups when any agent inside the folder (including nested repo groups) is running. The dot stays visible while the folder is collapsed.
 - The Agents home list refreshes about every 10 seconds while you are on that screen, and newly started agents appear on the list right away instead of waiting for the server list to catch up. Background polling is unchanged; status rate limits still apply.
 - Settings, Agent list: Hide agents older than (default Off) folds idle chats out of repo groups and folders by last activity. Running chats, needs-attention, unread bell items, pinned and starred chats, and starred repos or folders stay visible. Per-group Show N older and a list-wide row bring them back; search still finds them. Choices: Off, 1/3/7/14 days, 4/8/12 weeks.

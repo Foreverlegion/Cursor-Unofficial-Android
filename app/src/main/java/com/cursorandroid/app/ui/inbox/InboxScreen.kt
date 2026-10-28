@@ -79,9 +79,12 @@ import com.cursorandroid.app.ui.status.PlayColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.cursorandroid.app.ui.status.PrCheckChip
+import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.ui.status.StatusPill
 import com.cursorandroid.app.ui.status.agentCardSubtitle
 import com.cursorandroid.app.ui.status.agentLifecycleLabel
+import com.cursorandroid.app.ui.status.prChecksOpenUrl
 import com.cursorandroid.app.ui.status.relativeAge
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.runStatusLabel
@@ -193,6 +196,8 @@ fun InboxScreen(
         container.chats.snapshot().mapValues { it.value.repoUrl },
     )
     var git by remember { mutableStateOf(loadGit()) }
+    fun loadPrChecks(): Map<String, PrCheckSnap> = container.catalog.prCheckSnaps()
+    var prChecks by remember { mutableStateOf(loadPrChecks()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
     val searchParsed = remember(query) { InboxSearch.parse(query) }
@@ -309,6 +314,8 @@ fun InboxScreen(
                     runCatching { container.repo.refreshGitSnaps(latest) }
                     runCatching { container.repo.resolveAgentRepos(latest) }
                     git = loadGit()
+                    runCatching { container.repo.refreshPrChecks(latest, git) }
+                    prChecks = loadPrChecks()
                     val url = container.chats.claimFinishedPr(git)
                     if (!url.isNullOrBlank()) SafeLinks.open(context, url)
                 }
@@ -409,6 +416,7 @@ fun InboxScreen(
         VisibleAgent.inboxPolling(true)
         var machinesAt = 0L
         var machinesFailed = false
+        var prChecksAt = 0L
         try {
             inboxRefreshLoop(
                 first = RefreshReason.Resume,
@@ -467,6 +475,11 @@ fun InboxScreen(
                     }
                     git = loadGit()
                     val clock = System.currentTimeMillis()
+                    if (InboxPollPolicy.prChecksDue(reason, prChecksAt, clock) && !container.repo.statusGate.isPaused) {
+                        prChecksAt = clock
+                        runCatching { container.repo.refreshPrChecks(agents, git) }
+                        prChecks = loadPrChecks()
+                    }
                     if (InboxPollPolicy.machinesDue(reason, machinesAt, clock, machinesFailed)) {
                         machinesAt = clock
                         val listing = runCatching { container.repo.listMachines(agents) }.getOrNull()
@@ -728,6 +741,7 @@ fun InboxScreen(
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
+                        prChecks = prChecks,
                         live = live,
                         query = query,
                         onQueryChange = { query = it },
@@ -965,6 +979,7 @@ private fun AgentList(
     selectedId: String?,
     metas: Map<String, ChatMeta>,
     git: Map<String, GitSnap>,
+    prChecks: Map<String, PrCheckSnap> = emptyMap(),
     live: Map<String, String>,
     query: String,
     onQueryChange: (String) -> Unit,
@@ -1291,6 +1306,7 @@ private fun AgentList(
                                 agent = agent,
                                 title = metas[agent.id]?.title,
                                 git = if (compactCards) null else git[agent.id],
+                                prCheck = prChecks[agent.id],
                                 needsApproval = agent.id in approvalIds,
                                 selected = agent.id == selectedId,
                                 favorite = agent.id in favoriteIds,
@@ -1328,6 +1344,7 @@ private fun AgentList(
                             agent = agent,
                             title = metas[agent.id]?.title,
                             git = git[agent.id],
+                            prCheck = prChecks[agent.id],
                             needsApproval = agent.id in approvalIds,
                             selected = agent.id == selectedId,
                             favorite = true,
@@ -1359,6 +1376,7 @@ private fun AgentList(
                         agent = agent,
                         title = metas[agent.id]?.title,
                         git = git[agent.id],
+                        prCheck = prChecks[agent.id],
                         needsApproval = agent.id in approvalIds,
                         selected = agent.id == selectedId,
                         favorite = false,
@@ -1608,6 +1626,7 @@ internal fun AgentRow(
     agent: AgentSummary,
     title: String?,
     git: GitSnap?,
+    prCheck: PrCheckSnap? = null,
     needsApproval: Boolean,
     selected: Boolean,
     favorite: Boolean,
@@ -1708,6 +1727,12 @@ internal fun AgentRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     StatusPill(indicator)
+                    prCheck?.takeIf { it.showChip }?.let { snap ->
+                        PrCheckChip(snap) {
+                            val url = prChecksOpenUrl(snap.prUrl.ifBlank { git?.prUrl.orEmpty() })
+                            if (url.isNotBlank()) SafeLinks.open(context, url)
+                        }
+                    }
                     val lineTime = if (compact) compactTime else whenLabel
                     if (lineTime.isNotBlank()) {
                         Text(

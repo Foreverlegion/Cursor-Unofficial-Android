@@ -40,6 +40,8 @@ object InboxPollPolicy {
     const val MACHINES_EVERY_MS = 60_000L
     const val MACHINES_RETRY_MS = 20_000L
     const val RUN_CHECK_LIMIT = 6
+    const val PR_CHECKS_EVERY_MS = 60_000L
+    const val PR_CHECKS_LIMIT = 8
 
     fun busy(agents: List<AgentSummary>, localActive: Set<String>): Boolean =
         localActive.isNotEmpty() || agents.any { isLiveStatus(it.status) }
@@ -67,6 +69,9 @@ object InboxPollPolicy {
     fun resolveReposDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
 
     fun runChecksDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
+
+    fun prChecksDue(reason: RefreshReason, lastAtMs: Long, nowMs: Long): Boolean =
+        reason != RefreshReason.Tick || nowMs - lastAtMs >= PR_CHECKS_EVERY_MS
 
     fun runSweepDue(reason: RefreshReason, tick: Int): Boolean =
         reason != RefreshReason.Tick || tick % 2 == 0

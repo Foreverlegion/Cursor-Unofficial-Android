@@ -6,6 +6,7 @@ import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
+import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.data.api.MeResponse
 import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.api.WorkerPool
@@ -125,6 +126,22 @@ class CatalogCache(
         if (next.remove(agentId) != null) {
             active().edit { putString("git", json.encodeToString(next)) }
         }
+    }
+
+    fun prCheckSnaps(): Map<String, PrCheckSnap> {
+        val raw = active().getString("pr_checks", null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, PrCheckSnap>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    fun savePrCheck(agentId: String, snap: PrCheckSnap?) {
+        if (agentId.isBlank()) return
+        val next = prCheckSnaps().toMutableMap()
+        if (snap == null || !snap.showChip) {
+            if (next.remove(agentId) == null) return
+        } else {
+            next[agentId] = snap
+        }
+        active().edit { putString("pr_checks", json.encodeToString(next)) }
     }
 
     fun reposFresh(maxAgeMs: Long = REPOS_TTL): Boolean {
