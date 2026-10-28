@@ -60,12 +60,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.R
 import com.cursorandroid.app.data.api.ModelItem
+import com.cursorandroid.app.data.notify.PromotedNotificationSettings
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
@@ -197,6 +200,7 @@ internal fun SettingsScreenContent(
     val overviewScope = rememberCoroutineScope()
     var notify by remember { mutableStateOf(container.store.notifyOnComplete) }
     var notifyApprovals by remember { mutableStateOf(container.store.notifyOnApproval) }
+    var liveRunStatus by remember { mutableStateOf(container.store.liveRunStatus) }
     var showTools by remember { mutableStateOf(container.store.showToolCalls) }
     var showThinking by remember { mutableStateOf(container.store.showThinking) }
     var defaultModel by remember { mutableStateOf(container.store.defaultModel) }
@@ -236,6 +240,7 @@ internal fun SettingsScreenContent(
     fun reloadLocal() {
         notify = container.store.notifyOnComplete
         notifyApprovals = container.store.notifyOnApproval
+        liveRunStatus = container.store.liveRunStatus
         showTools = container.store.showToolCalls
         showThinking = container.store.showThinking
         defaultModel = container.store.defaultModel
@@ -534,6 +539,32 @@ internal fun SettingsScreenContent(
                                 if (on) RunWatchScheduler.resume(context.applicationContext)
                             },
                         )
+                        SettingsSwitchRow(
+                            title = stringResource(R.string.settings_live_run_status),
+                            summary = stringResource(R.string.settings_live_run_status_summary),
+                            checked = liveRunStatus,
+                            info = ALERT_INFO,
+                            onInfo = { info = it },
+                            onCheckedChange = { on ->
+                                if (on && Build.VERSION.SDK_INT >= 33 && !NotifyPermission.granted(context)) {
+                                    notifyPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                liveRunStatus = on
+                                container.store.liveRunStatus = on
+                                if (!on) container.notifier.clearAllLiveRuns()
+                                else RunWatchScheduler.resume(context.applicationContext)
+                            },
+                        )
+                        if (Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API) {
+                            val promotedIntent = remember(context) { PromotedNotificationSettings.settingsIntent(context) }
+                            if (promotedIntent != null) {
+                                SettingsLinkRow(
+                                    title = stringResource(R.string.settings_promoted_notifications),
+                                    summary = stringResource(R.string.settings_promoted_notifications_summary),
+                                    onClick = { context.startActivity(promotedIntent) },
+                                )
+                            }
+                        }
                         SettingsSwitchRow(
                             title = "Unrestricted battery",
                             summary = "Lets background checks keep running",

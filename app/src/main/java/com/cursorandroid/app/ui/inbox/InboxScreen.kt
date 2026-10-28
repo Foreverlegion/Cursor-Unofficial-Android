@@ -370,6 +370,7 @@ fun InboxScreen(
                     }
                     val agents = mergeInboxAgents(mirror.items, incoming)
                     applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
+                    container.notifier.syncLiveFromWatchList(agents)
                     if (InboxPollPolicy.runSweepDue(reason, tick) && !container.repo.statusGate.isPaused) {
                         container.runSettle.sweep(
                             mirror.items,
