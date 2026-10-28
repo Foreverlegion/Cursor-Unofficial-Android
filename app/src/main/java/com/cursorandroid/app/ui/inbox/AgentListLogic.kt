@@ -247,7 +247,7 @@ fun repoGroups(
             color = style.color,
         )
     }.sortedByDescending { group ->
-        (group.agents + group.hiddenOlder).maxOfOrNull { it.sortKey() } ?: 0L
+        (group.agents + group.hiddenOlder).maxOfOrNull { it.sortKey() } ?: ""
     }
     val manual = if (prefs.order.isEmpty()) {
         byActivity
