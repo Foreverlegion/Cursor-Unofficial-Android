@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "apiKey": "key_SHOULD_DROP",
+  "defaultModel": "model-1.0.28",
+  "notifyOnComplete": false,
+  "forges": [
+    {"id": "f28", "provider": "github", "name": "GitHub", "token": "", "extraForge": true}
+  ],
+  "repoDefaults": [
+    {"repoUrl": "https://github.com/acme/app", "modelId": "opus", "branch": "dev", "extraRepo": true}
+  ],
+  "repoGroupPrefs": {
+    "styles": {
+      "acme/app": {"name": "Nexus", "favorite": true, "color": -14326805, "extraStyle": true}
+    },
+    "order": ["acme/app"],
+    "extraPrefs": true
+  },
+  "machinePrefs": {
+    "seen": {"name:build": {"name": "build", "last_seen_ms": 5, "extraSeen": true}},
+    "marks": {},
+    "auto_hide_days": 14
+  },
+  "uiFont": "serif",
+  "codeFont": "jetbrains_mono",
+  "textScalePct": 120,
+  "chatDensity": "compact",
+  "groupByRepo": false,
+  "compactCards": false,
+  "hideFinishedDays": 3,
+  "showInboxEnvs": false,
+  "chats": {
+    "c128": {
+      "title": "Pinned",
+      "hidden": true,
+      "muted": true,
+      "pinned": true,
+      "pinnedAt": 9,
+      "openFinishedPr": true
+    }
+  },
+  "conversations": {
+    "c128": [{"id": "l1", "kind": "assistant", "text": "hello from 1.0.28"}]
+  },
+  "drafts": {"c128": {"text": "draft-1.0.28"}},
+  "secrets": null,
+  "pendingArchives": [{"agentId": "sneaky-128"}],
+  "shareInstallCount": false,
+  "autoUpdate": false,
+  "extraField": "keep-going"
+}

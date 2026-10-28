@@ -78,6 +78,8 @@ import com.cursorandroid.app.data.api.acceptsManyRepos
 import com.cursorandroid.app.data.api.selection
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.RepositoryItem
+import com.cursorandroid.app.data.repo.RefreshReason
+import com.cursorandroid.app.data.repo.toInboxSummary
 import com.cursorandroid.app.data.notify.RunWatchScheduler
 import com.cursorandroid.app.data.repo.AttachItem
 import com.cursorandroid.app.data.repo.Attachments
@@ -1441,6 +1443,8 @@ fun NewAgentScreen(
                                     runStatus = created.run.status,
                                     immediate = true,
                                 )
+                                container.inboxStaging.stage(created.agent.toInboxSummary(created.run))
+                                container.inboxRefresh.request(RefreshReason.RunStarted)
                                 RunWatchScheduler.watch(
                                     context.applicationContext,
                                     created.agent.id,

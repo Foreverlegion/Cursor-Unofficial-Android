@@ -15,9 +15,9 @@ import java.util.concurrent.Executors
 
 @Serializable
 data class TranscriptLine(
-    val id: String,
-    val kind: String,
-    val text: String,
+    val id: String = "",
+    val kind: String = "",
+    val text: String = "",
     val runId: String? = null,
     val queued: Boolean = false,
     val thumbs: List<String> = emptyList(),

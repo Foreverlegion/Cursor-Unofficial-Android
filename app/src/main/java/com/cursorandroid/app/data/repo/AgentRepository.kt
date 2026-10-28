@@ -318,6 +318,26 @@ class AgentRepository(
         }
     }
 
+    /** First page only, or every page when [walkPages] is true (resume / manual refresh). */
+    suspend fun listAgentsForInboxPoll(
+        walkPages: Boolean,
+        prUrl: String? = null,
+    ): AgentListResponse {
+        val first = listAgentsPage(includeArchived = true, prUrl = prUrl)
+        if (!walkPages || first.nextCursor.isNullOrBlank()) return first
+        val pages = ArrayList<AgentListResponse>(MAX_PAGES)
+        pages += first
+        var cursor = first.nextCursor
+        for (i in 1 until MAX_PAGES) {
+            if (cursor.isNullOrBlank()) break
+            val page = listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrl)
+            pages += page
+            if (page.entries().isEmpty()) break
+            cursor = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+        }
+        return foldAgentPages(pages, MAX_PAGES)
+    }
+
     suspend fun hydrateStatuses(
         agents: List<AgentSummary>,
         limit: Int = 15,
@@ -506,6 +526,57 @@ class AgentRepository(
                 }
             }.forEach { it.await() }
         }
+    }
+
+    suspend fun refreshPrChecks(
+        agents: List<AgentSummary>,
+        git: Map<String, com.cursorandroid.app.data.api.GitSnap>,
+        limit: Int = InboxPollPolicy.PR_CHECKS_LIMIT,
+    ) {
+        if (statusGate.isPaused || store.demoMode) return
+        val cached = catalog.prCheckSnaps()
+        val targets = agents.mapNotNull { agent ->
+            val prUrl = git[agent.id]?.prUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            if (GithubPrChecks.parsePullUrl(prUrl) == null) return@mapNotNull null
+            agent.id to prUrl
+        }.take(limit)
+        if (targets.isEmpty()) return
+        coroutineScope {
+            targets.map { (agentId, prUrl) ->
+                async {
+                    val repoUrl = git[agentId]?.repoUrl
+                    val forge = repoUrl?.let { store.forgeForRepo(it) }
+                        ?: store.forges().firstOrNull { it.provider == ForgeKind.GITHUB.id && it.token.isNotBlank() }
+                    val token = forge?.token?.trim().orEmpty().ifBlank { store.githubToken.orEmpty().trim() }
+                    if (token.isEmpty()) return@async
+                    val apiBase = forge?.apiUrl?.trim()?.trimEnd('/').takeUnless { it.isNullOrEmpty() }
+                        ?: ForgeKind.GITHUB.apiUrl
+                    val snap = runCatching { GithubPrChecks.fetchSnap(token, apiBase, prUrl) }.getOrNull()
+                        ?: return@async
+                    val prior = cached[agentId]
+                    if (prior?.headSha == snap.headSha && prior.kind == snap.kind &&
+                        prior.label == snap.label && prior.failures == snap.failures
+                    ) {
+                        return@async
+                    }
+                    catalog.savePrCheck(agentId, snap.takeIf { it.showChip })
+                }
+            }.forEach { it.await() }
+        }
+    }
+
+    suspend fun refreshPrCheck(agentId: String, prUrl: String, repoUrl: String?) {
+        if (statusGate.isPaused || store.demoMode || agentId.isBlank()) return
+        val trimmed = prUrl.trim()
+        if (trimmed.isEmpty() || GithubPrChecks.parsePullUrl(trimmed) == null) return
+        val forge = repoUrl?.let { store.forgeForRepo(it) }
+            ?: store.forges().firstOrNull { it.provider == ForgeKind.GITHUB.id && it.token.isNotBlank() }
+        val token = forge?.token?.trim().orEmpty().ifBlank { store.githubToken.orEmpty().trim() }
+        if (token.isEmpty()) return
+        val apiBase = forge?.apiUrl?.trim()?.trimEnd('/').takeUnless { it.isNullOrEmpty() }
+            ?: ForgeKind.GITHUB.apiUrl
+        val snap = runCatching { GithubPrChecks.fetchSnap(token, apiBase, trimmed) }.getOrNull() ?: return
+        catalog.savePrCheck(agentId, snap.takeIf { it.showChip })
     }
 
     @Volatile

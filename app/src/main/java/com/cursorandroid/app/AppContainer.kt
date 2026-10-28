@@ -10,9 +10,16 @@ import com.cursorandroid.app.data.api.SseStreamer
 import com.cursorandroid.app.data.auth.ApiKeyStore
 import com.cursorandroid.app.data.auth.SessionGuard
 import com.cursorandroid.app.data.auth.CursorBrowserLogin
+import com.cursorandroid.app.data.auth.CursorDashboardUsage
 import com.cursorandroid.app.data.notify.NoticeStore
 import com.cursorandroid.app.data.notify.RunNotifier
 import com.cursorandroid.app.data.repo.AgentRepository
+import com.cursorandroid.app.data.repo.ArchiveCoordinator
+import com.cursorandroid.app.data.repo.InboxSignals
+import com.cursorandroid.app.data.repo.LocalFolderStore
+import com.cursorandroid.app.data.repo.CustomFolderIconStore
+import com.cursorandroid.app.data.repo.ImportedFontStore
+import com.cursorandroid.app.data.repo.PendingArchiveStore
 import com.cursorandroid.app.data.repo.ArtifactHistoryStore
 import com.cursorandroid.app.data.repo.StagedRestore
 import com.cursorandroid.app.data.repo.StatusCallMeter
@@ -26,6 +33,7 @@ import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.ForgeSyncStore
 import com.cursorandroid.app.data.repo.ForgeSyncer
 import com.cursorandroid.app.data.repo.InboxRefreshHub
+import com.cursorandroid.app.data.repo.InboxStagingHub
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
 import com.cursorandroid.app.data.repo.RunSettleHub
@@ -57,6 +65,7 @@ class AppContainer(context: Context) {
     val runModels = RunModelStore(context)
     val notices = NoticeStore(context)
     val inboxRefresh = InboxRefreshHub()
+    val inboxStaging = InboxStagingHub()
     val runSettle = RunSettleHub { ended ->
         conversations.settle(ended.agentId, ended.runId, ended.status)
         val agents = catalog.agents()
@@ -152,6 +161,8 @@ class AppContainer(context: Context) {
 
     val login = CursorBrowserLogin(publicHttp, json)
 
+    val dashboardUsage = CursorDashboardUsage(publicHttp, json)
+
     val statusGate = StatusGate(
         meter = StatusCallMeter(sink = if (debug) { line -> Log.d("StatusCalls", line) } else null),
     )
@@ -175,4 +186,16 @@ class AppContainer(context: Context) {
 
     /** Debug builds only: how many status calls went out in the last minute, for the About page. */
     val statusCallsPerMinute: Int? get() = if (debug) statusGate.meter.lastMinute() else null
+
+    val signals = InboxSignals()
+    val folders = LocalFolderStore(ui)
+    val folderIcons = CustomFolderIconStore(context)
+    val importedFonts = ImportedFontStore(context, ui)
+    val archives = ArchiveCoordinator(
+        store = PendingArchiveStore(ui),
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        catalog = catalog,
+        archive = { id -> repo.archive(id) },
+        signals = signals,
+    )
 }

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "apiKey": "key_SHOULD_DROP",
+  "notifyOnComplete": false,
+  "notifyOnApproval": false,
+  "mcpName": "legacy",
+  "mcpUrl": "https://example.com/mcp",
+  "showThinking": true,
+  "showToolCalls": false,
+  "hideThinking": false,
+  "hideTools": false,
+  "defaultModel": "model-1.0.2",
+  "showMicrophone": false,
+  "githubToken": "ghp_PLAIN_102",
+  "inboxWorkingOnly": true,
+  "inboxShowArchived": true,
+  "themeColor": -14326805,
+  "showInboxEnvs": false,
+  "showInboxRemote": false,
+  "chats": {
+    "c102": {
+      "title": "From 1.0.2",
+      "favorite": true,
+      "favoritedAt": 10,
+      "repoUrl": "https://github.com/acme/app",
+      "baseBranch": "main",
+      "startSha": "abc",
+      "ignoredRemoteSha": "def",
+      "extraChat": true
+    }
+  },
+  "conversations": {
+    "c102": [
+      {"id": "l1", "kind": "user", "text": "hello from 1.0.2", "extraLine": "keep"}
+    ]
+  },
+  "drafts": {
+    "c102": {"text": "draft-1.0.2", "extraDraft": 1}
+  },
+  "pendingArchives": [{"agentId": "sneaky-102", "previousStatus": "RUNNING"}],
+  "autoUpdate": true,
+  "extraField": "keep-going"
+}

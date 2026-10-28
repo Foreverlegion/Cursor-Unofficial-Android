@@ -5,6 +5,11 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import com.cursorandroid.app.data.auth.ApiKeyStore
+import com.cursorandroid.app.data.repo.IMPORTED_FONT_PREFIX
+import com.cursorandroid.app.data.repo.ImportedFontStore
+import com.cursorandroid.app.data.repo.ImportedFontStore.Companion.importedId
+import com.cursorandroid.app.data.repo.ImportedFontStore.Companion.isImportedId
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import com.cursorandroid.app.R
@@ -43,6 +48,41 @@ enum class ChatDensity(val id: String, val label: String, val summary: String) {
     }
 }
 
+enum class HomeDensity(val id: String, val label: String, val summary: String) {
+    Comfortable("comfortable", "Comfortable", "Roomier folders and repo rows"),
+    Compact("compact", "Compact", "More folders on screen"),
+    Large("large", "Large", "Largest icons and labels"),
+    ;
+
+    companion object {
+        fun fromId(id: String?): HomeDensity = entries.firstOrNull { it.id == id } ?: Comfortable
+    }
+
+    val folderIconDp get() = when (this) {
+        Compact -> 16
+        Comfortable -> 24
+        Large -> 30
+    }
+
+    val folderRowPadV get() = when (this) {
+        Compact -> 6
+        Comfortable -> 12
+        Large -> 16
+    }
+
+    val folderTitleStyle: String get() = when (this) {
+        Compact -> "titleSmall"
+        Comfortable -> "titleMedium"
+        Large -> "titleLarge"
+    }
+
+    val repoRowPadV get() = when (this) {
+        Compact -> 6
+        Comfortable -> 12
+        Large -> 14
+    }
+}
+
 const val MIN_TEXT_SCALE = 85
 const val MAX_TEXT_SCALE = 140
 const val DEFAULT_TEXT_SCALE = 100
@@ -69,10 +109,15 @@ data class Appearance(
     val codeFont: CodeFont = CodeFont.SystemMono,
     val textScalePct: Int = DEFAULT_TEXT_SCALE,
     val density: ChatDensity = ChatDensity.Comfortable,
+    val homeDensity: HomeDensity = HomeDensity.Comfortable,
+    val importedUiFont: androidx.compose.ui.text.font.FontFamily? = null,
+    val importedCodeFont: androidx.compose.ui.text.font.FontFamily? = null,
 ) {
     val bubblePadH get() = if (density == ChatDensity.Compact) 11 else 14
     val bubblePadV get() = if (density == ChatDensity.Compact) 6 else 10
     val rowGap get() = if (density == ChatDensity.Compact) 4 else 8
+
+    fun codeFontFamily(): FontFamily = importedCodeFont ?: codeFont.family()
 }
 
 val LocalAppearance = staticCompositionLocalOf { Appearance() }
@@ -103,3 +148,21 @@ fun CodeFont.family(): FontFamily = when (this) {
     CodeFont.RobotoMono -> RobotoMonoFamily
     CodeFont.JetBrainsMono -> JetBrainsMonoFamily
 }
+
+fun resolveUiFontFamily(store: ApiKeyStore, imported: ImportedFontStore): FontFamily? {
+    val id = store.uiFont
+    if (isImportedId(id)) {
+        return importedId(id)?.let { imported.family(it) }
+    }
+    return UiFont.fromId(id).family()
+}
+
+fun resolveCodeFontFamily(store: ApiKeyStore, imported: ImportedFontStore): FontFamily {
+    val id = store.codeFont
+    if (isImportedId(id)) {
+        return importedId(id)?.let { imported.family(it) } ?: FontFamily.Monospace
+    }
+    return CodeFont.fromId(id).family()
+}
+
+fun importedFontSelectionId(entryId: String) = "$IMPORTED_FONT_PREFIX$entryId"

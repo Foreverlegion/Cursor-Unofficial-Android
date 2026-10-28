@@ -1,3 +1,39 @@
+# 1.0.36
+
+- Agent list and chat header status pills always show the agent's live run state (Running, Needs approval, Done, Failed). A running agent no longer shows Failed because an older run or PR CI failed.
+- When a GitHub pull request's latest checks fail on the agent's head commit, a smaller secondary chip appears beside the status pill (Build failed: job name, Test failed: test or job name, Check failed: name). Several failures show the first plus "+N more"; tap opens a sheet listing each failure with a link to its GitHub check run, plus all checks on the PR. Checks refresh on the slower inbox poll cadence, about once a minute, not on every list tick.
+- Local folders show the same running dot as repo groups when any agent inside the folder (including nested repo groups) is running. The dot stays visible while the folder is collapsed.
+- The Agents home list refreshes about every 10 seconds while you are on that screen, and newly started agents appear on the list right away instead of waiting for the server list to catch up. Background polling is unchanged; status rate limits still apply.
+- Settings, Usage (About): two progress bars for the current billing period — Cursor models and Other models — from the Cursor dashboard API, plus when the period resets. Refreshes when you open About and about once a minute while you stay there; last good values are cached. If the dashboard call fails, the bars stay hidden with no error message.
+- Settings, Agent list: Hide agents older than (default 3 weeks) folds idle chats out of repo groups and folders by last activity. Running chats, needs-attention, unread bell items, pinned and starred chats, and starred repos or folders stay visible. Per-group Show N older and a list-wide row bring them back; search still finds them. Choices: Off, 1/3/7/14 days, 3 weeks, 4/8/12 weeks.
+- Local folders can use a photo as the folder icon: long-press a folder, Set or Change icon, then From photo (Android photo picker, or pick an image on older devices). Photos are center-cropped to a circle, saved as a 256×256 WebP under ~40 KB in app storage, and included in backup. Rejects only images over 50 MB or 100 megapixels. Remove icon restores the default; deleting the folder removes its icon file.
+
+# 1.0.35
+
+- Inbox search is one field: type a chat keyword or paste a pull-request URL (GitHub, GitLab, or Origin) or `#123` to filter by PR. The separate PR URL box is gone.
+- Search collapses to a magnifying-glass icon beside the Cloud and Remote tabs. Tap to expand; it hides when you scroll, go back, or tap away if the query is empty. An active query keeps the filter and shows a dot on the icon.
+- Settings, Appearance: Home density (Compact, Comfortable, Large) scales folder and repo rows on the agent list. Comfortable defaults are roomier now that search takes less space.
+- Folder Change icon keeps every built-in icon and adds Upload image (photo picker, no storage permission). Images are cropped square, saved on the phone, and survive updates and backup.
+- Settings, Appearance: App font adds Import font for `.ttf` and `.otf` files (validated on import). Pick among imported fonts or delete them. Code font can use an imported face too. Missing files fall back to the system font.
+- Live run status uses one notification per agent (stable id and tag). Creating, running, and other in-run states update that same entry instead of stacking duplicates. No empty progress bar on Android 16; elapsed time shows in the body when known.
+- Run, live, and completion alerts share one notification group with a summary when several agents run at once. Only the most recent agents (Settings, Notifications: Max live status notifications, default 2) get ungrouped live status chips on Android 16; the rest stay in the collapsed group. Live status for running agents is off by default on new installs; upgrading from 1.0.34 keeps a choice you already saved and turns live status off if you never changed it.
+
+# 1.0.34
+
+- Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.
+- Custom folder colors you pick are saved and still import from backup the same way as preset colors.
+- Inbox foreground polling no longer waits out a status rate-limit pause before calling the agent list again. Timer ticks are list-only (no status hydration on every 20 s). Resume triggers an immediate list refresh with the usual status follow-up.
+- Android 16 live status: while a run you started is already on the fast run watch, an ongoing notification shows the agent name and state (promoted when the app is allowed). Finishing replaces it with the normal completion alert. Settings, Notifications: Live status for running agents (default on) and a link to the system live-update permission for this app.
+
+# 1.0.33
+
+- Archive, unarchive, delete, pin, favorite, rename, hide, and mute update the list immediately. If the server call fails, the row comes back and a note shows the reason.
+- Archive waits 7 seconds before it calls Cursor. Undo in that window cancels the pending archive and does not call unarchive. The note stays for those same 7 seconds. Swiping it away does not send or cancel the archive. Each archive keeps its own timer. Pending archives are saved on the phone. Leaving the app sends them. If the app is killed first, the next launch sends them.
+- Local folders group repo groups and chats on this phone only. Nothing is sent to Cursor. They are kept across updates. Deleting a folder leaves the chats in the list. Move to folder is on the long-press menu and in multi-select.
+- A starred repo, and a starred folder, stays at the top and is never moved into Show N hidden, however old its last chat is. Hide still removes a chat you hid yourself. This holds on every filter and in search. Starred rows keep their order.
+- A folder has a name color and an icon. The default color follows the theme, and the default icon is the folder. A renamed repo still shows its real path under the name.
+- Backup now includes folders (name, color, icon, collapsed, star, and which chats and repos are in them) and which repo groups are collapsed. A backup from any older version still imports. The sign-in key stays out. Pending archives are not in a backup.
+
 # 1.0.31
 
 - Fixes being signed out / losing your API key after an app update.

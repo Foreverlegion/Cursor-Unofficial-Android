@@ -28,11 +28,16 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import com.cursorandroid.app.data.repo.GroupMove
+import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.moveGroupKey
+import com.cursorandroid.app.ui.theme.ColorPickerDialog
+import com.cursorandroid.app.ui.theme.LocalAppearance
+import com.cursorandroid.app.ui.theme.HomeDensity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +51,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,68 +66,91 @@ internal class RepoGroupActions(
     val onColor: (key: String, color: Int) -> Unit,
     val onOrder: (keys: List<String>) -> Unit,
     val onResetOrder: () -> Unit,
+    val onMoveToFolder: (key: String) -> Unit,
 )
 
 internal fun LazyListScope.cloudAgentBlocks(
-    arrangement: CloudArrangement,
+    laid: FolderedCloud,
+    folderActions: FolderListActions,
+    filtering: Boolean,
     groupActions: RepoGroupActions,
     groupByRepo: Boolean,
     collapsed: Set<String>,
     onToggleGroup: (String) -> Unit,
+    onRenameFolder: (LocalFolder) -> Unit,
+    onDeleteFolder: (LocalFolder) -> Unit,
     revealFinished: Boolean,
     onToggleReveal: () -> Unit,
+    revealedOlderGroups: Set<String>,
+    onToggleRevealGroup: (String) -> Unit,
     agentRow: @Composable (AgentSummary) -> Unit,
 ) {
-    if (arrangement.pinned.isNotEmpty()) {
+    if (laid.pinned.isNotEmpty()) {
         item(key = "hdr-pin") { SectionHeading("Pinned") }
-        itemsKeyed(arrangement.pinned, "pin") { agentRow(it) }
+        itemsKeyed(laid.pinned, "pin") { agentRow(it) }
     }
-    if (groupByRepo) {
-        val displayKeys = arrangement.groups.map { it.key }
-        val favoriteKeys = arrangement.groups.filter { it.favorite }.map { it.key }.toSet()
-        arrangement.groups.forEach { group ->
-            item(key = "repo-${group.key}") {
-                val peers = displayKeys.filter { (it in favoriteKeys) == group.favorite }
-                val at = peers.indexOf(group.key)
-                RepoGroupHeader(
-                    label = group.title,
-                    subtitle = group.path.takeIf { group.customName != null && it.isNotBlank() },
-                    realName = group.path.ifBlank { group.label },
-                    count = group.agents.size,
-                    running = group.running,
-                    expanded = group.key !in collapsed,
-                    favorite = group.favorite,
-                    color = group.color,
-                    renamed = group.customName != null,
-                    canMoveUp = at > 0,
-                    canMoveDown = at in 0 until peers.lastIndex,
-                    manualOrder = groupActions.manualOrder,
-                    onClick = { onToggleGroup(group.key) },
-                    onRename = { groupActions.onRename(group.key, it) },
-                    onFavorite = { groupActions.onFavorite(group.key) },
-                    onColor = { groupActions.onColor(group.key, it) },
-                    onMove = { move ->
-                        groupActions.onOrder(moveGroupKey(displayKeys, favoriteKeys, group.key, move))
-                    },
-                    onResetOrder = groupActions.onResetOrder,
+    val visibleFolders = laid.folders.filter { it.shownInList(folderActions.membership, filtering) }
+    visibleFolders.forEach { block ->
+        item(key = "fld-${block.folder.id}") {
+            FolderHeader(
+                folder = block.folder,
+                count = block.count,
+                running = block.running,
+                iconStore = folderActions.iconStore,
+                onToggle = { folderActions.onToggleCollapsed(block.folder.id) },
+                onRename = { onRenameFolder(block.folder) },
+                onDelete = { onDeleteFolder(block.folder) },
+                onToggleFavorite = { folderActions.onToggleFavorite(block.folder.id) },
+                onColor = { folderActions.onColor(block.folder.id, it) },
+                onIcon = { folderActions.onIcon(block.folder.id, it) },
+                onUploadIcon = { folderActions.onUploadIcon(block.folder.id) },
+            )
+        }
+        if (!block.folder.collapsed) {
+            block.groups.forEach { group ->
+                repoGroupBlock(
+                    group,
+                    laid,
+                    "fld-${block.folder.id}",
+                    collapsed,
+                    groupActions,
+                    onToggleGroup,
+                    revealFinished,
+                    revealedOlderGroups,
+                    onToggleRevealGroup,
+                    agentRow,
                 )
             }
-            if (group.key !in collapsed) {
-                itemsKeyed(group.agents, "g-${group.key}") { agentRow(it) }
-            }
+            itemsKeyed(block.chats, "fld-${block.folder.id}-chat") { agentRow(it) }
+        }
+    }
+    if (groupByRepo) {
+        laid.groups.forEach { group ->
+            repoGroupBlock(
+                group,
+                laid,
+                "root",
+                collapsed,
+                groupActions,
+                onToggleGroup,
+                revealFinished,
+                revealedOlderGroups,
+                onToggleRevealGroup,
+                agentRow,
+            )
         }
     } else {
-        if (arrangement.favorites.isNotEmpty()) {
+        if (laid.favorites.isNotEmpty()) {
             item(key = "hdr-fav") { SectionHeading("Favorites") }
-            itemsKeyed(arrangement.favorites, "fav") { agentRow(it) }
+            itemsKeyed(laid.favorites, "fav") { agentRow(it) }
             item(key = "hdr-all") { SectionHeading("All") }
         }
-        itemsKeyed(arrangement.rest, "row") { agentRow(it) }
+        itemsKeyed(laid.rest, "row") { agentRow(it) }
     }
-    if (arrangement.hiddenFinished > 0) {
+    if (laid.hiddenFinished > 0) {
         item(key = "aged") {
-            val count = arrangement.hiddenFinished
-            val label = if (revealFinished) "Hide $count older" else "Show $count hidden"
+            val count = laid.hiddenFinished
+            val label = if (revealFinished) "Hide $count older" else "Show $count older"
             Text(
                 label,
                 color = MaterialTheme.colorScheme.primary,
@@ -133,6 +160,72 @@ internal fun LazyListScope.cloudAgentBlocks(
                     .clickable(onClick = onToggleReveal)
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             )
+        }
+    }
+}
+
+private fun LazyListScope.repoGroupBlock(
+    group: RepoGroup,
+    laid: FolderedCloud,
+    keyPrefix: String,
+    collapsed: Set<String>,
+    groupActions: RepoGroupActions,
+    onToggleGroup: (String) -> Unit,
+    revealFinished: Boolean,
+    revealedOlderGroups: Set<String>,
+    onToggleRevealGroup: (String) -> Unit,
+    agentRow: @Composable (AgentSummary) -> Unit,
+) {
+    val all = laid.folders.flatMap { it.groups } + laid.groups
+    val displayKeys = all.map { it.key }
+    val favoriteKeys = all.filter { it.favorite }.map { it.key }.toSet()
+    item(key = "$keyPrefix-repo-${group.key}") {
+        val peers = displayKeys.filter { (it in favoriteKeys) == group.favorite }
+        val at = peers.indexOf(group.key)
+        RepoGroupHeader(
+            label = group.title,
+            subtitle = group.path.takeIf { group.customName != null && it.isNotBlank() },
+            realName = group.path.ifBlank { group.label },
+            count = group.agents.size,
+            running = group.running,
+            expanded = group.key !in collapsed,
+            favorite = group.favorite,
+            color = group.color,
+            renamed = group.customName != null,
+            canMoveUp = at > 0,
+            canMoveDown = at in 0 until peers.lastIndex,
+            manualOrder = groupActions.manualOrder,
+            onClick = { onToggleGroup(group.key) },
+            onRename = { groupActions.onRename(group.key, it) },
+            onFavorite = { groupActions.onFavorite(group.key) },
+            onColor = { groupActions.onColor(group.key, it) },
+            onMove = { move ->
+                groupActions.onOrder(moveGroupKey(displayKeys, favoriteKeys, group.key, move))
+            },
+            onResetOrder = groupActions.onResetOrder,
+            onMoveToFolder = { groupActions.onMoveToFolder(group.key) },
+        )
+    }
+    if (group.key !in collapsed) {
+        itemsKeyed(group.agents, "$keyPrefix-g-${group.key}") { agentRow(it) }
+        val hidden = group.hiddenOlder
+        if (hidden.isNotEmpty()) {
+            val expanded = revealFinished || group.key in revealedOlderGroups
+            if (!expanded) {
+                item(key = "$keyPrefix-older-${group.key}") {
+                    Text(
+                        "Show ${hidden.size} older",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleRevealGroup(group.key) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+            } else {
+                itemsKeyed(hidden, "$keyPrefix-gh-${group.key}") { agentRow(it) }
+            }
         }
     }
 }
@@ -171,6 +264,18 @@ internal val GroupHeaderColors = listOf(
     0xFFF472B6.toInt(),
 )
 
+@Composable
+internal fun RepoRunningDot(visible: Boolean, modifier: Modifier = Modifier) {
+    if (!visible) return
+    Box(
+        modifier = modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .semantics { contentDescription = "Running" },
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun RepoGroupHeader(
@@ -192,12 +297,19 @@ internal fun RepoGroupHeader(
     onColor: (Int) -> Unit,
     onMove: (GroupMove) -> Unit,
     onResetOrder: () -> Unit,
+    onMoveToFolder: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
     var colorOpen by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
+    val home = LocalAppearance.current.homeDensity
     val nameColor = if (color != 0) Color(color) else MaterialTheme.colorScheme.onSurface
+    val titleStyle = when (home) {
+        HomeDensity.Large -> MaterialTheme.typography.titleLarge
+        HomeDensity.Compact -> MaterialTheme.typography.titleSmall
+        HomeDensity.Comfortable -> MaterialTheme.typography.titleMedium
+    }
     Box {
         Row(
             modifier = Modifier
@@ -209,7 +321,7 @@ internal fun RepoGroupHeader(
                         menu = true
                     },
                 )
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = home.repoRowPadV.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -225,7 +337,7 @@ internal fun RepoGroupHeader(
                 ) {
                     Text(
                         label,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = titleStyle,
                         color = nameColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -256,13 +368,7 @@ internal fun RepoGroupHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (running > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .semantics { contentDescription = "Running" },
-                )
+                RepoRunningDot(visible = true)
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -293,6 +399,13 @@ internal fun RepoGroupHeader(
                 onClick = {
                     menu = false
                     onFavorite()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Move to folder") },
+                onClick = {
+                    menu = false
+                    onMoveToFolder()
                 },
             )
             DropdownMenuItem(
@@ -372,46 +485,17 @@ internal fun RepoGroupHeader(
         )
     }
     if (colorOpen) {
-        AlertDialog(
-            onDismissRequest = { colorOpen = false },
-            title = { Text("Header color") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        GroupHeaderColors.forEach { swatch ->
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(swatch))
-                                    .border(
-                                        width = if (swatch == color) 3.dp else 1.dp,
-                                        color = if (swatch == color) {
-                                            MaterialTheme.colorScheme.onBackground
-                                        } else {
-                                            MaterialTheme.colorScheme.outline
-                                        },
-                                        shape = CircleShape,
-                                    )
-                                    .clickable {
-                                        colorOpen = false
-                                        onColor(swatch)
-                                    },
-                            )
-                        }
-                    }
-                    TextButton(onClick = {
-                        colorOpen = false
-                        onColor(0)
-                    }) { Text(if (color == 0) "Default (selected)" else "Default") }
-                }
+        ColorPickerDialog(
+            title = "Header color",
+            initialColor = color,
+            presetColors = GroupHeaderColors,
+            allowDefault = true,
+            defaultPreviewColor = MaterialTheme.colorScheme.onSurface.toArgb(),
+            onConfirm = {
+                colorOpen = false
+                onColor(it)
             },
-            confirmButton = {
-                TextButton(onClick = { colorOpen = false }) { Text("Close") }
-            },
+            onDismiss = { colorOpen = false },
         )
     }
 }
@@ -427,20 +511,18 @@ internal fun SwipeArchiveRow(
         content()
         return
     }
-    var fired by remember { mutableStateOf(false) }
+    var armed by remember { mutableStateOf(true) }
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart && !fired) {
-                fired = true
+            if (value == SwipeToDismissBoxValue.EndToStart && armed) {
+                armed = false
                 onArchive()
             }
             false
         },
     )
-    LaunchedEffect(fired) {
-        if (!fired) return@LaunchedEffect
-        delay(1_200)
-        fired = false
+    LaunchedEffect(state.currentValue) {
+        if (state.currentValue == SwipeToDismissBoxValue.Settled) armed = true
     }
     SwipeToDismissBox(
         state = state,

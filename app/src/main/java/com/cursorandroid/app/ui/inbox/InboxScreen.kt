@@ -5,6 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -69,7 +73,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX
+import com.cursorandroid.app.data.repo.FolderIconImportResult
 import com.cursorandroid.app.ui.status.PlayColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.cursorandroid.app.ui.status.PrCheckChipWithSheet
+import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.ui.status.StatusPill
 import com.cursorandroid.app.ui.status.agentCardSubtitle
 import com.cursorandroid.app.ui.status.agentLifecycleLabel
@@ -78,6 +89,7 @@ import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.runStatusLabel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
@@ -100,7 +112,6 @@ import com.cursorandroid.app.data.api.isArchived
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.api.markCloudArchived
-import com.cursorandroid.app.data.api.mergeInboxAgents
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.visibleInbox
 import com.cursorandroid.app.data.notify.unreadCount
@@ -111,10 +122,12 @@ import com.cursorandroid.app.data.repo.RefreshReason
 import com.cursorandroid.app.data.repo.applyRunChecks
 import com.cursorandroid.app.data.repo.inboxRefreshLoop
 import com.cursorandroid.app.data.repo.runCheckTargets
-import com.cursorandroid.app.data.api.isLiveStatus
+import com.cursorandroid.app.data.api.actionReason
 import com.cursorandroid.app.data.repo.ChatMeta
 import com.cursorandroid.app.data.repo.ChatShare
+import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.SafeLinks
+import com.cursorandroid.app.data.repo.withPendingArchives
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -140,7 +153,18 @@ fun InboxScreen(
     settingsEpoch: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    var items by remember { mutableStateOf(container.catalog.agents().sortedByDescending { it.sortKey() }) }
+    val seedAgents = remember {
+        container.catalog.agents().sortedByDescending { it.sortKey() }
+            .withPendingArchives(container.archives.pendingIds())
+    }
+    var items by remember { mutableStateOf(seedAgents) }
+    val mirror = remember { AgentMirror(seedAgents) }
+    fun publish(next: List<AgentSummary>, save: Boolean = true) {
+        val shown = next.withPendingArchives(container.archives.pendingIds())
+        mirror.items = shown
+        items = shown
+        if (save) container.catalog.saveAgents(shown)
+    }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var machinePrefs by remember { mutableStateOf(container.machines.prefs()) }
     var machineAction by remember { mutableStateOf<Computer?>(null) }
@@ -171,9 +195,17 @@ fun InboxScreen(
         container.chats.snapshot().mapValues { it.value.repoUrl },
     )
     var git by remember { mutableStateOf(loadGit()) }
+    fun loadPrChecks(): Map<String, PrCheckSnap> = container.catalog.prCheckSnaps()
+    var prChecks by remember { mutableStateOf(loadPrChecks()) }
     var live by remember { mutableStateOf(container.conversations.liveStatuses()) }
     var query by remember { mutableStateOf("") }
+    val searchParsed = remember(query) { InboxSearch.parse(query) }
     var prUrlFilter by remember { mutableStateOf("") }
+    var searchExpanded by remember { mutableStateOf(false) }
+    var searchFocusPulse by remember { mutableStateOf(false) }
+    var iconUploadFolderId by remember { mutableStateOf<String?>(null) }
+    var iconImportBusy by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     var showArchived by remember { mutableStateOf(container.chats.inboxShowArchived) }
     var showHidden by remember { mutableStateOf(container.chats.inboxShowHidden) }
     var workingOnly by remember { mutableStateOf(container.chats.inboxWorkingOnly) }
@@ -182,8 +214,13 @@ fun InboxScreen(
     var hideFinishedDays by remember { mutableIntStateOf(container.chats.hideFinishedDays) }
     var collapsedRepos by remember { mutableStateOf(container.chats.collapsedRepos) }
     var groupPrefs by remember { mutableStateOf(container.chats.repoGroupPrefs) }
+    var folders by remember { mutableStateOf(container.folders.snapshot()) }
+    fun refreshFolders() {
+        folders = container.folders.snapshot()
+    }
     var cloudFilter by remember { mutableStateOf(CloudFilter.All) }
     var revealFinished by remember { mutableStateOf(false) }
+    var revealedOlderGroups by remember { mutableStateOf(setOf<String>()) }
     val snackbar = remember { SnackbarHostState() }
     val hiddenIds = metas.filter { it.value.hidden }.keys
     var nextCursor by remember { mutableStateOf<String?>(null) }
@@ -197,12 +234,58 @@ fun InboxScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var reloadJob by remember { mutableStateOf<Job?>(null) }
+    fun applyFolderIconFromUri(uri: android.net.Uri?) {
+        val folderId = iconUploadFolderId
+        iconUploadFolderId = null
+        if (folderId == null || uri == null) return
+        if (iconImportBusy) return
+        iconImportBusy = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                container.folderIcons.importForFolder(context, uri, folderId)
+            }
+            iconImportBusy = false
+            when (result) {
+                is FolderIconImportResult.Success -> {
+                    val old = folders.folders.firstOrNull { it.id == folderId }?.icon
+                    if (!old.isNullOrBlank() && old.startsWith(CUSTOM_FOLDER_ICON_PREFIX) && old != result.iconId) {
+                        container.folderIcons.delete(old)
+                    }
+                    container.folders.setIcon(folderId, result.iconId)
+                    refreshFolders()
+                }
+                is FolderIconImportResult.Failure -> {
+                    snackbar.showSnackbar(result.message, duration = SnackbarDuration.Short)
+                }
+                FolderIconImportResult.Cancelled -> Unit
+            }
+        }
+    }
+    val photoPickerAvailable = remember(context) {
+        ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(context)
+    }
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> applyFolderIconFromUri(uri) }
+    val legacyPhotoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> applyFolderIconFromUri(uri) }
+    fun launchFolderPhotoPicker(folderId: String) {
+        iconUploadFolderId = folderId
+        if (photoPickerAvailable) {
+            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        } else {
+            legacyPhotoPicker.launch("image/*")
+        }
+    }
+
+    fun mergeInbox(incoming: List<AgentSummary>): List<AgentSummary> =
+        container.inboxStaging.merge(mirror.items, incoming)
 
     fun applyAgents(incoming: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
         val agents = settleAgents(incoming, container.runSettle.settled.value, container.runSettle.liveRuns.value)
-        items = agents
+        publish(agents)
         nextCursor = cursor
-        container.catalog.saveAgents(agents)
         live = container.conversations.liveStatuses()
         container.notices.reconcile(agents, live, container.chatTitles())
         container.notifier.acknowledgeKnown(agents)
@@ -222,7 +305,7 @@ fun InboxScreen(
                 val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
                 ensureActive()
                 val incoming = container.repo.hydrateStatuses(page.entries())
-                var latest = mergeInboxAgents(items, incoming)
+                var latest = mergeInbox(incoming)
                 applyAgents(latest, page.nextCursor, watch = true)
                 refreshing = false
                 metas = container.chats.snapshot()
@@ -230,6 +313,8 @@ fun InboxScreen(
                     runCatching { container.repo.refreshGitSnaps(latest) }
                     runCatching { container.repo.resolveAgentRepos(latest) }
                     git = loadGit()
+                    runCatching { container.repo.refreshPrChecks(latest, git) }
+                    prChecks = loadPrChecks()
                     val url = container.chats.claimFinishedPr(git)
                     if (!url.isNullOrBlank()) SafeLinks.open(context, url)
                 }
@@ -244,7 +329,7 @@ fun InboxScreen(
                     ensureActive()
                     val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
                     if (more.entries().isEmpty()) break
-                    latest = mergeInboxAgents(latest, more.entries())
+                    latest = mergeInbox(more.entries())
                     applyAgents(latest, more.nextCursor, watch = false)
                     cursor = more.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
                 }
@@ -258,7 +343,7 @@ fun InboxScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (items.isEmpty()) error = e.message ?: "Failed to load agents"
+                if (mirror.items.isEmpty()) error = e.message ?: "Failed to load agents"
             } finally {
                 refreshing = false
             }
@@ -268,14 +353,29 @@ fun InboxScreen(
         }
     }
 
+    LaunchedEffect(searchParsed.prUrlForApi) {
+        val next = searchParsed.prUrlForApi.orEmpty()
+        if (next != prUrlFilter) {
+            prUrlFilter = next
+            reload()
+        }
+    }
+    BackHandler(enabled = searchExpanded) {
+        searchExpanded = false
+    }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && query.isBlank()) {
+            searchExpanded = false
+        }
+    }
+
     val settledRuns by container.runSettle.settled.collectAsStateWithLifecycle()
     val localActive by container.runSettle.localActive.collectAsStateWithLifecycle()
     val liveRuns by container.runSettle.liveRuns.collectAsStateWithLifecycle()
     LaunchedEffect(settledRuns, liveRuns) {
-        val next = settleAgents(items, settledRuns, liveRuns)
-        if (next !== items) {
-            items = next
-            container.catalog.saveAgents(next)
+        val next = settleAgents(mirror.items, settledRuns, liveRuns)
+        if (next !== mirror.items) {
+            publish(next)
             live = container.conversations.liveStatuses()
             container.notices.reconcile(next, live, container.chatTitles())
         }
@@ -293,6 +393,7 @@ fun InboxScreen(
         collapsedRepos = container.chats.collapsedRepos
         groupPrefs = container.chats.repoGroupPrefs
         revealFinished = false
+        revealedOlderGroups = emptySet()
     }
     LaunchedEffect(Unit) {
         reload(showSpinner = items.isEmpty())
@@ -304,6 +405,9 @@ fun InboxScreen(
             container.inboxRefresh.request(RefreshReason.Notification)
         }
     }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        container.inboxRefresh.request(RefreshReason.Resume)
+    }
     LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
         if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
         val hub = container.inboxRefresh
@@ -311,13 +415,15 @@ fun InboxScreen(
         VisibleAgent.inboxPolling(true)
         var machinesAt = 0L
         var machinesFailed = false
+        var prChecksAt = 0L
         try {
             inboxRefreshLoop(
                 first = RefreshReason.Resume,
                 intervalMs = { failures ->
-                    maxOf(
-                        InboxPollPolicy.intervalMs(items, container.runSettle.localActive.value, failures),
-                        container.repo.statusGate.remainingMs(),
+                    InboxPollPolicy.listIntervalMs(
+                        mirror.items,
+                        container.runSettle.localActive.value,
+                        failures,
                     )
                 },
                 now = System::currentTimeMillis,
@@ -327,11 +433,20 @@ fun InboxScreen(
                     if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
                     if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
-                    val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
+                    val walkPages = InboxPollPolicy.walkAgentPagesDue(reason, tick)
+                    val page = container.repo.listAgentsForInboxPoll(walkPages, prUrlFilter)
                     val fresh = page.entries()
-                    val checks = runCheckTargets(items, fresh, container.runSettle.settled.value)
-                    val incoming = container.repo.hydrateStatuses(fresh)
-                    if (checks.isNotEmpty()) {
+                    val checks = if (InboxPollPolicy.runChecksDue(reason)) {
+                        runCheckTargets(mirror.items, fresh, container.runSettle.settled.value)
+                    } else {
+                        emptyList()
+                    }
+                    val incoming = if (InboxPollPolicy.hydrateStatusesDue(reason)) {
+                        container.repo.hydrateStatuses(fresh)
+                    } else {
+                        fresh
+                    }
+                    if (checks.isNotEmpty() && !container.repo.statusGate.isPaused) {
                         val runs = coroutineScope {
                             checks.map { agent ->
                                 async { agent to runCatching { container.repo.getRun(agent.id, agent.latestRunId!!) }.getOrNull() }
@@ -339,11 +454,12 @@ fun InboxScreen(
                         }
                         applyRunChecks(container.runSettle, runs)
                     }
-                    val agents = mergeInboxAgents(items, incoming)
+                    val agents = mergeInbox(incoming)
                     applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
-                    if (reason != RefreshReason.Tick || tick % 2 == 0) {
+                    container.notifier.syncLiveFromWatchList(agents)
+                    if (InboxPollPolicy.runSweepDue(reason, tick) && !container.repo.statusGate.isPaused) {
                         container.runSettle.sweep(
-                            items,
+                            mirror.items,
                             onSettled = { agent, run ->
                                 container.notifier.notifyIfNeeded(agent.id, agent.name, run.id, run.status, run.result)
                             },
@@ -353,9 +469,16 @@ fun InboxScreen(
                         }
                     }
                     metas = container.chats.snapshot()
-                    runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                    if (InboxPollPolicy.resolveReposDue(reason) && !container.repo.statusGate.isPaused) {
+                        runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                    }
                     git = loadGit()
                     val clock = System.currentTimeMillis()
+                    if (InboxPollPolicy.prChecksDue(reason, prChecksAt, clock) && !container.repo.statusGate.isPaused) {
+                        prChecksAt = clock
+                        runCatching { container.repo.refreshPrChecks(agents, git) }
+                        prChecks = loadPrChecks()
+                    }
                     if (InboxPollPolicy.machinesDue(reason, machinesAt, clock, machinesFailed)) {
                         machinesAt = clock
                         val listing = runCatching { container.repo.listMachines(agents) }.getOrNull()
@@ -382,36 +505,53 @@ fun InboxScreen(
     val approvalIds = notices.mapNotNull { notice ->
         notice.agentId.takeIf { notice.kind == "approval" }
     }.toSet()
-    val pendingArchive = remember { HashSet<String>() }
+    val unreadAgentIds = remember(notices) {
+        notices.filter { !it.read && !it.dismissed }.mapNotNull { it.agentId }.toSet()
+    }
     fun archiveWithUndo(agent: AgentSummary) {
-        if (!pendingArchive.add(agent.id)) return
+        if (agent.isArchived()) return
         val name = container.chats.displayName(agent.id, agent.name)
-        val previous = agent.status
-        scope.launch {
-            val ok = runCatching { container.repo.archive(agent.id) }.isSuccess
-            if (!ok) {
-                pendingArchive.remove(agent.id)
-                snackbar.showSnackbar("Couldn't archive")
-                return@launch
-            }
-            items = items.map {
-                if (it.id == agent.id) it.copy(archived = true, status = "ARCHIVED") else it
-            }
-            container.catalog.saveAgents(items)
-            val result = snackbar.showSnackbar(
-                message = "$name archived",
-                actionLabel = "Undo",
-                duration = SnackbarDuration.Long,
-            )
-            if (result == SnackbarResult.ActionPerformed) {
-                runCatching { container.repo.unarchive(agent.id) }
-                items = items.map {
-                    if (it.id == agent.id) it.copy(archived = false, status = previous) else it
-                }
-                container.catalog.saveAgents(items)
-            }
-            pendingArchive.remove(agent.id)
+        if (!container.archives.enqueue(agent.id, agent.status, name)) return
+        publish(mirror.items.map {
+            if (it.id == agent.id) it.copy(archived = true, status = "ARCHIVED") else it
+        })
+    }
+    fun unarchiveNow(agent: AgentSummary) {
+        val undone = container.archives.undo(agent.id)
+        if (undone != null) {
+            publish(mirror.items.map {
+                if (it.id == agent.id) it.copy(archived = false, status = undone.previousStatus) else it
+            })
+            return
         }
+        val previous = agent
+        val restored = if (agent.status.equals("ARCHIVED", ignoreCase = true)) "FINISHED" else agent.status
+        publish(mirror.items.map {
+            if (it.id == agent.id) it.copy(archived = false, status = restored) else it
+        })
+        scope.launch {
+            val result = runCatching { container.repo.unarchive(agent.id) }
+            if (result.isFailure) {
+                publish(mirror.items.map { if (it.id == agent.id) previous else it })
+                container.signals.error("Couldn't unarchive. ${result.exceptionOrNull()?.actionReason() ?: "Request failed"}")
+            }
+        }
+    }
+    val toasts by container.archives.toasts.collectAsStateWithLifecycle()
+    val signalTick by container.signals.tick.collectAsStateWithLifecycle()
+    LaunchedEffect(signalTick) {
+        val dropped = container.signals.drainDrops().toSet()
+        val restored = container.signals.drainRestores()
+        var next = mirror.items.filter { it.id !in dropped }
+        for (agent in restored) {
+            next = if (next.any { it.id == agent.id }) {
+                next.map { if (it.id == agent.id) agent else it }
+            } else {
+                next + agent
+            }
+        }
+        if (dropped.isNotEmpty() || restored.isNotEmpty()) publish(next)
+        container.signals.drainErrors().forEach { message -> snackbar.showSnackbar(message) }
     }
 
     if (noticesOpen) {
@@ -439,7 +579,25 @@ fun InboxScreen(
     Scaffold(
         modifier = modifier,
         contentWindowInsets = AppInsets.bars,
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            Column {
+                ArchiveToastColumn(
+                    toasts = toasts,
+                    onUndo = { id ->
+                        val item = container.archives.undo(id)
+                        if (item == null) {
+                            container.archives.dismissToast(id)
+                            return@ArchiveToastColumn
+                        }
+                        publish(mirror.items.map {
+                            if (it.id == id) it.copy(archived = false, status = item.previousStatus) else it
+                        })
+                    },
+                    onDismiss = { container.archives.dismissToast(it) },
+                )
+                SnackbarHost(snackbar)
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -499,11 +657,73 @@ fun InboxScreen(
                     }
                 }
             }
-            InboxTabStrip(
+            InboxTabStripWithSearch(
                 tabs = tabs,
                 selected = tab,
                 onSelect = { selectedTab = it },
+                searchExpanded = searchExpanded,
+                onToggleSearch = {
+                    if (searchExpanded && query.isBlank()) {
+                        searchExpanded = false
+                    } else {
+                        searchExpanded = true
+                        searchFocusPulse = true
+                    }
+                },
+                searchActive = query.isNotBlank(),
             )
+            InboxSearchField(
+                expanded = searchExpanded,
+                query = query,
+                onQueryChange = { query = it },
+                requestFocus = searchFocusPulse,
+                onFocusConsumed = { searchFocusPulse = false },
+            )
+            if (tab == InboxTab.Agents) {
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CloudFilter.entries.forEach { item ->
+                        FilterChip(
+                            selected = cloudFilter == item,
+                            onClick = { cloudFilter = item },
+                            label = { Text(item.label) },
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = workingOnly,
+                        onClick = {
+                            workingOnly = !workingOnly
+                            container.chats.inboxWorkingOnly = workingOnly
+                        },
+                        label = { Text("Working") },
+                    )
+                    FilterChip(
+                        selected = showArchived,
+                        onClick = {
+                            showArchived = !showArchived
+                            container.chats.inboxShowArchived = showArchived
+                        },
+                        label = { Text("Archived") },
+                    )
+                    FilterChip(
+                        selected = showHidden,
+                        onClick = {
+                            showHidden = !showHidden
+                            container.chats.inboxShowHidden = showHidden
+                        },
+                        label = { Text("Hidden") },
+                    )
+                }
+            }
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = { reload(showSpinner = true) },
@@ -520,14 +740,11 @@ fun InboxScreen(
                         selectedId = selectedId,
                         metas = metas,
                         git = git,
+                        prChecks = prChecks,
                         live = live,
                         query = query,
                         onQueryChange = { query = it },
-                        prUrl = prUrlFilter,
-                        onApplyPrUrl = { next ->
-                            prUrlFilter = next.trim()
-                            reload()
-                        },
+                        listState = listState,
                         showArchived = showArchived,
                         onShowArchived = {
                             showArchived = it
@@ -550,9 +767,8 @@ fun InboxScreen(
                                 val page = runCatching {
                                     container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
                                 }.getOrNull() ?: return@launch
-                                items = mergeInboxAgents(items, page.entries())
+                                publish(mergeInbox(page.entries()))
                                 nextCursor = page.nextCursor
-                                container.catalog.saveAgents(items)
                             }
                         },
                         error = error,
@@ -585,30 +801,20 @@ fun InboxScreen(
                             metas = container.chats.snapshot()
                         },
                         onArchive = { agent -> archiveWithUndo(agent) },
-                        onUnarchive = { agent ->
-                            scope.launch {
-                                runCatching { container.repo.unarchive(agent.id) }
-                                items = items.map {
-                                    if (it.id == agent.id) it.copy(archived = false) else it
-                                }
-                                container.catalog.saveAgents(items)
-                            }
-                        },
+                        onUnarchive = { agent -> unarchiveNow(agent) },
                         onArchiveIds = { ids, archive ->
-                            scope.launch {
-                                ids.forEach { id ->
-                                    runCatching {
-                                        if (archive) container.repo.archive(id) else container.repo.unarchive(id)
-                                    }
+                            if (archive) {
+                                val targets = mirror.items.filter { it.id in ids && !it.isArchived() }
+                                targets.forEach { agent ->
+                                    val name = container.chats.displayName(agent.id, agent.name)
+                                    container.archives.enqueue(agent.id, agent.status, name)
                                 }
-                                items = items.map { agent ->
-                                    if (agent.id in ids) {
-                                        agent.copy(archived = archive, status = if (archive) "ARCHIVED" else agent.status)
-                                    } else {
-                                        agent
-                                    }
-                                }
-                                container.catalog.saveAgents(items)
+                                val targetIds = targets.map { it.id }.toSet()
+                                publish(mirror.items.map { agent ->
+                                    if (agent.id in targetIds) agent.copy(archived = true, status = "ARCHIVED") else agent
+                                })
+                            } else {
+                                ids.mapNotNull { id -> mirror.items.firstOrNull { it.id == id } }.forEach { unarchiveNow(it) }
                             }
                         },
                         onDelete = { deleteIds = listOf(it.id) },
@@ -621,6 +827,15 @@ fun InboxScreen(
                         onCloudFilter = { cloudFilter = it },
                         revealFinished = revealFinished,
                         onRevealFinished = { revealFinished = !revealFinished },
+                        revealedOlderGroups = revealedOlderGroups,
+                        onToggleRevealGroup = { key ->
+                            revealedOlderGroups = if (key in revealedOlderGroups) {
+                                revealedOlderGroups - key
+                            } else {
+                                revealedOlderGroups + key
+                            }
+                        },
+                        unreadAgentIds = unreadAgentIds,
                         groupPrefs = groupPrefs,
                         onGroupPrefs = { next ->
                             groupPrefs = next
@@ -635,6 +850,64 @@ fun InboxScreen(
                             val pinned = metas[id]?.pinned == true
                             container.chats.setPinned(id, !pinned)
                             metas = container.chats.snapshot()
+                        },
+                        folders = folders,
+                        onCreateFolder = { name ->
+                            val created = container.folders.create(name)
+                            refreshFolders()
+                            created
+                        },
+                        onRenameFolder = { id, name ->
+                            val ok = container.folders.rename(id, name)
+                            refreshFolders()
+                            ok
+                        },
+                        onDeleteFolder = { id ->
+                            val folder = folders.folders.firstOrNull { it.id == id }
+                            if (folder?.icon?.startsWith(CUSTOM_FOLDER_ICON_PREFIX) == true) {
+                                container.folderIcons.delete(folder.icon)
+                            }
+                            container.folderIcons.deleteForFolder(id)
+                            container.folders.delete(id)
+                            refreshFolders()
+                        },
+                        onToggleFolder = { id ->
+                            val folder = folders.folders.firstOrNull { it.id == id }
+                            if (folder != null) {
+                                container.folders.setCollapsed(id, !folder.collapsed)
+                                refreshFolders()
+                            }
+                        },
+                        onToggleFolderFavorite = { id ->
+                            val folder = folders.folders.firstOrNull { it.id == id }
+                            if (folder != null) {
+                                container.folders.setFavorite(id, !folder.favorite)
+                                refreshFolders()
+                            }
+                        },
+                        onFolderColor = { id, color ->
+                            container.folders.setColor(id, color)
+                            refreshFolders()
+                        },
+                        onFolderIcon = { id, icon ->
+                            val old = folders.folders.firstOrNull { it.id == id }?.icon
+                            if (!old.isNullOrBlank() && old.startsWith(com.cursorandroid.app.data.repo.CUSTOM_FOLDER_ICON_PREFIX) && old != icon) {
+                                container.folderIcons.delete(old)
+                            }
+                            container.folders.setIcon(id, icon)
+                            refreshFolders()
+                        },
+                        iconStore = container.folderIcons,
+                        onUploadFolderIcon = { folderId ->
+                            if (!iconImportBusy) launchFolderPhotoPicker(folderId)
+                        },
+                        onMoveChats = { ids, folderId ->
+                            container.folders.moveChats(ids, folderId)
+                            refreshFolders()
+                        },
+                        onMoveGroup = { key, folderId ->
+                            container.folders.moveGroup(key, folderId)
+                            refreshFolders()
                         },
                     )
                 }
@@ -663,13 +936,26 @@ fun InboxScreen(
                     onClick = {
                         val ids = deleteIds
                         deleteIds = emptyList()
+                        val removed = mirror.items.filter { it.id in ids }
+                        removed.forEach { container.archives.undo(it.id) }
+                        publish(mirror.items.filter { it.id !in ids })
                         scope.launch {
-                            ids.forEach { id ->
-                                val ok = runCatching { container.repo.deleteAgent(id) }.isSuccess
-                                if (ok) container.forgetLocal(id)
+                            val failed = mutableListOf<Pair<AgentSummary, String>>()
+                            for (agent in removed) {
+                                try {
+                                    container.repo.deleteAgent(agent.id)
+                                    container.forgetLocal(agent.id)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    failed += agent to e.actionReason()
+                                }
                             }
-                            items = items.filter { it.id !in ids }
-                            container.catalog.saveAgents(items)
+                            if (failed.isNotEmpty()) {
+                                val missing = failed.map { it.first }.filter { snap -> mirror.items.none { it.id == snap.id } }
+                                publish(mirror.items + missing)
+                                container.signals.error("Couldn't delete. ${failed.first().second}")
+                            }
                         }
                     },
                 ) { Text("Delete") }
@@ -692,11 +978,11 @@ private fun AgentList(
     selectedId: String?,
     metas: Map<String, ChatMeta>,
     git: Map<String, GitSnap>,
+    prChecks: Map<String, PrCheckSnap> = emptyMap(),
     live: Map<String, String>,
     query: String,
     onQueryChange: (String) -> Unit,
-    prUrl: String,
-    onApplyPrUrl: (String) -> Unit,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     showArchived: Boolean,
     onShowArchived: (Boolean) -> Unit,
     showHidden: Boolean,
@@ -728,15 +1014,33 @@ private fun AgentList(
     onCloudFilter: (CloudFilter) -> Unit,
     revealFinished: Boolean,
     onRevealFinished: () -> Unit,
+    revealedOlderGroups: Set<String>,
+    onToggleRevealGroup: (String) -> Unit,
+    unreadAgentIds: Set<String>,
     groupPrefs: RepoGroupPrefs,
     onGroupPrefs: (RepoGroupPrefs) -> Unit,
     collapsedRepos: Set<String>,
     onToggleRepo: (String) -> Unit,
     onTogglePin: (String) -> Unit,
+    folders: com.cursorandroid.app.data.repo.FolderMembership,
+    onCreateFolder: (String) -> com.cursorandroid.app.data.repo.LocalFolder?,
+    onRenameFolder: (String, String) -> Boolean,
+    onDeleteFolder: (String) -> Unit,
+    onToggleFolder: (String) -> Unit,
+    onToggleFolderFavorite: (String) -> Unit,
+    onFolderColor: (String, Int) -> Unit,
+    onFolderIcon: (String, String) -> Unit,
+    iconStore: com.cursorandroid.app.data.repo.CustomFolderIconStore,
+    onUploadFolderIcon: (String) -> Unit,
+    onMoveChats: (Set<String>, String?) -> Unit,
+    onMoveGroup: (String, String?) -> Unit,
 ) {
     var selecting by remember { mutableStateOf(false) }
     var checkedIds by remember { mutableStateOf(setOf<String>()) }
     var bulkMenu by remember { mutableStateOf(false) }
+    var moveTarget by remember { mutableStateOf<FolderMove?>(null) }
+    var renameFolder by remember { mutableStateOf<LocalFolder?>(null) }
+    var deleteFolder by remember { mutableStateOf<LocalFolder?>(null) }
     if (selecting) {
         BackHandler {
             selecting = false
@@ -755,12 +1059,17 @@ private fun AgentList(
         checkedIds = emptySet()
         bulkMenu = false
     }
-    val needle = query.trim()
+    val parsed = remember(query) { InboxSearch.parse(query) }
+    val needle = parsed.textNeedle
     val favoriteIds = metas.filter { it.value.favorite }.keys
     val newest = items
         .map { overlayWorking(it, live) }
         .filter { agent ->
             if (!cloud && workingOnly && !agent.isWorking()) return@filter false
+            if (parsed.prNumber != null) {
+                val snap = git[agent.id]
+                if (!InboxSearch.matchesPrNumber(snap?.prUrl, parsed.prNumber)) return@filter false
+            }
             if (needle.isBlank()) return@filter true
             val title = metas[agent.id]?.title
             val snap = git[agent.id]
@@ -777,6 +1086,7 @@ private fun AgentList(
         }
         .sortedByDescending { it.sortKey() }
     val arranged = if (cloud) {
+        val applyAgeFilter = needle.isBlank() && parsed.prNumber == null
         arrangeCloudAgents(
             agents = newest,
             git = git,
@@ -789,98 +1099,44 @@ private fun AgentList(
             groupByRepo = groupByRepo,
             nowMillis = System.currentTimeMillis(),
             groupPrefs = groupPrefs,
+            folders = folders,
+            unreadAgentIds = unreadAgentIds,
+            applyAgeFilter = applyAgeFilter,
         )
     } else {
         null
     }
     val favorites = arranged?.favorites ?: newest.filter { it.id in favoriteIds }
     val rest = arranged?.rest ?: newest.filter { it.id !in favoriteIds }
-    val cloudEmpty = arranged != null &&
-        arranged.pinned.isEmpty() &&
-        arranged.groups.isEmpty() &&
-        arranged.favorites.isEmpty() &&
-        arranged.rest.isEmpty() &&
-        arranged.hiddenFinished == 0
+    val laid = arranged?.let { applyLocalFolders(it, folders, approvalIds) }
+    val filtering = parsed.hasPrFilter || needle.isNotBlank() || (cloud && cloudFilter != CloudFilter.All)
+    val visibleFolderCount = laid?.folders?.count { it.shownInList(folders, filtering) } ?: 0
+    val cloudEmpty = laid != null &&
+        laid.pinned.isEmpty() &&
+        visibleFolderCount == 0 &&
+        laid.groups.isEmpty() &&
+        laid.favorites.isEmpty() &&
+        laid.rest.isEmpty() &&
+        laid.hiddenFinished == 0
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        item(key = "search") {
-            Box(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Search chats") },
-                        singleLine = true,
-                    )
-                    var prDraft by remember(prUrl) { mutableStateOf(prUrl) }
-                    OutlinedTextField(
-                        value = prDraft,
-                        onValueChange = { prDraft = it },
+        if (selecting) {
+            item(key = "select-bar") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 6.dp,
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        label = { Text("Filter by PR URL") },
-                        placeholder = { Text("https://github.com/org/repo/pull/1") },
-                        singleLine = true,
-                        trailingIcon = {
-                            TextButton(
-                                onClick = { onApplyPrUrl(prDraft) },
-                            ) { Text(if (prDraft.isBlank()) "Clear" else "Filter") }
-                        },
-                    )
-                    if (cloud) {
-                        FlowRow(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CloudFilter.entries.forEach { item ->
-                                FilterChip(
-                                    selected = cloudFilter == item,
-                                    onClick = { onCloudFilter(item) },
-                                    label = { Text(item.label) },
-                                )
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            FilterChip(
-                                selected = workingOnly,
-                                onClick = { onWorkingOnly(!workingOnly) },
-                                label = { Text("Working") },
-                            )
-                            FilterChip(
-                                selected = showArchived,
-                                onClick = { onShowArchived(!showArchived) },
-                                label = { Text("Archived") },
-                            )
-                            FilterChip(
-                                selected = showHidden,
-                                onClick = { onShowHidden(!showHidden) },
-                                label = { Text("Hidden") },
-                            )
-                        }
-                    }
-                }
-                if (selecting) {
-                    Surface(
-                        modifier = Modifier.matchParentSize(),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 6.dp,
-                        shadowElevation = 6.dp,
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
                             IconButton(onClick = { stopSelecting() }) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Cancel selection")
                             }
@@ -944,6 +1200,13 @@ private fun AgentList(
                                         },
                                     )
                                     DropdownMenuItem(
+                                        text = { Text("Move to folder") },
+                                        onClick = {
+                                            bulkMenu = false
+                                            moveTarget = FolderMove.Chats(checkedIds)
+                                        },
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("Delete") },
                                         onClick = {
                                             bulkMenu = false
@@ -957,7 +1220,6 @@ private fun AgentList(
                     }
                 }
             }
-        }
         when {
             error != null && items.isEmpty() -> {
                 item(key = "error") {
@@ -992,9 +1254,24 @@ private fun AgentList(
                         )
                     }
                 }
-                if (arranged != null) {
+                if (laid != null) {
                     cloudAgentBlocks(
-                        arrangement = arranged,
+                        laid = laid,
+                        folderActions = FolderListActions(
+                            membership = folders,
+                            iconStore = iconStore,
+                            onCreate = onCreateFolder,
+                            onRename = onRenameFolder,
+                            onDelete = onDeleteFolder,
+                            onToggleCollapsed = onToggleFolder,
+                            onToggleFavorite = onToggleFolderFavorite,
+                            onColor = onFolderColor,
+                            onIcon = onFolderIcon,
+                            onUploadIcon = onUploadFolderIcon,
+                            onMoveChats = onMoveChats,
+                            onMoveGroup = onMoveGroup,
+                        ),
+                        filtering = filtering,
                         groupActions = RepoGroupActions(
                             manualOrder = groupPrefs.order.isNotEmpty(),
                             onRename = { key, name ->
@@ -1008,12 +1285,17 @@ private fun AgentList(
                             },
                             onOrder = { keys -> onGroupPrefs(groupPrefs.withOrder(keys)) },
                             onResetOrder = { onGroupPrefs(groupPrefs.resetOrder()) },
+                            onMoveToFolder = { key -> moveTarget = FolderMove.Group(key) },
                         ),
                         groupByRepo = groupByRepo,
                         collapsed = collapsedRepos,
                         onToggleGroup = onToggleRepo,
+                        onRenameFolder = { renameFolder = it },
+                        onDeleteFolder = { deleteFolder = it },
                         revealFinished = revealFinished,
                         onToggleReveal = onRevealFinished,
+                        revealedOlderGroups = revealedOlderGroups,
+                        onToggleRevealGroup = onToggleRevealGroup,
                     ) { agent ->
                         SwipeArchiveRow(
                             enabled = !selecting && !agent.isArchived(),
@@ -1023,6 +1305,7 @@ private fun AgentList(
                                 agent = agent,
                                 title = metas[agent.id]?.title,
                                 git = if (compactCards) null else git[agent.id],
+                                prCheck = prChecks[agent.id],
                                 needsApproval = agent.id in approvalIds,
                                 selected = agent.id == selectedId,
                                 favorite = agent.id in favoriteIds,
@@ -1046,6 +1329,7 @@ private fun AgentList(
                                 onArchive = { onArchive(agent) },
                                 onUnarchive = { onUnarchive(agent) },
                                 onDelete = { onDelete(agent) },
+                                onMoveToFolder = { moveTarget = FolderMove.Chats(setOf(agent.id)) },
                             )
                         }
                     }
@@ -1059,6 +1343,7 @@ private fun AgentList(
                             agent = agent,
                             title = metas[agent.id]?.title,
                             git = git[agent.id],
+                            prCheck = prChecks[agent.id],
                             needsApproval = agent.id in approvalIds,
                             selected = agent.id == selectedId,
                             favorite = true,
@@ -1078,6 +1363,7 @@ private fun AgentList(
                             onArchive = { onArchive(agent) },
                             onUnarchive = { onUnarchive(agent) },
                             onDelete = { onDelete(agent) },
+                            onMoveToFolder = { moveTarget = FolderMove.Chats(setOf(agent.id)) },
                         )
                     }
                     item(key = "hdr-all") {
@@ -1089,6 +1375,7 @@ private fun AgentList(
                         agent = agent,
                         title = metas[agent.id]?.title,
                         git = git[agent.id],
+                        prCheck = prChecks[agent.id],
                         needsApproval = agent.id in approvalIds,
                         selected = agent.id == selectedId,
                         favorite = false,
@@ -1108,6 +1395,7 @@ private fun AgentList(
                         onArchive = { onArchive(agent) },
                         onUnarchive = { onUnarchive(agent) },
                         onDelete = { onDelete(agent) },
+                        onMoveToFolder = { moveTarget = FolderMove.Chats(setOf(agent.id)) },
                     )
                 }
                 }
@@ -1121,6 +1409,40 @@ private fun AgentList(
                 ) { Text("Load older chats") }
             }
         }
+    }
+    moveTarget?.let { target ->
+        MoveToFolderDialog(
+            folders = folders.folders,
+            onMove = { folderId ->
+                when (target) {
+                    is FolderMove.Chats -> {
+                        onMoveChats(target.ids, folderId)
+                        stopSelecting()
+                    }
+                    is FolderMove.Group -> onMoveGroup(target.key, folderId)
+                }
+                moveTarget = null
+            },
+            onCreate = onCreateFolder,
+            onDismiss = { moveTarget = null },
+        )
+    }
+    renameFolder?.let { folder ->
+        RenameFolderDialog(
+            folder = folder,
+            onRename = { onRenameFolder(folder.id, it) },
+            onDismiss = { renameFolder = null },
+        )
+    }
+    deleteFolder?.let { folder ->
+        DeleteFolderDialog(
+            name = folder.name,
+            onDelete = {
+                onDeleteFolder(folder.id)
+                deleteFolder = null
+            },
+            onDismiss = { deleteFolder = null },
+        )
     }
 }
 
@@ -1303,6 +1625,7 @@ internal fun AgentRow(
     agent: AgentSummary,
     title: String?,
     git: GitSnap?,
+    prCheck: PrCheckSnap? = null,
     needsApproval: Boolean,
     selected: Boolean,
     favorite: Boolean,
@@ -1324,6 +1647,7 @@ internal fun AgentRow(
     onArchive: () -> Unit,
     onUnarchive: () -> Unit,
     onDelete: () -> Unit,
+    onMoveToFolder: () -> Unit = {},
 ) {
     val name = title?.takeIf { it.isNotBlank() } ?: agent.name?.ifBlank { null } ?: agent.id
     var menu by remember { mutableStateOf(false) }
@@ -1402,6 +1726,11 @@ internal fun AgentRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     StatusPill(indicator)
+                    prCheck?.takeIf { it.showChip }?.let { snap ->
+                        PrCheckChipWithSheet(snap) { url ->
+                            if (url.isNotBlank()) SafeLinks.open(context, url)
+                        }
+                    }
                     val lineTime = if (compact) compactTime else whenLabel
                     if (lineTime.isNotBlank()) {
                         Text(
@@ -1463,6 +1792,13 @@ internal fun AgentRow(
                 onClick = {
                     menu = false
                     onRename()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Move to folder") },
+                onClick = {
+                    menu = false
+                    onMoveToFolder()
                 },
             )
             DropdownMenuItem(
@@ -1576,4 +1912,9 @@ private fun InboxBottomNav(onSettings: () -> Unit) {
 private fun overlayWorking(agent: AgentSummary, live: Map<String, String>): AgentSummary {
     val local = live[agent.id]
     return if (isLiveStatus(local) && !agent.isWorking()) agent.copy(status = local) else agent
+}
+
+/** Latest agent rows for coroutines. Compose state reads inside a long-lived poll can stay on the value from when it started. */
+private class AgentMirror(start: List<AgentSummary>) {
+    @Volatile var items: List<AgentSummary> = start
 }

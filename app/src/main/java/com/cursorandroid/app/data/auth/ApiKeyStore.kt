@@ -27,6 +27,9 @@ import com.cursorandroid.app.data.repo.upsertPublicGithub
 import com.cursorandroid.app.data.repo.UiKeys
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.upsertRepoDefault
+import com.cursorandroid.app.data.notify.DEFAULT_MAX_LIVE_PROMOTED
+import com.cursorandroid.app.data.notify.clampMaxLivePromoted
+import com.cursorandroid.app.data.notify.migrateNotifyLiveDefaults
 
 class ApiKeyStore internal constructor(
     context: Context,
@@ -54,6 +57,7 @@ class ApiKeyStore internal constructor(
         recover()
         runCatching { migrateSecrets() }
         runCatching { forges() }
+        runCatching { migrateNotifyLiveDefaults(notifyPrefs) }
     }
 
     var apiKey: String?
@@ -72,6 +76,22 @@ class ApiKeyStore internal constructor(
         get() = notifyPrefs.getBoolean(NOTIFY_APPROVAL, true)
         set(value) {
             notifyPrefs.edit { putBoolean(NOTIFY_APPROVAL, value) }
+        }
+
+    var liveRunStatus: Boolean
+        get() = notifyPrefs.getBoolean(LIVE_RUN_STATUS, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(LIVE_RUN_STATUS, value) }
+        }
+
+    var maxLivePromoted: Int
+        get() = clampMaxLivePromoted(
+            notifyPrefs.getInt(MAX_LIVE_PROMOTED, DEFAULT_MAX_LIVE_PROMOTED),
+        )
+        set(value) {
+            notifyPrefs.edit {
+                putInt(MAX_LIVE_PROMOTED, clampMaxLivePromoted(value))
+            }
         }
 
     var showToolCalls: Boolean
@@ -123,6 +143,10 @@ class ApiKeyStore internal constructor(
     var chatDensity: String
         get() = ui[UiKeys.chatDensity] ?: "comfortable"
         set(value) = ui.put(UiKeys.chatDensity, value)
+
+    var homeDensity: String
+        get() = ui[UiKeys.homeDensity] ?: "comfortable"
+        set(value) = ui.put(UiKeys.homeDensity, value)
 
     var showInboxEnvs: Boolean
         get() = ui[UiKeys.showInboxEnvs] ?: true
@@ -412,6 +436,8 @@ class ApiKeyStore internal constructor(
         private const val REPO_DEFAULTS = "repo_defaults"
         private const val NOTIFY = "notify_on_complete"
         private const val NOTIFY_APPROVAL = "notify_on_approval"
+        private const val LIVE_RUN_STATUS = "live_run_status"
+        private const val MAX_LIVE_PROMOTED = "max_live_promoted"
         private const val SHOW_TOOLS = "show_tool_calls"
         private const val SHOW_THINKING = "show_thinking"
         private const val MCP_NAME = "mcp_name"

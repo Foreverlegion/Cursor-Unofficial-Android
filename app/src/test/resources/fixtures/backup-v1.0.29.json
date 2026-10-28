@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "defaultModel": "model-1.0.29",
+  "mcpServers": [
+    {
+      "id": "m29",
+      "name": "docs",
+      "url": "https://example.com/mcp",
+      "auth": {"clientId": "cid", "clientSecret": "", "scopes": ["read"], "extraAuth": true},
+      "extraMcp": true
+    }
+  ],
+  "chats": {"c129": {"title": "From 1.0.29", "pinned": true}},
+  "conversations": {
+    "c129": [
+      {"id": "l1", "kind": "assistant", "text": "hello from 1.0.29", "atMs": 42, "extraLine": true}
+    ]
+  },
+  "drafts": {"c129": {"text": "draft-1.0.29"}},
+  "pendingArchives": [{"agentId": "sneaky-129"}],
+  "extraField": "keep-going"
+}

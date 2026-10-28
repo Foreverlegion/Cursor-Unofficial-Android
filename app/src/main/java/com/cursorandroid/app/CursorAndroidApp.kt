@@ -18,6 +18,10 @@ class CursorAndroidApp : Application() {
         super.onCreate()
         registerActivityLifecycleCallbacks(ForegroundCallbacks)
         container = AppContainer(this)
+        container.archives.recoverAfterProcessDeath()
+        container.folderIcons.pruneOrphans(
+            container.folders.snapshot().folders.map { it.icon }.filter { it.isNotBlank() }.toSet(),
+        )
         container.notifier.ensureChannel()
         if (container.store.hasKey()) {
             RunWatchScheduler.resume(this)
@@ -39,7 +43,14 @@ class CursorAndroidApp : Application() {
         override fun onActivityStarted(activity: Activity) = VisibleAgent.activityStarted()
         override fun onActivityResumed(activity: Activity) = Unit
         override fun onActivityPaused(activity: Activity) = Unit
-        override fun onActivityStopped(activity: Activity) = VisibleAgent.activityStopped()
+        override fun onActivityStopped(activity: Activity) {
+            VisibleAgent.activityStopped()
+            if (!VisibleAgent.foreground()) {
+                val app = activity.application as CursorAndroidApp
+                app.container.archives.flush()
+                app.container.ui.flush()
+            }
+        }
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
         override fun onActivityDestroyed(activity: Activity) = Unit
     }

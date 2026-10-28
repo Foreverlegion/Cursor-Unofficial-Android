@@ -1,3 +1,7 @@
+List actions update immediately. Archive waits 7 seconds and can be undone before it is sent.
+Local folders group repos and chats on this phone. They survive updates.
+Starred repos stay visible and are not folded into Show N hidden.
+
 Message times on every chat message, with day separators.
 Forges sync their repo lists automatically, with status in Settings.
 Fixed a crash when importing settings from a backup.

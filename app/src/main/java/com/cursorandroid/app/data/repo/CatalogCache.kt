@@ -6,6 +6,8 @@ import com.cursorandroid.app.data.api.AgentSummary
 import com.cursorandroid.app.data.api.CloudEnvironment
 import com.cursorandroid.app.data.api.Computer
 import com.cursorandroid.app.data.api.GitSnap
+import com.cursorandroid.app.data.auth.StoredDashboardPeriodUsage
+import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.data.api.MeResponse
 import com.cursorandroid.app.data.api.RepositoryItem
 import com.cursorandroid.app.data.api.WorkerPool
@@ -33,6 +35,21 @@ class CatalogCache(
     fun savedEnvironments(): List<CloudEnvironment> = readList("saved_environments")
 
     fun saveAgents(items: List<AgentSummary>) = write("agents", items)
+
+    fun updateAgent(id: String, block: (AgentSummary) -> AgentSummary): Boolean {
+        val current = agents()
+        val index = current.indexOfFirst { it.id == id }
+        if (index < 0) return false
+        val next = current.toMutableList()
+        next[index] = block(next[index])
+        saveAgents(next)
+        return true
+    }
+
+    fun removeAgents(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        saveAgents(agents().filter { it.id !in ids })
+    }
     fun saveComputers(items: List<Computer>) = write("computers", items)
     fun saveRepos(items: List<RepositoryItem>) = write("repos", items)
     fun savePools(items: List<WorkerPool>) = write("pools", items)
@@ -110,6 +127,35 @@ class CatalogCache(
         if (next.remove(agentId) != null) {
             active().edit { putString("git", json.encodeToString(next)) }
         }
+    }
+
+    fun prCheckSnaps(): Map<String, PrCheckSnap> {
+        val raw = active().getString("pr_checks", null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, PrCheckSnap>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    fun savePrCheck(agentId: String, snap: PrCheckSnap?) {
+        if (agentId.isBlank()) return
+        val next = prCheckSnaps().toMutableMap()
+        if (snap == null || !snap.showChip) {
+            if (next.remove(agentId) == null) return
+        } else {
+            next[agentId] = snap
+        }
+        active().edit { putString("pr_checks", json.encodeToString(next)) }
+    }
+
+    fun dashboardPeriod(): StoredDashboardPeriodUsage? {
+        val raw = active().getString("dashboard_period", null) ?: return null
+        return runCatching { json.decodeFromString<StoredDashboardPeriodUsage>(raw) }.getOrNull()
+    }
+
+    fun saveDashboardPeriod(value: StoredDashboardPeriodUsage?) {
+        if (value == null) {
+            active().edit { remove("dashboard_period") }
+            return
+        }
+        active().edit { putString("dashboard_period", json.encodeToString(value)) }
     }
 
     fun reposFresh(maxAgeMs: Long = REPOS_TTL): Boolean {

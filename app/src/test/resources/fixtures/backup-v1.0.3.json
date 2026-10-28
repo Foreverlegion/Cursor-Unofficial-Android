@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "defaultModel": "model-1.0.3",
+  "inboxShowHidden": true,
+  "autoUpdate": true,
+  "chats": {
+    "c103": {"title": "From 1.0.3", "hidden": true, "extraChat": true}
+  },
+  "conversations": {
+    "c103": [{"id": "l1", "kind": "user", "text": "hello from 1.0.3"}]
+  },
+  "drafts": {"c103": {"text": "draft-1.0.3"}},
+  "pendingArchives": [{"agentId": "sneaky-103"}],
+  "extraField": "keep-going"
+}

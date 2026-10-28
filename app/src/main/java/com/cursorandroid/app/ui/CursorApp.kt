@@ -46,6 +46,8 @@ import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.BatteryPromptPolicy
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
 import com.cursorandroid.app.data.notify.RunWatchScheduler
+import com.cursorandroid.app.data.repo.RefreshReason
+import com.cursorandroid.app.data.repo.toInboxSummary
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
@@ -66,6 +68,9 @@ import com.cursorandroid.app.ui.theme.Appearance
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
 import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.HomeDensity
+import com.cursorandroid.app.ui.theme.resolveCodeFontFamily
+import com.cursorandroid.app.ui.theme.resolveUiFontFamily
 import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +84,9 @@ private fun readAppearance(container: AppContainer) = Appearance(
     codeFont = CodeFont.fromId(container.store.codeFont),
     textScalePct = clampTextScale(container.store.textScalePct),
     density = ChatDensity.fromId(container.store.chatDensity),
+    homeDensity = HomeDensity.fromId(container.store.homeDensity),
+    importedUiFont = resolveUiFontFamily(container.store, container.importedFonts),
+    importedCodeFont = resolveCodeFontFamily(container.store, container.importedFonts),
 )
 
 @Composable
@@ -463,6 +471,8 @@ private fun openLaunchedAgent(
         runStatus = created.run.status,
         immediate = true,
     )
+    container.inboxStaging.stage(created.agent.toInboxSummary(created.run))
+    container.inboxRefresh.request(RefreshReason.RunStarted)
     RunWatchScheduler.watch(
         context.applicationContext,
         created.agent.id,

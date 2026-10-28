@@ -61,6 +61,7 @@ class RunSettleHubTest {
         assertEquals("IDLE", next[0].status)
         assertEquals("ERROR", next[0].runStatus)
         assertEquals(RunIndicator.Failed, runIndicator(next[0].status, next[0].runStatus))
+        assertEquals(RunIndicator.Running, runIndicator("ACTIVE", "ERROR"))
     }
 
     @Test

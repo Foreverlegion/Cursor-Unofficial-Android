@@ -50,8 +50,8 @@ android {
         applicationId = "com.cursorandroid.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 131
-        versionName = "1.0.31"
+        versionCode = 136
+        versionName = "1.0.36"
         buildConfigField(
             "String",
             "APP_ISSUES_TOKEN",
@@ -169,6 +169,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.datastore.preferences)
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")

@@ -27,6 +27,7 @@ import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
 import com.cursorandroid.app.ui.theme.CursorTheme
 import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.HomeDensity
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import org.junit.Before
@@ -105,6 +106,7 @@ class SettingsPagesRenderTest {
                 codeFont = CodeFont.fromId(c.store.codeFont),
                 textScalePct = c.store.textScalePct,
                 density = ChatDensity.fromId(c.store.chatDensity),
+                homeDensity = HomeDensity.fromId(c.store.homeDensity),
             )
             CursorTheme(appearance = appearance) {
                 SettingsScreenContent(

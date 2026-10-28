@@ -41,6 +41,13 @@ object RunWatchScheduler {
                 (app as? CursorAndroidApp)?.container?.inboxRefresh?.request(RefreshReason.RunStarted)
             }
         }
+        (app as? CursorAndroidApp)?.container?.notifier?.updateLiveRun(
+            agentId = agentId,
+            agentName = agentName,
+            runId = runId,
+            agentStatus = null,
+            runStatus = recorded,
+        )
         ensureSweep(app)
     }
 

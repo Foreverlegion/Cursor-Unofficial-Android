@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "defaultModel": "model-1.0.13",
+  "inboxShowHidden": true,
+  "autoUpdate": true,
+  "mcpServers": [
+    {
+      "id": "m13",
+      "name": "docs",
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": {"X-Test": "1"},
+      "extraMcp": true
+    }
+  ],
+  "chats": {"c113": {"title": "From 1.0.13", "hidden": true}},
+  "conversations": {
+    "c113": [{"id": "l1", "kind": "user", "text": "hello from 1.0.13"}]
+  },
+  "drafts": {"c113": {"text": "draft-1.0.13"}},
+  "pendingArchives": [{"agentId": "sneaky-113"}],
+  "extraField": "keep-going"
+}
