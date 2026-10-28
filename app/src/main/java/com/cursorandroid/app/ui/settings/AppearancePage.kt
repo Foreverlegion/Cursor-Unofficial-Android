@@ -8,17 +8,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,12 +31,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.status.PlayColors
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
+import com.cursorandroid.app.ui.theme.ColorPickerDialog
 import com.cursorandroid.app.ui.theme.DEFAULT_TEXT_SCALE
 import com.cursorandroid.app.ui.theme.LocalAppearance
 import com.cursorandroid.app.ui.theme.MAX_TEXT_SCALE
@@ -48,10 +47,9 @@ import com.cursorandroid.app.ui.theme.ThemeColorPresets
 import com.cursorandroid.app.ui.theme.UiFont
 import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.theme.formatHexColor
-import com.cursorandroid.app.ui.theme.parseHexColor
 import com.cursorandroid.app.ui.thread.MessageText
 
-private enum class AppearanceDialog { Font, CodeFont, Density }
+private enum class AppearanceDialog { Font, CodeFont, Density, AccentColor }
 
 private const val PREVIEW_TEXT =
     "Here is the fix. Run the check below, then open the PR.\n```\n./gradlew assembleRelease\n```"
@@ -65,9 +63,7 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
     var codeFont by remember { mutableStateOf(CodeFont.fromId(store.codeFont)) }
     var density by remember { mutableStateOf(ChatDensity.fromId(store.chatDensity)) }
     var scale by remember { mutableFloatStateOf(clampTextScale(store.textScalePct).toFloat()) }
-    var hex by remember { mutableStateOf(formatHexColor(themeColor)) }
     var dialog by remember { mutableStateOf<AppearanceDialog?>(null) }
-    val hexColor = parseHexColor(hex)
 
     fun applyColor(argb: Int) {
         themeColor = argb
@@ -77,57 +73,31 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
 
     ThemePreview()
 
-    Text(
-        "Accent color",
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-        style = MaterialTheme.typography.bodyLarge,
-    )
-    FlowRow(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .clickable { dialog = AppearanceDialog.AccentColor }
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .semantics { contentDescription = "Accent color ${formatHexColor(themeColor)}" },
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ThemeColorPresets.forEach { color ->
-            val selected = themeColor == color
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Color(color))
-                    .border(
-                        width = if (selected) 3.dp else 1.dp,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.onBackground
-                        } else {
-                            MaterialTheme.colorScheme.outline
-                        },
-                        shape = CircleShape,
-                    )
-                    .clickable {
-                        hex = formatHexColor(color)
-                        applyColor(color)
-                    },
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(themeColor))
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Accent color", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                formatHexColor(themeColor),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
-    OutlinedTextField(
-        value = hex,
-        onValueChange = { value ->
-            hex = value.take(7)
-            parseHexColor(hex)?.let { applyColor(it) }
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        label = { Text("Custom color") },
-        placeholder = { Text("#F54E00") },
-        isError = hexColor == null,
-        supportingText = { Text(if (hexColor == null) "Use #RRGGBB" else "Applies as you type") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
-    )
     HorizontalDivider()
 
     SettingsChoiceRow(
@@ -186,6 +156,16 @@ internal fun AppearancePage(container: AppContainer, onChanged: () -> Unit) {
     )
 
     when (dialog) {
+        AppearanceDialog.AccentColor -> ColorPickerDialog(
+            title = "Accent color",
+            initialColor = themeColor,
+            presetColors = ThemeColorPresets,
+            onConfirm = { picked ->
+                applyColor(picked)
+                dialog = null
+            },
+            onDismiss = { dialog = null },
+        )
         AppearanceDialog.Font -> ChoiceDialog(
             title = "Font",
             selected = uiFont.id,

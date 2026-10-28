@@ -78,6 +78,7 @@ import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.runStatusLabel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
@@ -319,6 +320,9 @@ fun InboxScreen(
             container.inboxRefresh.request(RefreshReason.Notification)
         }
     }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        container.inboxRefresh.request(RefreshReason.Resume)
+    }
     LaunchedEffect(lifeState.isAtLeast(Lifecycle.State.STARTED)) {
         if (!lifeState.isAtLeast(Lifecycle.State.STARTED)) return@LaunchedEffect
         val hub = container.inboxRefresh
@@ -330,9 +334,10 @@ fun InboxScreen(
             inboxRefreshLoop(
                 first = RefreshReason.Resume,
                 intervalMs = { failures ->
-                    maxOf(
-                        InboxPollPolicy.intervalMs(mirror.items, container.runSettle.localActive.value, failures),
-                        container.repo.statusGate.remainingMs(),
+                    InboxPollPolicy.listIntervalMs(
+                        mirror.items,
+                        container.runSettle.localActive.value,
+                        failures,
                     )
                 },
                 now = System::currentTimeMillis,
@@ -342,11 +347,20 @@ fun InboxScreen(
                     if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
                     if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
-                    val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
+                    val walkPages = InboxPollPolicy.walkAgentPagesDue(reason)
+                    val page = container.repo.listAgentsForInboxPoll(walkPages, prUrlFilter)
                     val fresh = page.entries()
-                    val checks = runCheckTargets(mirror.items, fresh, container.runSettle.settled.value)
-                    val incoming = container.repo.hydrateStatuses(fresh)
-                    if (checks.isNotEmpty()) {
+                    val checks = if (InboxPollPolicy.runChecksDue(reason)) {
+                        runCheckTargets(mirror.items, fresh, container.runSettle.settled.value)
+                    } else {
+                        emptyList()
+                    }
+                    val incoming = if (InboxPollPolicy.hydrateStatusesDue(reason)) {
+                        container.repo.hydrateStatuses(fresh)
+                    } else {
+                        fresh
+                    }
+                    if (checks.isNotEmpty() && !container.repo.statusGate.isPaused) {
                         val runs = coroutineScope {
                             checks.map { agent ->
                                 async { agent to runCatching { container.repo.getRun(agent.id, agent.latestRunId!!) }.getOrNull() }
@@ -356,7 +370,8 @@ fun InboxScreen(
                     }
                     val agents = mergeInboxAgents(mirror.items, incoming)
                     applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
-                    if (reason != RefreshReason.Tick || tick % 2 == 0) {
+                    container.notifier.syncLiveFromWatchList(agents)
+                    if (InboxPollPolicy.runSweepDue(reason, tick) && !container.repo.statusGate.isPaused) {
                         container.runSettle.sweep(
                             mirror.items,
                             onSettled = { agent, run ->
@@ -368,7 +383,9 @@ fun InboxScreen(
                         }
                     }
                     metas = container.chats.snapshot()
-                    runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                    if (InboxPollPolicy.resolveReposDue(reason) && !container.repo.statusGate.isPaused) {
+                        runCatching { container.repo.resolveAgentRepos(agents, budget = 10) }
+                    }
                     git = loadGit()
                     val clock = System.currentTimeMillis()
                     if (InboxPollPolicy.machinesDue(reason, machinesAt, clock, machinesFailed)) {

@@ -85,6 +85,7 @@ object SettingsBackup {
         version = BACKUP_VERSION,
         notifyOnComplete = container.store.notifyOnComplete,
         notifyOnApproval = container.store.notifyOnApproval,
+        liveRunStatus = container.store.liveRunStatus,
         mcpServers = container.store.storedMcps(),
         showThinking = container.store.showThinking,
         showToolCalls = container.store.showToolCalls,
@@ -117,6 +118,7 @@ object SettingsBackup {
     private fun applySnapshot(container: AppContainer, snap: SettingsSnapshot) {
         container.store.notifyOnComplete = snap.notifyOnComplete
         container.store.notifyOnApproval = snap.notifyOnApproval
+        container.store.liveRunStatus = snap.liveRunStatus
         if (snap.mcpServers.isNotEmpty()) {
             container.store.saveStoredMcps(mergeMcpSecrets(container.store.storedMcps(), snap.mcpServers))
         } else if (snap.mcpName.isNotBlank() || snap.mcpUrl.isNotBlank()) {
@@ -180,6 +182,7 @@ data class SettingsSnapshot(
     val apiKey: String? = null,
     val notifyOnComplete: Boolean = true,
     val notifyOnApproval: Boolean = true,
+    val liveRunStatus: Boolean = true,
     // Read only, for files from before the MCP list. Never written.
     val mcpName: String = "",
     val mcpUrl: String = "",

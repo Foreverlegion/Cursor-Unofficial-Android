@@ -1,3 +1,10 @@
+# 1.0.34
+
+- Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.
+- Custom folder colors you pick are saved and still import from backup the same way as preset colors.
+- Inbox foreground polling no longer waits out a status rate-limit pause before calling the agent list again. Timer ticks are list-only (no status hydration on every 20 s). Resume triggers an immediate list refresh with the usual status follow-up.
+- Android 16 live status: while a run you started is already on the fast run watch, an ongoing notification shows the agent name and state (promoted when the app is allowed). Finishing replaces it with the normal completion alert. Settings, Notifications: Live status for running agents (default on) and a link to the system live-update permission for this app.
+
 # 1.0.33
 
 - Archive, unarchive, delete, pin, favorite, rename, hide, and mute update the list immediately. If the server call fails, the row comes back and a note shows the reason.

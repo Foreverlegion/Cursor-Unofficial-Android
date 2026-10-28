@@ -28,12 +28,14 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import com.cursorandroid.app.data.repo.GroupMove
 import com.cursorandroid.app.data.repo.LocalFolder
 import com.cursorandroid.app.data.repo.moveGroupKey
+import com.cursorandroid.app.ui.theme.ColorPickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -420,46 +422,17 @@ internal fun RepoGroupHeader(
         )
     }
     if (colorOpen) {
-        AlertDialog(
-            onDismissRequest = { colorOpen = false },
-            title = { Text("Header color") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        GroupHeaderColors.forEach { swatch ->
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(swatch))
-                                    .border(
-                                        width = if (swatch == color) 3.dp else 1.dp,
-                                        color = if (swatch == color) {
-                                            MaterialTheme.colorScheme.onBackground
-                                        } else {
-                                            MaterialTheme.colorScheme.outline
-                                        },
-                                        shape = CircleShape,
-                                    )
-                                    .clickable {
-                                        colorOpen = false
-                                        onColor(swatch)
-                                    },
-                            )
-                        }
-                    }
-                    TextButton(onClick = {
-                        colorOpen = false
-                        onColor(0)
-                    }) { Text(if (color == 0) "Default (selected)" else "Default") }
-                }
+        ColorPickerDialog(
+            title = "Header color",
+            initialColor = color,
+            presetColors = GroupHeaderColors,
+            allowDefault = true,
+            defaultPreviewColor = MaterialTheme.colorScheme.onSurface.toArgb(),
+            onConfirm = {
+                colorOpen = false
+                onColor(it)
             },
-            confirmButton = {
-                TextButton(onClick = { colorOpen = false }) { Text("Close") }
-            },
+            onDismiss = { colorOpen = false },
         )
     }
 }

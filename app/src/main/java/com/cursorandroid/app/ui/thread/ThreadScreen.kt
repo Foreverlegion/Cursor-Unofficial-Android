@@ -252,6 +252,23 @@ class ThreadViewModel(
         modelBook = container.runModels.recordApi(agentId, fromRuns, detail?.model)
     }
 
+    private fun pushLiveRun(
+        runId: String,
+        runStatus: String?,
+        activityHint: String? = null,
+        approvalPending: Boolean = false,
+    ) {
+        container.notifier.updateLiveRun(
+            agentId = agentId,
+            agentName = agent?.name,
+            runId = runId,
+            agentStatus = agent?.status,
+            runStatus = runStatus,
+            activityHint = activityHint,
+            approvalPending = approvalPending,
+        )
+    }
+
     fun consumePendingPr() {
         pendingPrUrl = null
     }
@@ -1086,6 +1103,7 @@ class ThreadViewModel(
                                 toolCallText(event.name, event.args),
                                 runId,
                             )
+                            pushLiveRun(runId, run?.status, toolCallText(event.name, event.args))
                             container.notifier.notifyApproval(
                                 agentId = agentId,
                                 agentName = agent?.name,
@@ -1098,6 +1116,7 @@ class ThreadViewModel(
                         }
                         is StreamEvent.Status -> {
                             run = run?.copy(status = event.status) ?: run
+                            pushLiveRun(runId, event.status)
                         }
                         is StreamEvent.Result -> {
                             clearApprovals()
@@ -1190,6 +1209,7 @@ class ThreadViewModel(
         }
         if (latest.isActive()) {
             adoptRun(latest)
+            pushLiveRun(latest.id, latest.status)
             return true
         }
         receiving = false
@@ -1243,6 +1263,7 @@ class ThreadViewModel(
                     )
                     break
                 }
+                pushLiveRun(runId, latest.status)
             }
         }
     }
