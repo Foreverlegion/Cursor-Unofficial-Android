@@ -93,6 +93,7 @@ internal fun LazyListScope.cloudAgentBlocks(
             FolderHeader(
                 folder = block.folder,
                 count = block.count,
+                running = block.running,
                 iconStore = folderActions.iconStore,
                 onToggle = { folderActions.onToggleCollapsed(block.folder.id) },
                 onRename = { onRenameFolder(block.folder) },
@@ -217,6 +218,18 @@ internal val GroupHeaderColors = listOf(
     0xFFF472B6.toInt(),
 )
 
+@Composable
+internal fun RepoRunningDot(visible: Boolean) {
+    if (!visible) return
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .semantics { contentDescription = "Running" },
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun RepoGroupHeader(
@@ -309,13 +322,7 @@ internal fun RepoGroupHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (running > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .semantics { contentDescription = "Running" },
-                )
+                RepoRunningDot(visible = true)
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

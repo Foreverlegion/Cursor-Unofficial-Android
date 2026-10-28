@@ -105,7 +105,6 @@ import com.cursorandroid.app.data.api.isArchived
 import com.cursorandroid.app.data.api.isLiveStatus
 import com.cursorandroid.app.data.api.isWorking
 import com.cursorandroid.app.data.api.markCloudArchived
-import com.cursorandroid.app.data.api.mergeInboxAgents
 import com.cursorandroid.app.data.api.sortKey
 import com.cursorandroid.app.data.api.visibleInbox
 import com.cursorandroid.app.data.notify.unreadCount
@@ -239,6 +238,9 @@ fun InboxScreen(
         refreshFolders()
     }
 
+    fun mergeInbox(incoming: List<AgentSummary>): List<AgentSummary> =
+        container.inboxStaging.merge(mirror.items, incoming)
+
     fun applyAgents(incoming: List<AgentSummary>, cursor: String?, watch: Boolean = false) {
         val agents = settleAgents(incoming, container.runSettle.settled.value, container.runSettle.liveRuns.value)
         publish(agents)
@@ -262,7 +264,7 @@ fun InboxScreen(
                 val page = container.repo.listAgentsPage(includeArchived = true, prUrl = prUrlFilter)
                 ensureActive()
                 val incoming = container.repo.hydrateStatuses(page.entries())
-                var latest = mergeInboxAgents(mirror.items, incoming)
+                var latest = mergeInbox(incoming)
                 applyAgents(latest, page.nextCursor, watch = true)
                 refreshing = false
                 metas = container.chats.snapshot()
@@ -284,7 +286,7 @@ fun InboxScreen(
                     ensureActive()
                     val more = container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
                     if (more.entries().isEmpty()) break
-                    latest = mergeInboxAgents(latest, more.entries())
+                    latest = mergeInbox(more.entries())
                     applyAgents(latest, more.nextCursor, watch = false)
                     cursor = more.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
                 }
@@ -386,7 +388,7 @@ fun InboxScreen(
                     if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@poll true
                     if (container.session.expired()) return@poll true
                     if (reloadJob?.isActive == true && refreshing) return@poll true
-                    val walkPages = InboxPollPolicy.walkAgentPagesDue(reason)
+                    val walkPages = InboxPollPolicy.walkAgentPagesDue(reason, tick)
                     val page = container.repo.listAgentsForInboxPoll(walkPages, prUrlFilter)
                     val fresh = page.entries()
                     val checks = if (InboxPollPolicy.runChecksDue(reason)) {
@@ -407,7 +409,7 @@ fun InboxScreen(
                         }
                         applyRunChecks(container.runSettle, runs)
                     }
-                    val agents = mergeInboxAgents(mirror.items, incoming)
+                    val agents = mergeInbox(incoming)
                     applyAgents(agents, page.nextCursor ?: nextCursor, watch = true)
                     container.notifier.syncLiveFromWatchList(agents)
                     if (InboxPollPolicy.runSweepDue(reason, tick) && !container.repo.statusGate.isPaused) {
@@ -711,7 +713,7 @@ fun InboxScreen(
                                 val page = runCatching {
                                     container.repo.listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrlFilter)
                                 }.getOrNull() ?: return@launch
-                                publish(mergeInboxAgents(mirror.items, page.entries()))
+                                publish(mergeInbox(page.entries()))
                                 nextCursor = page.nextCursor
                             }
                         },

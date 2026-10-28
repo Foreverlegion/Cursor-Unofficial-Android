@@ -34,7 +34,7 @@ class InboxRefreshHub {
 
 object InboxPollPolicy {
     const val ACTIVE_MS = 4_000L
-    const val IDLE_MS = 20_000L
+    const val IDLE_MS = 10_000L
     const val MAX_BACKOFF_MS = 60_000L
     const val MIN_GAP_MS = 1_500L
     const val MACHINES_EVERY_MS = 60_000L
@@ -57,8 +57,12 @@ object InboxPollPolicy {
     /** Timer ticks only refresh the agent list. Status hydration and run lookups run on triggers. */
     fun hydrateStatusesDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
 
-    /** Walk list cursors on open, resume, and manual refresh so older chats stay merged in. */
-    fun walkAgentPagesDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
+    /** Walk list cursors on open, resume, manual refresh, and every other timer tick so new chats show up. */
+    fun walkAgentPagesDue(reason: RefreshReason, tick: Int = 0): Boolean =
+        when (reason) {
+            RefreshReason.Tick -> tick > 0 && tick % 2 == 0
+            else -> true
+        }
 
     fun resolveReposDue(reason: RefreshReason): Boolean = reason != RefreshReason.Tick
 

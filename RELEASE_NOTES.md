@@ -1,3 +1,8 @@
+# 1.0.36
+
+- Local folders show the same running dot as repo groups when any agent inside the folder (including nested repo groups) is running. The dot stays visible while the folder is collapsed.
+- The Agents home list refreshes about every 10 seconds while you are on that screen, and newly started agents appear on the list right away instead of waiting for the server list to catch up. Background polling is unchanged; status rate limits still apply.
+
 # 1.0.35
 
 - Inbox search is one field: type a chat keyword or paste a pull-request URL (GitHub, GitLab, or Origin) or `#123` to filter by PR. The separate PR URL box is gone.

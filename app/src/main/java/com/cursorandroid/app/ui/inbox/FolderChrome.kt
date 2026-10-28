@@ -101,6 +101,7 @@ internal sealed class FolderMove {
 internal fun FolderHeader(
     folder: LocalFolder,
     count: Int,
+    running: Int,
     iconStore: CustomFolderIconStore,
     onToggle: () -> Unit,
     onRename: () -> Unit,
@@ -167,8 +168,8 @@ internal fun FolderHeader(
             count.toString(),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
         )
+        RepoRunningDot(visible = running > 0)
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
                 text = { Text("Rename") },

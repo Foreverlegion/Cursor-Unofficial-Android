@@ -45,7 +45,8 @@ import com.cursorandroid.app.LaunchRequest
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.BatteryPromptPolicy
 import com.cursorandroid.app.data.notify.FeedbackReplyScheduler
-import com.cursorandroid.app.data.notify.RunWatchScheduler
+import com.cursorandroid.app.data.repo.RefreshReason
+import com.cursorandroid.app.data.repo.toInboxSummary
 import com.cursorandroid.app.data.repo.Attachments
 import com.cursorandroid.app.data.repo.ChatDraft
 import com.cursorandroid.app.data.repo.DraftStore
@@ -469,6 +470,8 @@ private fun openLaunchedAgent(
         runStatus = created.run.status,
         immediate = true,
     )
+    container.inboxStaging.stage(created.agent.toInboxSummary(created.run))
+    container.inboxRefresh.request(RefreshReason.RunStarted)
     RunWatchScheduler.watch(
         context.applicationContext,
         created.agent.id,

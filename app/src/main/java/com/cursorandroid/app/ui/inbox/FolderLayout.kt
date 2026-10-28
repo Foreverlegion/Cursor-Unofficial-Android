@@ -9,6 +9,7 @@ data class FolderBlock(
     val folder: LocalFolder,
     val groups: List<RepoGroup>,
     val chats: List<AgentSummary>,
+    val running: Int = 0,
 ) {
     val count: Int get() = chats.size + groups.sumOf { it.agents.size }
 }
@@ -87,10 +88,14 @@ fun applyLocalFolders(
     val rest = pull(arrangement.rest)
     val ordered = membership.folders.filter { it.favorite } + membership.folders.filter { !it.favorite }
     val blocks = ordered.map { folder ->
+        val blockGroups = grouped[folder.id].orEmpty()
+        val blockChats = loose[folder.id].orEmpty().sortedByDescending { it.sortKey() }
         FolderBlock(
             folder = folder,
-            groups = grouped[folder.id].orEmpty(),
-            chats = loose[folder.id].orEmpty().sortedByDescending { it.sortKey() },
+            groups = blockGroups,
+            chats = blockChats,
+            running = blockChats.count { cloudBucket(it, it.id in approvalIds) == CloudFilter.Running } +
+                blockGroups.sumOf { it.running },
         )
     }
     return FolderedCloud(

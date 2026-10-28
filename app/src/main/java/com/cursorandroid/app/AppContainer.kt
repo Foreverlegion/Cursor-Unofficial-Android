@@ -32,6 +32,7 @@ import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.ForgeSyncStore
 import com.cursorandroid.app.data.repo.ForgeSyncer
 import com.cursorandroid.app.data.repo.InboxRefreshHub
+import com.cursorandroid.app.data.repo.InboxStagingHub
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
 import com.cursorandroid.app.data.repo.RunSettleHub
@@ -63,6 +64,7 @@ class AppContainer(context: Context) {
     val runModels = RunModelStore(context)
     val notices = NoticeStore(context)
     val inboxRefresh = InboxRefreshHub()
+    val inboxStaging = InboxStagingHub()
     val runSettle = RunSettleHub { ended ->
         conversations.settle(ended.agentId, ended.runId, ended.status)
         val agents = catalog.agents()
