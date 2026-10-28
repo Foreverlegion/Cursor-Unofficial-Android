@@ -554,7 +554,11 @@ class AgentRepository(
                     val snap = runCatching { GithubPrChecks.fetchSnap(token, apiBase, prUrl) }.getOrNull()
                         ?: return@async
                     val prior = cached[agentId]
-                    if (prior?.headSha == snap.headSha && prior.kind == snap.kind && prior.label == snap.label) return@async
+                    if (prior?.headSha == snap.headSha && prior.kind == snap.kind &&
+                        prior.label == snap.label && prior.failures == snap.failures
+                    ) {
+                        return@async
+                    }
                     catalog.savePrCheck(agentId, snap.takeIf { it.showChip })
                 }
             }.forEach { it.await() }

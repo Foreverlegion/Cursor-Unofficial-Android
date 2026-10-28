@@ -1,8 +1,11 @@
 package com.cursorandroid.app.data.repo
 
+import com.cursorandroid.app.ui.status.PrCheckClassifier
+import com.cursorandroid.app.ui.status.PrCheckChipKind
 import com.cursorandroid.app.ui.status.PrCheckRunView
 import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.ui.status.PrCheckSummary
+import com.cursorandroid.app.ui.status.PrCheckTestDetail
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -17,6 +20,8 @@ data class GithubPullRef(
 )
 
 object GithubPrChecks {
+    private const val ANNOTATION_BUDGET = 4
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -59,15 +64,54 @@ object GithubPrChecks {
         if (runCode !in 200..299) {
             return PrCheckSnap(headSha = headSha, prUrl = prUrl.trim())
         }
-        val runs = runCatching { json.decodeFromString<GhCheckRuns>(runRaw) }.getOrNull()
+        val rawRuns = runCatching { json.decodeFromString<GhCheckRuns>(runRaw) }.getOrNull()
             ?.check_runs
             .orEmpty()
-            .map { PrCheckRunView(it.name.orEmpty(), it.status.orEmpty(), it.conclusion) }
-        val display = PrCheckSummary.summarize(runs)
+        val runs = rawRuns.map { raw ->
+            val outputText = listOfNotNull(raw.output?.title, raw.output?.summary, raw.output?.text)
+                .joinToString("\n")
+                .trim()
+                .takeIf { it.isNotEmpty() }
+            PrCheckRunView(
+                name = raw.name.orEmpty(),
+                status = raw.status.orEmpty(),
+                conclusion = raw.conclusion,
+                id = raw.id,
+                htmlUrl = raw.html_url.orEmpty(),
+                outputText = outputText,
+            )
+        }
+        val enriched = enrichTestDetails(key, base, ref, runs)
+        val display = PrCheckSummary.summarize(enriched)
         return if (display == null) {
             PrCheckSnap(headSha = headSha, prUrl = prUrl.trim())
         } else {
             display.toSnap(headSha, prUrl.trim())
+        }
+    }
+
+    internal fun enrichTestDetails(
+        token: String,
+        apiBase: String,
+        ref: GithubPullRef,
+        runs: List<PrCheckRunView>,
+    ): List<PrCheckRunView> {
+        var budget = ANNOTATION_BUDGET
+        return runs.map { run ->
+            if (budget <= 0) return@map run
+            val failed = run.status.equals("completed", ignoreCase = true) &&
+                run.conclusion?.lowercase() in setOf("failure", "cancelled", "timed_out", "action_required")
+            if (!failed || run.id <= 0L) return@map run
+            if (PrCheckClassifier.category(run.name) != PrCheckChipKind.TestsFailed) return@map run
+            budget--
+            val path = "/repos/${ref.owner}/${ref.repo}/check-runs/${run.id}/annotations"
+            val (code, raw) = gh(token, apiBase, "GET", path)
+            if (code !in 200..299) return@map run
+            val annotations = runCatching { json.decodeFromString<List<GhAnnotation>>(raw) }.getOrDefault(emptyList())
+            val titles = annotations.mapNotNull { it.title?.trim()?.takeIf { t -> t.isNotEmpty() } }
+            val messages = annotations.mapNotNull { it.message?.trim()?.takeIf { t -> t.isNotEmpty() } }
+            val detail = PrCheckTestDetail.merge(run.name, run.outputText, titles, messages)
+            if (detail.isNullOrBlank()) run else run.copy(testDetail = detail)
         }
     }
 
@@ -104,8 +148,24 @@ object GithubPrChecks {
 
     @Serializable
     private data class GhCheckRun(
+        val id: Long = 0L,
         val name: String? = null,
+        val html_url: String? = null,
         val status: String? = null,
         val conclusion: String? = null,
+        val output: GhCheckOutput? = null,
+    )
+
+    @Serializable
+    private data class GhCheckOutput(
+        val title: String? = null,
+        val summary: String? = null,
+        val text: String? = null,
+    )
+
+    @Serializable
+    private data class GhAnnotation(
+        val title: String? = null,
+        val message: String? = null,
     )
 }

@@ -171,10 +171,8 @@ import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.ui.status.PlayColors
-import com.cursorandroid.app.ui.status.PrCheckChip
+import com.cursorandroid.app.ui.status.PrCheckChipWithSheet
 import com.cursorandroid.app.ui.status.StatusPill
-import com.cursorandroid.app.ui.status.foreground
-import com.cursorandroid.app.ui.status.prChecksOpenUrl
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.repoNameOnly
 import com.cursorandroid.app.ui.status.shortRepo
@@ -1638,8 +1636,8 @@ fun ThreadScreen(
                         ) {
                             StatusPill(indicator)
                             vm.prCheckSnap?.let { snap ->
-                                PrCheckChip(snap) {
-                                    SafeLinks.open(context, prChecksOpenUrl(snap.prUrl))
+                                PrCheckChipWithSheet(snap) { url ->
+                                    if (url.isNotBlank()) SafeLinks.open(context, url)
                                 }
                             }
                             Text(

@@ -79,12 +79,11 @@ import com.cursorandroid.app.ui.status.PlayColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.cursorandroid.app.ui.status.PrCheckChip
+import com.cursorandroid.app.ui.status.PrCheckChipWithSheet
 import com.cursorandroid.app.ui.status.PrCheckSnap
 import com.cursorandroid.app.ui.status.StatusPill
 import com.cursorandroid.app.ui.status.agentCardSubtitle
 import com.cursorandroid.app.ui.status.agentLifecycleLabel
-import com.cursorandroid.app.ui.status.prChecksOpenUrl
 import com.cursorandroid.app.ui.status.relativeAge
 import com.cursorandroid.app.ui.status.runIndicator
 import com.cursorandroid.app.ui.status.runStatusLabel
@@ -1728,8 +1727,7 @@ internal fun AgentRow(
                 ) {
                     StatusPill(indicator)
                     prCheck?.takeIf { it.showChip }?.let { snap ->
-                        PrCheckChip(snap) {
-                            val url = prChecksOpenUrl(snap.prUrl.ifBlank { git?.prUrl.orEmpty() })
+                        PrCheckChipWithSheet(snap) { url ->
                             if (url.isNotBlank()) SafeLinks.open(context, url)
                         }
                     }
