@@ -1090,7 +1090,8 @@ fun NewAgentScreen(
                 }
 
                 ModelPickerAnchorField(
-                    value = modelId.ifBlank { "Account default" },
+                    value = models.firstOrNull { it.id == modelId }?.displayName
+                        ?: modelId.ifBlank { "Account default" },
                     label = "Model",
                     expanded = modelPickerOpen,
                     onExpandedChange = { modelPickerOpen = it },

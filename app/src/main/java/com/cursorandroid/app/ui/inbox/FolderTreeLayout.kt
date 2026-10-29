@@ -39,6 +39,21 @@ fun folderTreeRowA11y(depth: Int, parentFolderName: String?, selfLabel: String):
     return "$selfLabel, in folder $parentFolderName"
 }
 
+/** Folder-level guide that should continue on deeper rows (e.g. chats inside a repo group). */
+fun folderTreeExtraGuideDepths(rowDepth: Int, parentFolderName: String?): List<Int> {
+    if (parentFolderName.isNullOrBlank()) return emptyList()
+    val folderChildDepth = folderTreeChildDepth(0)
+    if (rowDepth <= folderChildDepth) return emptyList()
+    return listOf(folderChildDepth)
+}
+
+internal fun folderTreeGuideDepths(rowDepth: Int, parentFolderName: String?): List<Int> {
+    val depths = mutableListOf<Int>()
+    if (rowDepth > 0) depths += rowDepth
+    depths += folderTreeExtraGuideDepths(rowDepth, parentFolderName)
+    return depths.distinct().sorted()
+}
+
 /**
  * Indents a list row and draws a low-contrast vertical guide in the gutter for nested rows.
  */
@@ -69,13 +84,15 @@ internal fun FolderTreeRow(
             Canvas(Modifier.matchParentSize()) {
                 val stepPx = with(density) { FolderTreeStepDp.toPx() }
                 val basePx = with(density) { FolderTreeBaseHorizontalDp.toPx() }
-                val lineX = basePx + (depth - 1) * stepPx + stepPx / 2f
-                drawLine(
-                    color = guideColor,
-                    start = Offset(lineX, 0f),
-                    end = Offset(lineX, size.height),
-                    strokeWidth = with(density) { 1.dp.toPx() },
-                )
+                for (guideDepth in folderTreeGuideDepths(depth, parentFolderName)) {
+                    val lineX = basePx + (guideDepth - 1) * stepPx + stepPx / 2f
+                    drawLine(
+                        color = guideColor,
+                        start = Offset(lineX, 0f),
+                        end = Offset(lineX, size.height),
+                        strokeWidth = with(density) { 1.dp.toPx() },
+                    )
+                }
             }
         }
         Box(

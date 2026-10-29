@@ -31,4 +31,13 @@ class FolderTreeLayoutTest {
         assertEquals("stocks, in folder stocky", folderTreeRowA11y(1, "stocky", "stocks"))
         assertEquals("Fix login, in folder stocky", folderTreeRowA11y(2, "stocky", "Fix login"))
     }
+
+    @Test
+    fun folderGuideContinuesOnNestedGroupChats() {
+        assertEquals(emptyList<Int>(), folderTreeExtraGuideDepths(1, "stocky"))
+        assertEquals(listOf(1), folderTreeExtraGuideDepths(2, "stocky"))
+        assertEquals(listOf(1, 2), folderTreeGuideDepths(2, "stocky"))
+        assertEquals(listOf(1), folderTreeGuideDepths(1, "stocky"))
+        assertEquals(listOf(2), folderTreeGuideDepths(2, null))
+    }
 }
