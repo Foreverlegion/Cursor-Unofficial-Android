@@ -318,6 +318,26 @@ class AgentRepository(
         }
     }
 
+    /** First page only, or every page when [walkPages] is true (resume / manual refresh). */
+    suspend fun listAgentsForInboxPoll(
+        walkPages: Boolean,
+        prUrl: String? = null,
+    ): AgentListResponse {
+        val first = listAgentsPage(includeArchived = true, prUrl = prUrl)
+        if (!walkPages || first.nextCursor.isNullOrBlank()) return first
+        val pages = ArrayList<AgentListResponse>(MAX_PAGES)
+        pages += first
+        var cursor = first.nextCursor
+        for (i in 1 until MAX_PAGES) {
+            if (cursor.isNullOrBlank()) break
+            val page = listAgentsPage(includeArchived = true, cursor = cursor, prUrl = prUrl)
+            pages += page
+            if (page.entries().isEmpty()) break
+            cursor = page.nextCursor?.takeIf { it.isNotBlank() && it != cursor }
+        }
+        return foldAgentPages(pages, MAX_PAGES)
+    }
+
     suspend fun hydrateStatuses(
         agents: List<AgentSummary>,
         limit: Int = 15,

@@ -65,7 +65,10 @@ import com.cursorandroid.app.ui.theme.CursorTheme
 import com.cursorandroid.app.ui.theme.Appearance
 import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
-import com.cursorandroid.app.ui.theme.UiFont
+import com.cursorandroid.app.ui.theme.HomeDensity
+import com.cursorandroid.app.ui.theme.HomeLayout
+import com.cursorandroid.app.ui.theme.bundledCodeFontFamily
+import com.cursorandroid.app.ui.theme.bundledUiFontFamily
 import com.cursorandroid.app.ui.theme.clampTextScale
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
@@ -74,12 +77,20 @@ import kotlinx.coroutines.withContext
 
 private enum class Pane { Inbox, Compose, Settings }
 
-private fun readAppearance(container: AppContainer) = Appearance(
-    uiFont = UiFont.fromId(container.store.uiFont),
-    codeFont = CodeFont.fromId(container.store.codeFont),
-    textScalePct = clampTextScale(container.store.textScalePct),
-    density = ChatDensity.fromId(container.store.chatDensity),
-)
+private fun readAppearance(container: AppContainer): Appearance {
+    val store = container.store
+    val uiKey = store.uiFont
+    val codeKey = store.codeFont
+    val uiFamily = container.importedFonts.composeFamily(uiKey) ?: bundledUiFontFamily(uiKey)
+    val codeFamily = container.importedFonts.composeFamily(codeKey) ?: bundledCodeFontFamily(codeKey)
+    return Appearance(
+        uiFontFamily = uiFamily,
+        codeFontFamily = codeFamily,
+        textScalePct = clampTextScale(store.textScalePct),
+        density = ChatDensity.fromId(store.chatDensity),
+        homeLayout = HomeLayout(HomeDensity.fromId(store.homeDensity)),
+    )
+}
 
 @Composable
 fun CursorApp(

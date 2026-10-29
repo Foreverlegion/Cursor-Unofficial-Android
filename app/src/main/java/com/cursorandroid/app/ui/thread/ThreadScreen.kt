@@ -105,6 +105,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.scaffoldBars
+import com.cursorandroid.app.data.api.actionReason
 import com.cursorandroid.app.data.api.AgentDetail
 import com.cursorandroid.app.data.api.AgentUsageResponse
 import com.cursorandroid.app.data.api.ApiException
@@ -167,6 +168,7 @@ import com.cursorandroid.app.data.repo.toItems
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
+import com.cursorandroid.app.ui.chat.ModelPickerSheet
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.ui.status.PlayColors
@@ -249,6 +251,23 @@ class ThreadViewModel(
         val fromRuns = runs.mapNotNull { item -> item.model?.let { item.id to it } }.toMap()
         if (fromRuns.isEmpty() && detail?.model == null) return
         modelBook = container.runModels.recordApi(agentId, fromRuns, detail?.model)
+    }
+
+    private fun pushLiveRun(
+        runId: String,
+        runStatus: String?,
+        activityHint: String? = null,
+        approvalPending: Boolean = false,
+    ) {
+        container.notifier.updateLiveRun(
+            agentId = agentId,
+            agentName = agent?.name,
+            runId = runId,
+            agentStatus = agent?.status,
+            runStatus = runStatus,
+            activityHint = activityHint,
+            approvalPending = approvalPending,
+        )
     }
 
     fun consumePendingPr() {
@@ -568,28 +587,42 @@ class ThreadViewModel(
     }
 
     fun archive(onDone: () -> Unit) {
-        viewModelScope.launch {
-            try {
-                container.repo.archive(agentId)
-                onDone()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fail(e)
-            }
-        }
+        val name = container.chats.displayName(agentId, agent?.name)
+        container.archives.enqueue(agentId, agent?.status, name)
+        onDone()
     }
 
     fun delete(onDone: () -> Unit) {
+        val snapshot = agent?.let {
+            com.cursorandroid.app.data.api.AgentSummary(
+                id = it.id,
+                name = it.name,
+                status = it.status,
+                env = it.env,
+                url = it.url,
+                createdAt = it.createdAt,
+                updatedAt = it.updatedAt,
+                latestRunId = it.latestRunId,
+                archived = it.archived,
+            )
+        }
+        container.archives.undo(agentId)
+        container.catalog.removeAgents(setOf(agentId))
+        container.signals.drop(agentId)
+        onDone()
         viewModelScope.launch {
             try {
                 container.repo.deleteAgent(agentId)
                 container.forgetLocal(agentId)
-                onDone()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail(e)
+                if (snapshot != null) {
+                    val current = container.catalog.agents().filter { it.id != snapshot.id }
+                    container.catalog.saveAgents(current + snapshot)
+                    container.signals.restore(snapshot)
+                }
+                container.signals.error("Couldn't delete. ${e.actionReason()}")
             }
         }
     }
@@ -1071,6 +1104,7 @@ class ThreadViewModel(
                                 toolCallText(event.name, event.args),
                                 runId,
                             )
+                            pushLiveRun(runId, run?.status, toolCallText(event.name, event.args))
                             container.notifier.notifyApproval(
                                 agentId = agentId,
                                 agentName = agent?.name,
@@ -1083,6 +1117,7 @@ class ThreadViewModel(
                         }
                         is StreamEvent.Status -> {
                             run = run?.copy(status = event.status) ?: run
+                            pushLiveRun(runId, event.status)
                         }
                         is StreamEvent.Result -> {
                             clearApprovals()
@@ -1175,6 +1210,7 @@ class ThreadViewModel(
         }
         if (latest.isActive()) {
             adoptRun(latest)
+            pushLiveRun(latest.id, latest.status)
             return true
         }
         receiving = false
@@ -1228,6 +1264,7 @@ class ThreadViewModel(
                     )
                     break
                 }
+                pushLiveRun(runId, latest.status)
             }
         }
     }
@@ -1378,7 +1415,7 @@ fun ThreadScreen(
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var draftReady by remember { mutableStateOf(false) }
-    var modelMenu by remember { mutableStateOf(false) }
+    var modelPickerOpen by remember { mutableStateOf(false) }
     var showFollowEnv by remember { mutableStateOf(false) }
     var followEnv by remember { mutableStateOf(listOf("" to "")) }
     val listState = remember(agentId) { LazyListState() }
@@ -1854,42 +1891,20 @@ fun ThreadScreen(
                 )
                 val modelLabel = models.firstOrNull { it.id == vm.followModel }?.displayName
                     ?: vm.followModel.ifBlank { "Model" }
-                Box {
-                    FilterChip(
-                        selected = vm.followModel.isNotBlank(),
-                        onClick = { modelMenu = true },
-                        label = {
-                            Text(
-                                modelLabel,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingIcon = {
-                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                        },
-                    )
-                    DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Account default") },
-                            onClick = {
-                                vm.followModel = ""
-                                vm.followParams = emptyList()
-                                modelMenu = false
-                            },
+                FilterChip(
+                    selected = vm.followModel.isNotBlank(),
+                    onClick = { modelPickerOpen = true },
+                    label = {
+                        Text(
+                            modelLabel,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        models.forEach { model ->
-                            DropdownMenuItem(
-                                text = { Text(model.displayName ?: model.id) },
-                                onClick = {
-                                    vm.followModel = model.id
-                                    vm.followParams = model.defaultParams()
-                                    modelMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
+                    },
+                    trailingIcon = {
+                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                    },
+                )
             }
             ModelParamRow(
                 model = models.firstOrNull { it.id == vm.followModel },
@@ -1973,6 +1988,23 @@ fun ThreadScreen(
             }
         }
     }
+    ModelPickerSheet(
+        open = modelPickerOpen,
+        title = "Follow-up model",
+        models = models,
+        selectedModelId = vm.followModel,
+        store = container.modelPicker,
+        onDismiss = { modelPickerOpen = false },
+        onPick = { id ->
+            vm.followModel = id
+            vm.followParams = if (id.isBlank()) {
+                emptyList()
+            } else {
+                models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
+            }
+            modelPickerOpen = false
+        },
+    )
     if (renaming) {
         RenameChatDialog(
             current = title,

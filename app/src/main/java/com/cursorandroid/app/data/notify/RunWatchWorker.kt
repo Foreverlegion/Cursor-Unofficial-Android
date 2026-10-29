@@ -56,6 +56,13 @@ class RunWatchWorker(
                 run.isActive() -> {
                     RunWatchStore.add(applicationContext, WatchItem(agentId, run.id, agentName))
                     ApprovalStreamHub.attach(applicationContext, agentId, run.id, agentName)
+                    app.container.notifier.updateLiveRun(
+                        agentId = agentId,
+                        agentName = agentName,
+                        runId = run.id,
+                        agentStatus = null,
+                        runStatus = run.status,
+                    )
                     RunWatchScheduler.chainNextPoll(applicationContext, agentId, run.id, agentName)
                     Result.success()
                 }

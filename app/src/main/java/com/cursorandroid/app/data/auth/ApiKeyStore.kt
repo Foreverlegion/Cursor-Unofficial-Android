@@ -74,6 +74,12 @@ class ApiKeyStore internal constructor(
             notifyPrefs.edit { putBoolean(NOTIFY_APPROVAL, value) }
         }
 
+    var liveRunStatus: Boolean
+        get() = notifyPrefs.getBoolean(LIVE_RUN_STATUS, true)
+        set(value) {
+            notifyPrefs.edit { putBoolean(LIVE_RUN_STATUS, value) }
+        }
+
     var showToolCalls: Boolean
         get() = notifyPrefs.getBoolean(SHOW_TOOLS, true)
         set(value) {
@@ -123,6 +129,10 @@ class ApiKeyStore internal constructor(
     var chatDensity: String
         get() = ui[UiKeys.chatDensity] ?: "comfortable"
         set(value) = ui.put(UiKeys.chatDensity, value)
+
+    var homeDensity: String
+        get() = ui[UiKeys.homeDensity] ?: "comfortable"
+        set(value) = ui.put(UiKeys.homeDensity, value)
 
     var showInboxEnvs: Boolean
         get() = ui[UiKeys.showInboxEnvs] ?: true
@@ -412,6 +422,7 @@ class ApiKeyStore internal constructor(
         private const val REPO_DEFAULTS = "repo_defaults"
         private const val NOTIFY = "notify_on_complete"
         private const val NOTIFY_APPROVAL = "notify_on_approval"
+        private const val LIVE_RUN_STATUS = "live_run_status"
         private const val SHOW_TOOLS = "show_tool_calls"
         private const val SHOW_THINKING = "show_thinking"
         private const val MCP_NAME = "mcp_name"

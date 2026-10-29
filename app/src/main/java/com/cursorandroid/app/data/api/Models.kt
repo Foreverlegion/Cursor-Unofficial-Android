@@ -110,8 +110,8 @@ data class Prompt(
 
 @Serializable
 data class ModelParam(
-    val id: String,
-    val value: String,
+    val id: String = "",
+    val value: String = "",
 )
 
 @Serializable

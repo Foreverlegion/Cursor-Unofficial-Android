@@ -49,9 +49,21 @@ class InboxRefreshTest {
         val idle = listOf(agent("a", "FINISHED", "r1"))
         assertEquals(InboxPollPolicy.IDLE_MS * 2, InboxPollPolicy.intervalMs(idle, emptySet(), 1))
         assertEquals(InboxPollPolicy.MAX_BACKOFF_MS, InboxPollPolicy.intervalMs(idle, emptySet(), 6))
+        assertEquals(InboxPollPolicy.IDLE_MS * 2, InboxPollPolicy.listIntervalMs(idle, emptySet(), 1))
         val running = listOf(agent("b", "RUNNING", "r2"))
         assertEquals(InboxPollPolicy.ACTIVE_MS * 2, InboxPollPolicy.intervalMs(running, emptySet(), 1))
         assertEquals(InboxPollPolicy.MAX_BACKOFF_MS, InboxPollPolicy.intervalMs(running, emptySet(), 9))
+    }
+
+    @Test
+    fun timerTicksOnlyHitTheAgentList() {
+        assertFalse(InboxPollPolicy.hydrateStatusesDue(RefreshReason.Tick))
+        assertTrue(InboxPollPolicy.hydrateStatusesDue(RefreshReason.Resume))
+        assertFalse(InboxPollPolicy.runChecksDue(RefreshReason.Tick))
+        assertFalse(InboxPollPolicy.walkAgentPagesDue(RefreshReason.Tick))
+        assertFalse(InboxPollPolicy.resolveReposDue(RefreshReason.Tick))
+        assertTrue(InboxPollPolicy.runSweepDue(RefreshReason.Tick, tick = 2))
+        assertFalse(InboxPollPolicy.runSweepDue(RefreshReason.Tick, tick = 1))
     }
 
     @Test

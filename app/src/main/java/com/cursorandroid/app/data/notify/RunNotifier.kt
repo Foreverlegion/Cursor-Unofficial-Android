@@ -1,5 +1,7 @@
 package com.cursorandroid.app.data.notify
 
+import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -49,6 +51,15 @@ class RunNotifier(
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = context.getString(R.string.notify_approval_channel_desc)
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                LIVE_CHANNEL,
+                context.getString(R.string.notify_live_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = context.getString(R.string.notify_live_channel_desc)
             },
         )
         manager.deleteNotificationChannel(WATCH_CHANNEL)
@@ -116,8 +127,9 @@ class RunNotifier(
         refresh?.request(RefreshReason.Notification)
         val title = chatTitle(agentId, agentName)
         val fresh = notices.record(agentId, title, runId, status, result)
-        if (!store.notifyOnComplete) return
         val terminal = status?.uppercase() in TERMINAL
+        if (terminal) clearLiveRun(runId)
+        if (!store.notifyOnComplete) return
         if (!terminal) return
         if (!fresh) return
         if (!claim(runId)) return
@@ -146,6 +158,112 @@ class RunNotifier(
         openUrl(context, prUrl, notifyId xor PR_ACTION_SALT)?.let { builder.addAction(0, "Open PR", it) }
         val notification = builder.build()
         NotifyShade.post(context, notifyId, notification)
+    }
+
+    fun updateLiveRun(
+        agentId: String,
+        agentName: String?,
+        runId: String,
+        agentStatus: String?,
+        runStatus: String?,
+        activityHint: String? = null,
+        approvalPending: Boolean = false,
+    ) {
+        if (!store.liveRunStatus) return
+        if (skipShade(agentId)) {
+            clearLiveRun(runId)
+            return
+        }
+        if (!NotifyPermission.granted(context)) return
+        val title = chatTitle(agentId, agentName)
+        val content = liveRunNotificationContent(
+            chatTitle = title,
+            agentStatus = agentStatus,
+            runStatus = runStatus,
+            activityHint = activityHint,
+            approvalPending = approvalPending,
+        ) ?: run {
+            clearLiveRun(runId)
+            return
+        }
+        ensureChannel()
+        val notifyId = liveNotifyId(runId)
+        val notification = buildLiveNotification(agentId, runId, notifyId, content)
+        NotifyShade.post(context, notifyId, notification)
+    }
+
+    fun syncLiveFromWatchList(agents: List<AgentSummary>) {
+        if (!store.liveRunStatus) return
+        val watches = RunWatchStore.all(context)
+        if (watches.isEmpty()) return
+        val byId = agents.associateBy { it.id }
+        for (watch in watches) {
+            val agent = byId[watch.agentId]
+            if (agent != null && watch.runId == agent.latestRunId) {
+                updateLiveRun(
+                    agentId = watch.agentId,
+                    agentName = watch.agentName ?: agent.name,
+                    runId = watch.runId,
+                    agentStatus = agent.status,
+                    runStatus = agent.runStatus ?: agent.status,
+                )
+            } else {
+                updateLiveRun(
+                    agentId = watch.agentId,
+                    agentName = watch.agentName,
+                    runId = watch.runId,
+                    agentStatus = null,
+                    runStatus = "RUNNING",
+                )
+            }
+        }
+    }
+
+    fun clearLiveRun(runId: String) {
+        NotifyShade.cancel(context, liveNotifyId(runId))
+    }
+
+    fun clearAllLiveRuns() {
+        RunWatchStore.all(context).forEach { clearLiveRun(it.runId) }
+    }
+
+    @SuppressLint("NewApi")
+    private fun buildLiveNotification(
+        agentId: String,
+        runId: String,
+        notifyId: Int,
+        content: LiveRunNotificationContent,
+    ): Notification {
+        val open = openChat(context, agentId, runId, notifyId)
+        val promote = Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API &&
+            store.liveRunStatus &&
+            context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        if (Build.VERSION.SDK_INT >= PromotedNotificationSettings.MIN_API) {
+            val builder = Notification.Builder(context, LIVE_CHANNEL)
+                .setSmallIcon(R.drawable.ic_stat_agent)
+                .setContentTitle(content.title)
+                .setContentText(content.body)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(open)
+                .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
+            if (promote) {
+                builder.setRequestPromotedOngoing(true)
+                builder.setShortCriticalText(content.shortCriticalText)
+            }
+            return builder.build()
+        }
+        return NotificationCompat.Builder(context, LIVE_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_agent)
+            .setContentTitle(content.title)
+            .setContentText(content.body)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(open)
+            .setProgress(0, 0, true)
+            .build()
     }
 
     private fun skipShade(agentId: String): Boolean {
@@ -189,6 +307,7 @@ class RunNotifier(
     companion object {
         const val CHANNEL = "agent_complete"
         const val APPROVAL_CHANNEL = "agent_approval"
+        const val LIVE_CHANNEL = "agent_live"
         const val WATCH_CHANNEL = "agent_watch"
         const val EXTRA_AGENT_ID = "agent_id"
         const val EXTRA_NOTICE_ID = "notice_id"

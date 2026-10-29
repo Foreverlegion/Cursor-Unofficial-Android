@@ -28,7 +28,7 @@ class AppearanceTest {
     fun unknownIdsFallBackToDefaults() {
         assertEquals(UiFont.System, UiFont.fromId("nope"))
         assertEquals(CodeFont.SystemMono, CodeFont.fromId(null))
-        assertEquals(ChatDensity.Comfortable, ChatDensity.fromId("x"))
+        assertEquals(HomeDensity.Comfortable, HomeDensity.fromId("x"))
         assertEquals(UiFont.Inter, UiFont.fromId("inter"))
     }
 

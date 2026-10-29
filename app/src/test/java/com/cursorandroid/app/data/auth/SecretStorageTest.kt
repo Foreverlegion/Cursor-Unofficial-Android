@@ -179,7 +179,6 @@ class SecretStorageTest {
     }
 
     @Test
-    @Test
     fun openFailureMustNotDeleteExistingSecurePrefsFiles() {
         val dir = java.io.File(context.applicationInfo.dataDir, "shared_prefs").apply { mkdirs() }
         val file = java.io.File(dir, "cursor_secure.xml")
@@ -192,7 +191,8 @@ class SecretStorageTest {
         assertTrue(file.readText().contains("keep-me"))
     }
 
-        fun savedForgesSurviveReopenWithEachTokenAndFeedTheSourceList() {
+    @Test
+    fun savedForgesSurviveReopenWithEachTokenAndFeedTheSourceList() {
         val store = open()
         store.saveForges(
             listOf(

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "defaultModel": "model-1.0.17",
+  "autoUpdate": false,
+  "shareInstallCount": true,
+  "skippedUpdateCode": 117,
+  "chats": {"c117": {"title": "From 1.0.17", "muted": true}},
+  "conversations": {
+    "c117": [{"id": "l1", "kind": "user", "text": "hello from 1.0.17"}]
+  },
+  "drafts": {"c117": {"text": "draft-1.0.17"}},
+  "pendingArchives": [{"agentId": "sneaky-117"}],
+  "extraField": "keep-going"
+}

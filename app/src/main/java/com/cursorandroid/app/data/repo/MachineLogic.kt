@@ -14,7 +14,7 @@ private const val MAX_MARKS = 200
 /** What the phone knows about one machine or worker. [viaAgent] means the time comes from an agent that used it. */
 @Serializable
 data class MachineRecord(
-    @SerialName("name") val name: String,
+    @SerialName("name") val name: String = "",
     @SerialName("worker_id") val workerId: String? = null,
     @SerialName("last_seen_ms") val lastSeenMs: Long = 0,
     @SerialName("first_seen_ms") val firstSeenMs: Long = 0,
@@ -32,7 +32,7 @@ object MachineMarkState {
 
 @Serializable
 data class MachineMark(
-    @SerialName("state") val state: String,
+    @SerialName("state") val state: String = "",
     @SerialName("at_ms") val atMs: Long = 0,
     @SerialName("name") val name: String = "",
 )

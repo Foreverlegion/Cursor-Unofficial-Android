@@ -33,6 +33,21 @@ class CatalogCache(
     fun savedEnvironments(): List<CloudEnvironment> = readList("saved_environments")
 
     fun saveAgents(items: List<AgentSummary>) = write("agents", items)
+
+    fun updateAgent(id: String, block: (AgentSummary) -> AgentSummary): Boolean {
+        val current = agents()
+        val index = current.indexOfFirst { it.id == id }
+        if (index < 0) return false
+        val next = current.toMutableList()
+        next[index] = block(next[index])
+        saveAgents(next)
+        return true
+    }
+
+    fun removeAgents(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        saveAgents(agents().filter { it.id !in ids })
+    }
     fun saveComputers(items: List<Computer>) = write("computers", items)
     fun saveRepos(items: List<RepositoryItem>) = write("repos", items)
     fun savePools(items: List<WorkerPool>) = write("pools", items)

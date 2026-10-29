@@ -96,6 +96,8 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
+import com.cursorandroid.app.ui.chat.ModelPickerAnchorField
+import com.cursorandroid.app.ui.chat.ModelPickerSheet
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.data.repo.ForgeClient
 import com.cursorandroid.app.data.repo.machineKey
@@ -149,7 +151,7 @@ fun NewAgentScreen(
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelId by remember { mutableStateOf("") }
     var modelParams by remember { mutableStateOf<List<ModelParam>>(emptyList()) }
-    var modelMenu by remember { mutableStateOf(false) }
+    var modelPickerOpen by remember { mutableStateOf(false) }
     var computers by remember { mutableStateOf(container.catalog.computers()) }
     var computerMenu by remember { mutableStateOf(false) }
     var machinePrefs by remember { mutableStateOf(container.machines.prefs()) }
@@ -1087,38 +1089,31 @@ fun NewAgentScreen(
                     )
                 }
 
-                ExposedDropdownMenuBox(expanded = modelMenu, onExpandedChange = { modelMenu = it }) {
-                    OutlinedTextField(
-                        value = modelId.ifBlank { "Account default" },
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Model") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu) },
-                        modifier = Modifier
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Account default") },
-                            onClick = {
-                                modelId = ""
-                                modelParams = emptyList()
-                                modelMenu = false
-                            },
-                        )
-                        models.forEach { model ->
-                            DropdownMenuItem(
-                                text = { Text(model.displayName ?: model.id) },
-                                onClick = {
-                                    modelId = model.id
-                                    modelParams = model.defaultParams()
-                                    modelMenu = false
-                                },
-                            )
+                ModelPickerAnchorField(
+                    value = models.firstOrNull { it.id == modelId }?.displayName
+                        ?: modelId.ifBlank { "Account default" },
+                    label = "Model",
+                    expanded = modelPickerOpen,
+                    onExpandedChange = { modelPickerOpen = it },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ModelPickerSheet(
+                    open = modelPickerOpen,
+                    title = "Model",
+                    models = models,
+                    selectedModelId = modelId,
+                    store = container.modelPicker,
+                    onDismiss = { modelPickerOpen = false },
+                    onPick = { id ->
+                        modelId = id
+                        modelParams = if (id.isBlank()) {
+                            emptyList()
+                        } else {
+                            models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
                         }
-                    }
-                }
+                        modelPickerOpen = false
+                    },
+                )
                 ModelParamRow(
                     model = models.firstOrNull { it.id == modelId },
                     params = modelParams,
