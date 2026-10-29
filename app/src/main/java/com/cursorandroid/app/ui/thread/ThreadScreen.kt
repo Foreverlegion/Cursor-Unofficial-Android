@@ -167,6 +167,7 @@ import com.cursorandroid.app.data.repo.toItems
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
+import com.cursorandroid.app.ui.chat.ModelPickerSheet
 import com.cursorandroid.app.ui.chat.RenameChatDialog
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.ui.status.PlayColors
@@ -1378,7 +1379,7 @@ fun ThreadScreen(
     var attaches by remember { mutableStateOf<List<AttachItem>>(emptyList()) }
     var models by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var draftReady by remember { mutableStateOf(false) }
-    var modelMenu by remember { mutableStateOf(false) }
+    var modelPickerOpen by remember { mutableStateOf(false) }
     var showFollowEnv by remember { mutableStateOf(false) }
     var followEnv by remember { mutableStateOf(listOf("" to "")) }
     val listState = remember(agentId) { LazyListState() }
@@ -1854,42 +1855,20 @@ fun ThreadScreen(
                 )
                 val modelLabel = models.firstOrNull { it.id == vm.followModel }?.displayName
                     ?: vm.followModel.ifBlank { "Model" }
-                Box {
-                    FilterChip(
-                        selected = vm.followModel.isNotBlank(),
-                        onClick = { modelMenu = true },
-                        label = {
-                            Text(
-                                modelLabel,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingIcon = {
-                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                        },
-                    )
-                    DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Account default") },
-                            onClick = {
-                                vm.followModel = ""
-                                vm.followParams = emptyList()
-                                modelMenu = false
-                            },
+                FilterChip(
+                    selected = vm.followModel.isNotBlank(),
+                    onClick = { modelPickerOpen = true },
+                    label = {
+                        Text(
+                            modelLabel,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        models.forEach { model ->
-                            DropdownMenuItem(
-                                text = { Text(model.displayName ?: model.id) },
-                                onClick = {
-                                    vm.followModel = model.id
-                                    vm.followParams = model.defaultParams()
-                                    modelMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
+                    },
+                    trailingIcon = {
+                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                    },
+                )
             }
             ModelParamRow(
                 model = models.firstOrNull { it.id == vm.followModel },
@@ -1973,6 +1952,23 @@ fun ThreadScreen(
             }
         }
     }
+    ModelPickerSheet(
+        open = modelPickerOpen,
+        title = "Follow-up model",
+        models = models,
+        selectedModelId = vm.followModel,
+        store = container.modelPicker,
+        onDismiss = { modelPickerOpen = false },
+        onPick = { id ->
+            vm.followModel = id
+            vm.followParams = if (id.isBlank()) {
+                emptyList()
+            } else {
+                models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
+            }
+            modelPickerOpen = false
+        },
+    )
     if (renaming) {
         RenameChatDialog(
             current = title,

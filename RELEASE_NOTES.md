@@ -1,3 +1,7 @@
+# 1.0.32
+
+- Model picker uses vendor tabs (Recent, All, Anthropic, OpenAI, and the rest) with search across every model. The last tab and your five most recent models are remembered on this device.
+
 # 1.0.31
 
 - Fixes being signed out / losing your API key after an app update.
