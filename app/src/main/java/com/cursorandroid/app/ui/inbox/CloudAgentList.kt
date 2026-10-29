@@ -94,6 +94,7 @@ internal fun LazyListScope.cloudAgentBlocks(
                 folder = block.folder,
                 count = block.count,
                 iconStore = folderIcons,
+                depth = 0,
                 onToggle = { folderActions.onToggleCollapsed(block.folder.id) },
                 onRename = { onRenameFolder(block.folder) },
                 onDelete = { onDeleteFolder(block.folder) },
@@ -103,15 +104,41 @@ internal fun LazyListScope.cloudAgentBlocks(
             )
         }
         if (!block.folder.collapsed) {
+            val childDepth = folderTreeChildDepth(0)
             block.groups.forEach { group ->
-                repoGroupBlock(group, laid, "fld-${block.folder.id}", collapsed, groupActions, onToggleGroup, agentRow)
+                repoGroupBlock(
+                    group = group,
+                    laid = laid,
+                    keyPrefix = "fld-${block.folder.id}",
+                    collapsed = collapsed,
+                    groupActions = groupActions,
+                    onToggleGroup = onToggleGroup,
+                    treeDepth = childDepth,
+                    parentFolderName = block.folder.name,
+                    agentRow = agentRow,
+                )
             }
-            itemsKeyed(block.chats, "fld-${block.folder.id}-chat") { agentRow(it) }
+            itemsKeyed(
+                agents = block.chats,
+                prefix = "fld-${block.folder.id}-chat",
+                depth = childDepth,
+                parentFolderName = block.folder.name,
+            ) { agentRow(it) }
         }
     }
     if (groupByRepo) {
         laid.groups.forEach { group ->
-            repoGroupBlock(group, laid, "root", collapsed, groupActions, onToggleGroup, agentRow)
+            repoGroupBlock(
+                group = group,
+                laid = laid,
+                keyPrefix = "root",
+                collapsed = collapsed,
+                groupActions = groupActions,
+                onToggleGroup = onToggleGroup,
+                treeDepth = 0,
+                parentFolderName = null,
+                agentRow = agentRow,
+            )
         }
     } else {
         if (laid.favorites.isNotEmpty()) {
@@ -145,6 +172,8 @@ private fun LazyListScope.repoGroupBlock(
     collapsed: Set<String>,
     groupActions: RepoGroupActions,
     onToggleGroup: (String) -> Unit,
+    treeDepth: Int,
+    parentFolderName: String?,
     agentRow: @Composable (AgentSummary) -> Unit,
 ) {
     val all = laid.folders.flatMap { it.groups } + laid.groups
@@ -166,6 +195,8 @@ private fun LazyListScope.repoGroupBlock(
             canMoveUp = at > 0,
             canMoveDown = at in 0 until peers.lastIndex,
             manualOrder = groupActions.manualOrder,
+            depth = treeDepth,
+            parentFolderName = parentFolderName,
             onClick = { onToggleGroup(group.key) },
             onRename = { groupActions.onRename(group.key, it) },
             onFavorite = { groupActions.onFavorite(group.key) },
@@ -178,20 +209,30 @@ private fun LazyListScope.repoGroupBlock(
         )
     }
     if (group.key !in collapsed) {
-        itemsKeyed(group.agents, "$keyPrefix-g-${group.key}") { agentRow(it) }
+        val agentDepth = folderTreeNestedGroupAgentDepth(treeDepth)
+        itemsKeyed(
+            agents = group.agents,
+            prefix = "$keyPrefix-g-${group.key}",
+            depth = agentDepth,
+            parentFolderName = parentFolderName,
+        ) { agentRow(it) }
     }
 }
 
 private fun LazyListScope.itemsKeyed(
     agents: List<AgentSummary>,
     prefix: String,
+    depth: Int = 0,
+    parentFolderName: String? = null,
     row: @Composable (AgentSummary) -> Unit,
 ) {
     items(
         count = agents.size,
         key = { index -> "$prefix-${agents[index].id}" },
     ) { index ->
-        row(agents[index])
+        FolderTreeAgentInset(depth = depth, parentFolderName = parentFolderName) {
+            row(agents[index])
+        }
     }
 }
 
@@ -231,6 +272,8 @@ internal fun RepoGroupHeader(
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     manualOrder: Boolean,
+    depth: Int = 0,
+    parentFolderName: String? = null,
     onClick: () -> Unit,
     onRename: (String?) -> Unit,
     onFavorite: () -> Unit,
@@ -245,25 +288,29 @@ internal fun RepoGroupHeader(
     val haptics = LocalHapticFeedback.current
     val nameColor = if (color != 0) Color(color) else MaterialTheme.colorScheme.onSurface
     Box {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menu = true
-                    },
-                )
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        FolderTreeRow(
+            depth = depth,
+            parentFolderName = parentFolderName,
+            rowLabel = label,
         ) {
-            Icon(
-                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = if (expanded) "Collapse $label" else "Expand $label",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = onClick,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu = true
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Collapse $label" else "Expand $label",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -309,6 +356,7 @@ internal fun RepoGroupHeader(
                         .background(MaterialTheme.colorScheme.primary)
                         .semantics { contentDescription = "Running" },
                 )
+            }
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

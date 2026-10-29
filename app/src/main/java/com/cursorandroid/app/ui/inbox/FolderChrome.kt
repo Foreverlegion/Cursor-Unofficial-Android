@@ -101,6 +101,8 @@ internal fun FolderHeader(
     folder: LocalFolder,
     count: Int,
     iconStore: FolderIconStore?,
+    depth: Int = 0,
+    parentFolderName: String? = null,
     onToggle: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -121,53 +123,60 @@ internal fun FolderHeader(
     val countStyle = MaterialTheme.typography.labelLarge.copy(
         fontSize = MaterialTheme.typography.labelLarge.fontSize * layout.folderCountScale,
     )
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onToggle,
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    menu = true
-                },
-            )
-            .padding(horizontal = 16.dp, vertical = layout.folderRowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(layout.folderRowGap),
-    ) {
-        Icon(
-            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-            contentDescription = if (expanded) "Collapse ${folder.name}" else "Expand ${folder.name}",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        FolderIconGlyph(
-            folder = folder,
-            iconStore = iconStore,
-            tint = if (folder.color != 0) nameColor else MaterialTheme.colorScheme.onSurfaceVariant,
-            size = layout.folderIconSize,
-        )
-        Text(
-            folder.name,
-            style = titleStyle,
-            color = nameColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        if (folder.favorite) {
-            Icon(
-                Icons.Filled.Star,
-                contentDescription = "Favorite folder",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(14.dp),
-            )
+    Box {
+        FolderTreeRow(
+            depth = depth,
+            parentFolderName = parentFolderName,
+            rowLabel = folder.name,
+            verticalPadding = layout.folderRowPadV,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = onToggle,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu = true
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(layout.folderRowGap),
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Collapse ${folder.name}" else "Expand ${folder.name}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FolderIconGlyph(
+                    folder = folder,
+                    iconStore = iconStore,
+                    tint = if (folder.color != 0) nameColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                    size = layout.folderIconSize,
+                )
+                Text(
+                    folder.name,
+                    style = titleStyle,
+                    color = nameColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (folder.favorite) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = "Favorite folder",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                Text(
+                    count.toString(),
+                    style = countStyle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Text(
-            count.toString(),
-            style = countStyle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
                 text = { Text("Rename") },
