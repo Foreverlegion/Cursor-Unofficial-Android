@@ -179,7 +179,6 @@ class SecretStorageTest {
     }
 
     @Test
-    @Test
     fun openFailureMustNotDeleteExistingSecurePrefsFiles() {
         val dir = java.io.File(context.applicationInfo.dataDir, "shared_prefs").apply { mkdirs() }
         val file = java.io.File(dir, "cursor_secure.xml")

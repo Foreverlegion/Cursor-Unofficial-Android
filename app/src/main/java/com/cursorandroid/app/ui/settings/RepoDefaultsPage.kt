@@ -35,6 +35,7 @@ import com.cursorandroid.app.data.api.repoKey
 import com.cursorandroid.app.data.repo.RepoDefault
 import com.cursorandroid.app.data.repo.knownRepoUrls
 import com.cursorandroid.app.ui.chat.ModelParamRow
+import com.cursorandroid.app.ui.chat.ModelPickerSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -167,37 +168,36 @@ fun RepoDefaultsPage(
         SettingsStaticRow("Repository", gitPath(item.repoUrl).ifBlank { item.repoUrl })
         val modelLabel = models.firstOrNull { it.id == item.modelId }?.displayName
             ?: item.modelId.ifBlank { "Account default" }
-        ExposedDropdownMenuBox(expanded = modelMenu, onExpandedChange = { modelMenu = it }) {
-            OutlinedTextField(
-                value = modelLabel,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Default model") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu) },
-                modifier = Modifier
-                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            ExposedDropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text("Account default") },
-                    onClick = {
-                        editing = item.copy(modelId = "", modelParams = emptyList())
-                        modelMenu = false
+        OutlinedTextField(
+            value = modelLabel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Default model") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { modelMenu = true }
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        ModelPickerSheet(
+            open = modelMenu,
+            title = "Default model",
+            models = models,
+            selectedModelId = item.modelId,
+            store = container.modelPicker,
+            onDismiss = { modelMenu = false },
+            onPick = { id ->
+                editing = item.copy(
+                    modelId = id,
+                    modelParams = if (id.isBlank()) {
+                        emptyList()
+                    } else {
+                        models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
                     },
                 )
-                models.forEach { model ->
-                    DropdownMenuItem(
-                        text = { Text(model.displayName ?: model.id) },
-                        onClick = {
-                            editing = item.copy(modelId = model.id, modelParams = model.defaultParams())
-                            modelMenu = false
-                        },
-                    )
-                }
-            }
-        }
+                modelMenu = false
+            },
+        )
         ModelParamRow(
             model = models.firstOrNull { it.id == item.modelId },
             params = item.modelParams,
