@@ -1,3 +1,3 @@
-PR URL or #number in search filters agents. Collapsible search on the tab row.
-Home density and larger folder rows. Custom folder icons from photos.
-Import .ttf / .otf app fonts. Code font can use imports too.
+Vendor tabs in the model picker. New agent shows the model name you picked.
+Folder children indent with a guide line, including chats inside a repo group in a folder.
+PR URL or #number in search. Home density and custom folder icons. Import app fonts.

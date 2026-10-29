@@ -1,12 +1,8 @@
-# 1.0.32
+# 1.0.36
 
 - Model picker uses vendor tabs (Recent, All, Anthropic, OpenAI, and the rest) with search across every model. The last tab and your five most recent models are remembered on this device.
-- Agents home search is one field: type a PR URL, GitLab or Origin merge request link, or #number to filter by pull request the same way the old PR box did. Anything else still searches titles, repos, and branches locally.
-- Search collapses to a magnifying-glass icon on the Cloud / Remote tab row. It opens below the tabs with the keyboard, hides when you scroll or go back with an empty query, and shows a dot when a filter is active with the query collapsed.
-- Settings, Appearance: Home density (Compact / Comfortable / Large) scales folder rows and icons on the agent list. Comfortable is the default and uses the space saved by the slimmer search header.
-- Folders: long-press or edit, Change icon, then pick a preset, upload a photo, or Reset to default. Custom icons are stored on the phone, survive updates, and export in backup.
-- Settings, Appearance: App font adds Import font for .ttf / .otf files (validated on import). Several imports are kept with delete. Code font can use the same imports. Missing files fall back to the system font.
-- Expanded local folders indent repo groups and chats under the folder with a subtle guide line so top-level rows below the folder are not mistaken for folder children.
+- New agent shows the model display name after you pick one, not the raw id.
+- Expanded local folders indent repo groups and chats under the folder with a subtle guide line; the guide continues alongside chats inside an expanded repo group so top-level rows below the folder are not mistaken for folder children.
 - Settings, Appearance accent color, folder name color, and repo group header color open one color picker: a large wheel, brightness slider, hex field, current vs new preview, preset swatches, and OK / Cancel. Default folder and group colors still follow the theme.
 - Custom folder colors you pick are saved and still import from backup the same way as preset colors.
 - Inbox foreground polling no longer waits out a status rate-limit pause before calling the agent list again. Timer ticks are list-only (no status hydration on every 20 s). Resume triggers an immediate list refresh with the usual status follow-up.
@@ -17,6 +13,14 @@
 - A starred repo, and a starred folder, stays at the top and is never moved into Show N hidden, however old its last chat is. Hide still removes a chat you hid yourself. This holds on every filter and in search. Starred rows keep their order.
 - A folder has a name color and an icon. The default color follows the theme, and the default icon is the folder. A renamed repo still shows its real path under the name.
 - Backup now includes folders (name, color, icon, collapsed, star, and which chats and repos are in them) and which repo groups are collapsed. A backup from any older version still imports. The sign-in key stays out. Pending archives are not in a backup.
+
+# 1.0.35
+
+- Agents home search is one field: type a PR URL, GitLab or Origin merge request link, or #number to filter by pull request the same way the old PR box did. Anything else still searches titles, repos, and branches locally.
+- Search collapses to a magnifying-glass icon on the Cloud / Remote tab row. It opens below the tabs with the keyboard, hides when you scroll or go back with an empty query, and shows a dot when a filter is active with the query collapsed.
+- Settings, Appearance: Home density (Compact / Comfortable / Large) scales folder rows and icons on the agent list. Comfortable is the default and uses the space saved by the slimmer search header.
+- Folders: long-press or edit, Change icon, then pick a preset, upload a photo, or Reset to default. Custom icons are stored on the phone, survive updates, and export in backup.
+- Settings, Appearance: App font adds Import font for .ttf / .otf files (validated on import). Several imports are kept with delete. Code font can use the same imports. Missing files fall back to the system font.
 
 # 1.0.31
 
