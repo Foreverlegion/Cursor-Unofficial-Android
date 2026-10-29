@@ -1,7 +1,6 @@
 package com.cursorandroid.app.ui.composeAgent
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -97,6 +96,7 @@ import com.cursorandroid.app.data.repo.toDraft
 import com.cursorandroid.app.ui.chat.AttachButton
 import com.cursorandroid.app.ui.chat.AttachChips
 import com.cursorandroid.app.ui.chat.ModelParamRow
+import com.cursorandroid.app.ui.chat.ModelPickerAnchorField
 import com.cursorandroid.app.ui.chat.ModelPickerSheet
 import com.cursorandroid.app.ui.chat.VoiceButton
 import com.cursorandroid.app.data.repo.ForgeClient
@@ -1089,15 +1089,12 @@ fun NewAgentScreen(
                     )
                 }
 
-                OutlinedTextField(
+                ModelPickerAnchorField(
                     value = modelId.ifBlank { "Account default" },
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Model") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelPickerOpen) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { modelPickerOpen = true },
+                    label = "Model",
+                    expanded = modelPickerOpen,
+                    onExpandedChange = { modelPickerOpen = it },
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 ModelPickerSheet(
                     open = modelPickerOpen,

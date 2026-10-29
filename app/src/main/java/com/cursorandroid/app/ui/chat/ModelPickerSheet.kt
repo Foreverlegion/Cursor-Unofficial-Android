@@ -4,6 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +34,34 @@ import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.repo.ModelPickerStore
 import com.cursorandroid.app.ui.theme.CursorTheme
+
+/** Read-only field that opens [ModelPickerSheet] via the menu anchor (text field must not eat taps). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModelPickerAnchorField(
+    value: String,
+    label: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,6 +113,8 @@ fun ModelPickerSheet(
                     tabs.forEachIndexed { index, tab ->
                         Tab(
                             selected = tabIndex == index,
+                            selectedContentColor = MaterialTheme.colorScheme.primary,
+                            unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             onClick = {
                                 tabIndex = index
                                 store.lastTabId = tab.id

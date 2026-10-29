@@ -11,6 +11,8 @@ class ModelVendorTest {
     fun mapsKnownVendorPrefixes() {
         assertEquals(ModelVendorTab.Cursor, modelVendorForId("composer-2.5"))
         assertEquals(ModelVendorTab.Cursor, modelVendorForId("cursor-fast"))
+        assertEquals(ModelVendorTab.Cursor, modelVendorForId("composer"))
+        assertEquals(ModelVendorTab.Cursor, modelVendorForId("auto"))
         assertEquals(ModelVendorTab.Anthropic, modelVendorForId("claude-opus-5-5"))
         assertEquals(ModelVendorTab.Anthropic, modelVendorForId("opus"))
         assertEquals(ModelVendorTab.OpenAi, modelVendorForId("gpt-5.6-sol"))

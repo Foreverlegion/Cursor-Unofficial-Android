@@ -30,7 +30,7 @@ fun modelVendorForId(modelId: String): ModelVendorTab {
     val id = modelId.trim().lowercase()
     if (id.isEmpty()) return ModelVendorTab.Other
     return when {
-        id.startsWith("composer-") || id.startsWith("cursor-") -> ModelVendorTab.Cursor
+        id.startsWith("composer-") || id.startsWith("cursor-") || id in cursorBareIds -> ModelVendorTab.Cursor
         id.startsWith("claude-") || id in anthropicAliases -> ModelVendorTab.Anthropic
         id.startsWith("gpt-") || id.startsWith("codex") || openAiOSeries(id) -> ModelVendorTab.OpenAi
         id.startsWith("gemini-") -> ModelVendorTab.Google
@@ -44,6 +44,9 @@ fun modelVendorForId(modelId: String): ModelVendorTab {
 }
 
 private val anthropicAliases = setOf("opus", "sonnet", "haiku")
+
+/** Bare ids (no hyphen) that still belong to Cursor / Auto in the catalog. */
+private val cursorBareIds = setOf("composer", "auto", "cursor", "default")
 
 private val openAiOPrefix = Regex("^o\\d")
 

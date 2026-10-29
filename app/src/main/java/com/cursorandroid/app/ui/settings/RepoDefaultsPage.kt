@@ -35,6 +35,7 @@ import com.cursorandroid.app.data.api.repoKey
 import com.cursorandroid.app.data.repo.RepoDefault
 import com.cursorandroid.app.data.repo.knownRepoUrls
 import com.cursorandroid.app.ui.chat.ModelParamRow
+import com.cursorandroid.app.ui.chat.ModelPickerAnchorField
 import com.cursorandroid.app.ui.chat.ModelPickerSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -168,15 +169,13 @@ fun RepoDefaultsPage(
         SettingsStaticRow("Repository", gitPath(item.repoUrl).ifBlank { item.repoUrl })
         val modelLabel = models.firstOrNull { it.id == item.modelId }?.displayName
             ?: item.modelId.ifBlank { "Account default" }
-        OutlinedTextField(
+        ModelPickerAnchorField(
             value = modelLabel,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Default model") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu) },
+            label = "Default model",
+            expanded = modelMenu,
+            onExpandedChange = { modelMenu = it },
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { modelMenu = true }
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         )
         ModelPickerSheet(
