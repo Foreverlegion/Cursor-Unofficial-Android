@@ -25,6 +25,7 @@ import com.cursorandroid.app.data.repo.DraftStore
 import com.cursorandroid.app.data.repo.FeedbackStore
 import com.cursorandroid.app.data.repo.ForgeSyncStore
 import com.cursorandroid.app.data.repo.ForgeSyncer
+import com.cursorandroid.app.data.repo.GrokChatStore
 import com.cursorandroid.app.data.repo.InboxRefreshHub
 import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
@@ -52,6 +53,7 @@ class AppContainer(context: Context) {
     val chats = LocalChatStore(ui)
     val machines = MachineStore(ui)
     val drafts = DraftStore(context)
+    val grokChat = GrokChatStore(ui)
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
     val runModels = RunModelStore(context)
