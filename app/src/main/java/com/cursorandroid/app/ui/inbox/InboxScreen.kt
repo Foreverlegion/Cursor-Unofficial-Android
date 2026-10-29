@@ -135,6 +135,8 @@ fun InboxScreen(
     onSelect: (String) -> Unit,
     onCompose: (envType: String, envName: String?) -> Unit,
     onSettings: () -> Unit,
+    onGrok: () -> Unit = {},
+    grokTabActive: Boolean = false,
     showEnvs: Boolean = true,
     showRemote: Boolean = true,
     settingsEpoch: Int = 0,
@@ -471,7 +473,11 @@ fun InboxScreen(
             )
         },
         bottomBar = {
-            InboxBottomNav(onSettings = onSettings)
+            InboxBottomNav(
+                grokActive = grokTabActive,
+                onGrok = onGrok,
+                onSettings = onSettings,
+            )
         },
     ) { padding ->
         Column(
@@ -1542,7 +1548,12 @@ private fun InboxTabStrip(
 }
 
 @Composable
-private fun InboxBottomNav(onSettings: () -> Unit) {
+fun InboxBottomNav(
+    grokActive: Boolean = false,
+    onInbox: () -> Unit = {},
+    onGrok: () -> Unit = {},
+    onSettings: () -> Unit,
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1559,9 +1570,17 @@ private fun InboxBottomNav(onSettings: () -> Unit) {
         ) {
             Text(
                 "Inbox",
-                color = PlayColors.Teal,
-                fontWeight = FontWeight.SemiBold,
+                color = if (!grokActive) PlayColors.Teal else PlayColors.Muted,
+                fontWeight = if (!grokActive) FontWeight.SemiBold else FontWeight.Normal,
                 style = MaterialTheme.typography.titleMedium,
+                modifier = if (grokActive) Modifier.clickable(onClick = onInbox) else Modifier,
+            )
+            Text(
+                "Grok",
+                color = if (grokActive) PlayColors.Teal else PlayColors.Muted,
+                fontWeight = if (grokActive) FontWeight.SemiBold else FontWeight.Normal,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.clickable(onClick = onGrok),
             )
             Text(
                 "Settings",
@@ -1572,7 +1591,6 @@ private fun InboxBottomNav(onSettings: () -> Unit) {
         }
     }
 }
-
 private fun overlayWorking(agent: AgentSummary, live: Map<String, String>): AgentSummary {
     val local = live[agent.id]
     return if (isLiveStatus(local) && !agent.isWorking()) agent.copy(status = local) else agent

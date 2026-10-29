@@ -1,3 +1,8 @@
+# 1.0.32
+
+- Grok tab: chat with Grok models through your existing Cursor login (no-repo cloud agent, follow-ups on the same agent, SSE streaming, local history).
+- Grok voice: hold-to-talk and hands-free modes use on-device speech recognition and text-to-speech; microphone permission is requested the first time you use voice.
+
 # 1.0.31
 
 - Fixes being signed out / losing your API key after an app update.

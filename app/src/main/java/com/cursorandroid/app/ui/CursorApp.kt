@@ -67,12 +67,13 @@ import com.cursorandroid.app.ui.theme.ChatDensity
 import com.cursorandroid.app.ui.theme.CodeFont
 import com.cursorandroid.app.ui.theme.UiFont
 import com.cursorandroid.app.ui.theme.clampTextScale
+import com.cursorandroid.app.ui.grok.GrokChatScreen
 import com.cursorandroid.app.ui.thread.ThreadScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class Pane { Inbox, Compose, Settings }
+private enum class Pane { Inbox, Compose, Settings, Grok }
 
 private fun readAppearance(container: AppContainer) = Appearance(
     uiFont = UiFont.fromId(container.store.uiFont),
@@ -294,6 +295,7 @@ private fun CursorAppContent(
                         pane = Pane.Compose
                     },
                     onSettings = { pane = Pane.Settings },
+                    onGrok = { pane = Pane.Grok; selectedId = null },
                     showEnvs = showInboxEnvs,
                     showRemote = showInboxRemote,
                     settingsEpoch = settingsEpoch,
@@ -335,6 +337,14 @@ private fun CursorAppContent(
                             initialEnvName = composeEnvName,
                             resetTick = composeTick,
                         )
+                        pane == Pane.Grok -> GrokChatScreen(
+                            container = container,
+                            showBack = false,
+                            onBack = { pane = Pane.Inbox },
+                            onInbox = { pane = Pane.Inbox },
+                            onSettings = { pane = Pane.Settings },
+                            modifier = Modifier.fillMaxSize(),
+                        )
                         selectedId != null -> ThreadScreen(
                             container = container,
                             agentId = selectedId!!,
@@ -375,6 +385,13 @@ private fun CursorAppContent(
                     initialEnvName = composeEnvName,
                     resetTick = composeTick,
                 )
+                pane == Pane.Grok -> GrokChatScreen(
+                    container = container,
+                    showBack = false,
+                    onBack = { pane = Pane.Inbox },
+                    onInbox = { pane = Pane.Inbox },
+                    onSettings = { pane = Pane.Settings },
+                )
                 selectedId != null -> ThreadScreen(
                     container = container,
                     agentId = selectedId!!,
@@ -395,6 +412,7 @@ private fun CursorAppContent(
                         pane = Pane.Compose
                     },
                     onSettings = { pane = Pane.Settings },
+                    onGrok = { pane = Pane.Grok; selectedId = null },
                     showEnvs = showInboxEnvs,
                     showRemote = showInboxRemote,
                     settingsEpoch = settingsEpoch,

@@ -55,6 +55,8 @@ object UiKeys {
 
     val machinePrefs = stringPreferencesKey("machine_prefs")
     val machinePrefsUnreadable = stringPreferencesKey("machine_prefs_unreadable")
+
+    val grokChatSession = stringPreferencesKey("grok_chat_session")
 }
 
 /** What the app kept in SharedPreferences before the DataStore existed. Read only, never deleted. */

@@ -282,6 +282,7 @@ class DemoSession {
         val MODELS = listOf(
             ModelItem(id = "demo-composer", displayName = "Composer", description = "Sample model"),
             ModelItem(id = "demo-fast", displayName = "Fast", description = "Sample model"),
+            ModelItem(id = "grok-4.6-fast", displayName = "Grok 4.6", description = "Sample Grok model"),
         )
         val WORKERS = listOf(
             Worker(
