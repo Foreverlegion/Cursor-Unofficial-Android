@@ -36,6 +36,7 @@ import com.cursorandroid.app.data.repo.LocalChatStore
 import com.cursorandroid.app.data.repo.RunModelStore
 import com.cursorandroid.app.data.repo.RunSettleHub
 import com.cursorandroid.app.data.repo.MachineStore
+import com.cursorandroid.app.data.repo.ModelPickerStore
 import com.cursorandroid.app.data.repo.UiPrefsStore
 import com.cursorandroid.app.data.repo.settleAgents
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +62,7 @@ class AppContainer(context: Context) {
     val catalog = CatalogCache(context) { store.demoMode }
     val artifactHistory = ArtifactHistoryStore(context)
     val runModels = RunModelStore(context)
+    val modelPicker = ModelPickerStore(context)
     val notices = NoticeStore(context)
     val inboxRefresh = InboxRefreshHub()
     val runSettle = RunSettleHub { ended ->

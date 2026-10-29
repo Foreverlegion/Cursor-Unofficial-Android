@@ -82,6 +82,7 @@ import com.cursorandroid.app.data.repo.UserRuleSync
 import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
+import com.cursorandroid.app.ui.chat.ModelPickerSheet
 import com.cursorandroid.app.ui.inbox.HideFinishedAge
 import com.cursorandroid.app.ui.scaffoldBars
 import kotlinx.coroutines.Dispatchers
@@ -287,10 +288,12 @@ internal fun SettingsScreenContent(
         }
     }
     if (modelMenu) {
-        ChoiceDialog(
+        ModelPickerSheet(
+            open = true,
             title = "Default model",
-            selected = defaultModel,
-            options = listOf("" to "Account default") + modelItems.map { it.id to (it.displayName ?: it.id) },
+            models = modelItems,
+            selectedModelId = defaultModel,
+            store = container.modelPicker,
             onDismiss = { modelMenu = false },
             onPick = { id ->
                 defaultModel = id
