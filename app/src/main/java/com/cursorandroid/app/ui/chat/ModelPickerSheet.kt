@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.api.ModelItem
+import com.cursorandroid.app.data.api.routerInCatalog
 import com.cursorandroid.app.data.repo.ModelPickerStore
 import com.cursorandroid.app.ui.theme.CursorTheme
 
@@ -75,18 +76,21 @@ fun ModelPickerSheet(
     onPick: (String) -> Unit,
 ) {
     if (!open) return
-    val recent = remember(models) { store.recentInCatalog(models) }
-    val tabs = remember(models, recent) { modelPickerTabs(models, recent) }
-    var tabIndex by remember(open, selectedModelId, models) {
-        val tabId = store.resolveOpenTab(selectedModelId, models)
+    val pickerModels = remember(models, selectedModelId) {
+        store.pickerModels(models, selectedModelId)
+    }
+    val recent = remember(pickerModels) { store.recentInCatalog(pickerModels) }
+    val tabs = remember(pickerModels, recent) { modelPickerTabs(pickerModels, recent) }
+    var tabIndex by remember(open, selectedModelId, pickerModels) {
+        val tabId = store.resolveOpenTab(selectedModelId, pickerModels)
         mutableIntStateOf(tabs.indexOfFirst { it.id == tabId }.coerceAtLeast(0))
     }
     var search by remember(open) { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    LaunchedEffect(open, selectedModelId, models) {
+    LaunchedEffect(open, selectedModelId, pickerModels) {
         if (!open) return@LaunchedEffect
-        val tabId = store.resolveOpenTab(selectedModelId, models)
+        val tabId = store.resolveOpenTab(selectedModelId, pickerModels)
         tabIndex = tabs.indexOfFirst { it.id == tabId }.coerceAtLeast(0)
         search = ""
     }
@@ -131,7 +135,7 @@ fun ModelPickerSheet(
                 }
             }
             if (searching) {
-                val groups = remember(search, models) { groupedSearchResults(search, models) }
+                val groups = remember(search, pickerModels) { groupedSearchResults(search, pickerModels) }
                 LazyColumn(modifier = Modifier.padding(bottom = 32.dp)) {
                     groups.forEach { (vendor, items) ->
                         item(key = "header-${vendor.id}") {
@@ -160,8 +164,8 @@ fun ModelPickerSheet(
                 }
             } else {
                 val activeTab = tabs.getOrElse(tabIndex) { ModelVendorTab.All }
-                val rows = remember(activeTab, models, recent) {
-                    modelsForPickerTab(activeTab, models, recent)
+                val rows = remember(activeTab, pickerModels, recent) {
+                    modelsForPickerTab(activeTab, pickerModels, recent)
                 }
                 LazyColumn(modifier = Modifier.padding(bottom = 32.dp)) {
                     items(rows, key = {
@@ -192,6 +196,17 @@ fun ModelPickerSheet(
                         }
                     }
                 }
+            }
+            if (!routerInCatalog(models)) {
+                Text(
+                    "Cursor Router (Auto cost / balance / intelligence) is not in your model list. " +
+                        "Enable Router on a Teams or Enterprise account, or pick a fixed model.",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

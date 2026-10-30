@@ -1,5 +1,7 @@
 package com.cursorandroid.app.ui.thread
 
+import com.cursorandroid.app.data.api.OPTIMIZE_FOR_PARAM
+import com.cursorandroid.app.data.api.ROUTER_MODEL_ID
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.api.ModelParameter
@@ -40,6 +42,22 @@ class ModelLabelTest {
     fun matchesAliasAndSkipsNonEffortParams() {
         val sel = ModelSelection("opus", listOf(ModelParam("fast", "true")))
         assertEquals("Claude Opus 5.5", modelLabel(sel, catalog))
+    }
+
+    @Test
+    fun routerLabelShowsBalance() {
+        val router = ModelItem(
+            id = ROUTER_MODEL_ID,
+            displayName = "Auto",
+            parameters = listOf(
+                ModelParameter(
+                    id = OPTIMIZE_FOR_PARAM,
+                    values = listOf(ModelValue("balanced")),
+                ),
+            ),
+        )
+        val sel = ModelSelection(ROUTER_MODEL_ID, listOf(ModelParam(OPTIMIZE_FOR_PARAM, "balanced")))
+        assertEquals("Auto · Balance", modelLabel(sel, catalog + router))
     }
 
     @Test

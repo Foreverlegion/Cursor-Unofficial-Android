@@ -1,3 +1,8 @@
+# 1.0.33
+
+- Model picker remembers reasoning, fast, and other catalog options per model on this device. Cursor Router (`auto-smart`) shows Cost, Balance, and Intelligence when your account lists it; create and follow-up send `optimize_for` with the model.
+- Settings: hide models from the picker on this device only (does not change server-side Auto Router). Options and hidden models are included in settings backup.
+
 # 1.0.32
 
 - Model picker uses vendor tabs (Recent, All, Anthropic, OpenAI, and the rest) with search across every model. The last tab and your five most recent models are remembered on this device.

@@ -3,6 +3,7 @@ package com.cursorandroid.app.data.repo
 import android.content.Context
 import android.net.Uri
 import com.cursorandroid.app.AppContainer
+import com.cursorandroid.app.data.api.ModelParam
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -85,6 +86,8 @@ object SettingsBackup {
         chats = container.chats.snapshot(),
         conversations = container.conversations.exportAll(),
         drafts = container.drafts.exportAll(),
+        modelsHiddenFromPicker = container.modelPicker.hiddenFromPicker().sorted(),
+        modelParamPrefs = container.modelPicker.allParamPrefs(),
     )
 
     private fun applySnapshot(container: AppContainer, snap: SettingsSnapshot) {
@@ -139,6 +142,8 @@ object SettingsBackup {
         if (snap.drafts.isNotEmpty()) {
             container.drafts.importAll(snap.drafts)
         }
+        container.modelPicker.setHiddenFromPicker(snap.modelsHiddenFromPicker.toSet())
+        container.modelPicker.replaceParamPrefs(snap.modelParamPrefs)
     }
 
     private const val MAX_IMPORT_BYTES = 8L * 1024L * 1024L
@@ -182,5 +187,7 @@ data class SettingsSnapshot(
     val chats: Map<String, ChatMeta> = emptyMap(),
     val conversations: Map<String, List<TranscriptLine>> = emptyMap(),
     val drafts: Map<String, ChatDraft> = emptyMap(),
+    val modelsHiddenFromPicker: List<String> = emptyList(),
+    val modelParamPrefs: Map<String, List<ModelParam>> = emptyMap(),
     val secrets: SealedSecrets? = null,
 )

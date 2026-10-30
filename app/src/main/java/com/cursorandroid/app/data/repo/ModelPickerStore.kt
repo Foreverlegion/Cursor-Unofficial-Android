@@ -3,12 +3,19 @@ package com.cursorandroid.app.data.repo
 import android.content.Context
 import androidx.core.content.edit
 import com.cursorandroid.app.data.api.ModelItem
+import com.cursorandroid.app.data.api.ModelParam
+import com.cursorandroid.app.data.api.defaultParams
+import com.cursorandroid.app.data.api.modelsVisibleInPicker
 import com.cursorandroid.app.ui.chat.ModelVendorTab
 import com.cursorandroid.app.ui.chat.modelPickerTabs
 import com.cursorandroid.app.ui.chat.modelVendorForId
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class ModelPickerStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     var lastTabId: String
         get() = prefs.getString(KEY_TAB, ModelVendorTab.All.id) ?: ModelVendorTab.All.id
@@ -59,10 +66,66 @@ class ModelPickerStore(context: Context) {
         return recentModelIds().filter { it in catalog }
     }
 
+    fun hiddenFromPicker(): Set<String> =
+        prefs.getString(KEY_HIDDEN, null)
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.toSet()
+            ?: emptySet()
+
+    fun setHiddenFromPicker(ids: Set<String>) {
+        prefs.edit {
+            if (ids.isEmpty()) remove(KEY_HIDDEN) else putString(KEY_HIDDEN, ids.sorted().joinToString(","))
+        }
+    }
+
+    fun pickerModels(catalog: List<ModelItem>, selectedModelId: String): List<ModelItem> =
+        modelsVisibleInPicker(catalog, hiddenFromPicker(), selectedModelId)
+
+    fun allParamPrefs(): Map<String, List<ModelParam>> {
+        val raw = prefs.getString(KEY_PARAM_PREFS, null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<ModelParamPrefsFile>(raw).byModel }.getOrDefault(emptyMap())
+    }
+
+    fun replaceParamPrefs(byModel: Map<String, List<ModelParam>>) {
+        prefs.edit {
+            if (byModel.isEmpty()) {
+                remove(KEY_PARAM_PREFS)
+            } else {
+                putString(KEY_PARAM_PREFS, json.encodeToString(ModelParamPrefsFile(byModel)))
+            }
+        }
+    }
+
+    fun paramsFor(modelId: String, item: ModelItem?): List<ModelParam> {
+        if (modelId.isBlank()) return emptyList()
+        allParamPrefs()[modelId]?.let { return it }
+        return item?.defaultParams().orEmpty()
+    }
+
+    fun saveParams(modelId: String, params: List<ModelParam>) {
+        if (modelId.isBlank()) return
+        val next = allParamPrefs().toMutableMap()
+        if (params.isEmpty()) {
+            next.remove(modelId)
+        } else {
+            next[modelId] = params
+        }
+        replaceParamPrefs(next)
+    }
+
     companion object {
         const val MAX_RECENT = 5
         private const val PREFS = "cursor_model_picker"
         private const val KEY_TAB = "last_tab"
         private const val KEY_RECENT = "recent_ids"
+        private const val KEY_HIDDEN = "hidden_from_picker"
+        private const val KEY_PARAM_PREFS = "param_prefs"
     }
 }
+
+@Serializable
+private data class ModelParamPrefsFile(
+    val byModel: Map<String, List<ModelParam>> = emptyMap(),
+)

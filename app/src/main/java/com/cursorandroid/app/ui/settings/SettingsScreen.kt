@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +47,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +68,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.cursorandroid.app.AppContainer
 import com.cursorandroid.app.data.api.ModelItem
+import com.cursorandroid.app.data.api.ModelParam
 import com.cursorandroid.app.data.notify.BatteryExemption
 import com.cursorandroid.app.data.notify.NotifyPermission
 import com.cursorandroid.app.data.notify.RunWatchScheduler
@@ -80,6 +83,7 @@ import com.cursorandroid.app.data.repo.SafeLinks
 import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.chat.ModelPickerSheet
+import com.cursorandroid.app.ui.chat.ModelParamRow
 import com.cursorandroid.app.ui.inbox.HideFinishedAge
 import com.cursorandroid.app.ui.scaffoldBars
 import com.cursorandroid.app.ui.theme.ThemeColorPresets
@@ -120,9 +124,11 @@ private const val REMOTE_INFO =
 private const val REMOTE_MACHINES_INFO =
     "Lists every machine and worker this phone has seen, with when it was last seen. Hide keeps one out of New agent and the Remote list. Delete forgets it on this phone only, because the Cursor API cannot remove a worker. Auto-hide hides offline machines not seen for a number of days."
 private const val BACKUP_INFO =
-    "Export includes repo defaults, theme, inbox tabs, alerts, model, MCP servers, chat names, favorites, pins, drafts, and cached transcripts. The API key, forge tokens, and MCP header, env, and OAuth values are left out unless you turn on Include secrets, which seals them with a passphrase. Keep the file private."
+    "Export includes repo defaults, theme, inbox tabs, alerts, model and model options, picker hidden models, MCP servers, chat names, favorites, pins, drafts, and cached transcripts. The API key, forge tokens, and MCP header, env, and OAuth values are left out unless you turn on Include secrets, which seals them with a passphrase. Keep the file private."
 private const val KEY_INFO =
     "The key stays on this phone across updates, stored encrypted. Uninstall wipes it unless you import an export."
+private const val HIDDEN_MODELS_INFO =
+    "Hides checked models in the model picker on this phone only. It does not change which model Cursor Router picks on the server; the API has no way to exclude models from real Auto."
 private const val USAGE_INFO =
     "Cloud Agents token usage only. Desktop and team totals live on the Cursor dashboard."
 
@@ -209,6 +215,8 @@ internal fun SettingsScreenContent(
     val userRuleScope = rememberCoroutineScope()
     var modelItems by remember { mutableStateOf<List<ModelItem>>(emptyList()) }
     var modelMenu by remember { mutableStateOf(false) }
+    var hiddenModelsMenu by remember { mutableStateOf(false) }
+    var defaultModelParams by remember { mutableStateOf<List<ModelParam>>(emptyList()) }
     var themeColor by remember { mutableIntStateOf(container.store.themeColor) }
     var showInboxEnvs by remember { mutableStateOf(container.store.showInboxEnvs) }
     var showInboxRemote by remember { mutableStateOf(container.store.showInboxRemote) }
@@ -255,9 +263,19 @@ internal fun SettingsScreenContent(
 
     LaunchedEffect(Unit) {
         modelItems = runCatching { container.repo.models() }.getOrDefault(emptyList())
+        defaultModelParams = container.modelPicker.paramsFor(
+            container.store.defaultModel,
+            modelItems.firstOrNull { it.id == container.store.defaultModel },
+        )
         githubLogin = withContext(Dispatchers.IO) {
             runCatching { GithubRepos.authenticatedLogin(container.store.githubToken) }.getOrNull()
         }
+    }
+    LaunchedEffect(defaultModel, modelItems) {
+        defaultModelParams = container.modelPicker.paramsFor(
+            defaultModel,
+            modelItems.firstOrNull { it.id == defaultModel },
+        )
     }
     LaunchedEffect(page == SettingsPage.About) {
         if (page == SettingsPage.About) overview.refreshAll()
@@ -294,7 +312,22 @@ internal fun SettingsScreenContent(
             onPick = { id ->
                 defaultModel = id
                 container.store.defaultModel = id
+                defaultModelParams = container.modelPicker.paramsFor(
+                    id,
+                    modelItems.firstOrNull { it.id == id },
+                )
                 modelMenu = false
+            },
+        )
+    }
+    if (hiddenModelsMenu) {
+        HiddenModelsSheet(
+            models = modelItems,
+            hidden = container.modelPicker.hiddenFromPicker(),
+            onDismiss = { hiddenModelsMenu = false },
+            onSave = { ids ->
+                container.modelPicker.setHiddenFromPicker(ids)
+                hiddenModelsMenu = false
             },
         )
     }
@@ -494,6 +527,23 @@ internal fun SettingsScreenContent(
                             info = "Used for new agents in this app. Does not change PC or web.",
                             onInfo = { info = it },
                             onClick = { modelMenu = true },
+                        )
+                        ModelParamRow(
+                            model = modelItems.firstOrNull { it.id == defaultModel },
+                            params = defaultModelParams,
+                            onParams = {
+                                defaultModelParams = it
+                                container.modelPicker.saveParams(defaultModel, it)
+                            },
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                        val hiddenCount = container.modelPicker.hiddenFromPicker().size
+                        SettingsChoiceRow(
+                            title = "Models hidden from Auto (this device)",
+                            summary = if (hiddenCount == 0) "None hidden" else "$hiddenCount hidden in picker",
+                            info = HIDDEN_MODELS_INFO,
+                            onInfo = { info = it },
+                            onClick = { hiddenModelsMenu = true },
                         )
                         SettingsChoiceRow(
                             title = "User rule",
@@ -1039,4 +1089,63 @@ internal fun ChoiceDialog(
             TextButton(onClick = onDismiss) { Text("Close") }
         },
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HiddenModelsSheet(
+    models: List<ModelItem>,
+    hidden: Set<String>,
+    onDismiss: () -> Unit,
+    onSave: (Set<String>) -> Unit,
+) {
+    var draft by remember(hidden) { mutableStateOf(hidden) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Models hidden from Auto (this device)", style = MaterialTheme.typography.titleLarge)
+            Text(
+                HIDDEN_MODELS_INFO,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (models.isEmpty()) {
+                Text("Load models from your account first.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    models.sortedBy { it.displayName ?: it.id }.forEach { item ->
+                        FilterChip(
+                            selected = item.id in draft,
+                            onClick = {
+                                draft = if (item.id in draft) draft - item.id else draft + item.id
+                            },
+                            label = {
+                                Text(
+                                    item.displayName ?: item.id,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = { onSave(draft) }) { Text("Save") }
+            }
+        }
+    }
 }

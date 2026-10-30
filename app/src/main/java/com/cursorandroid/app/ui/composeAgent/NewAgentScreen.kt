@@ -284,7 +284,10 @@ fun NewAgentScreen(
             val fallback = container.store.defaultModel
             if (fallback.isNotBlank()) {
                 modelId = fallback
-                modelParams = models.firstOrNull { it.id == fallback }?.defaultParams().orEmpty()
+                modelParams = container.modelPicker.paramsFor(
+                    fallback,
+                    models.firstOrNull { it.id == fallback },
+                )
             }
             return@LaunchedEffect
         }
@@ -1105,18 +1108,20 @@ fun NewAgentScreen(
                     onDismiss = { modelPickerOpen = false },
                     onPick = { id ->
                         modelId = id
-                        modelParams = if (id.isBlank()) {
-                            emptyList()
-                        } else {
-                            models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
-                        }
+                        modelParams = container.modelPicker.paramsFor(
+                            id,
+                            models.firstOrNull { it.id == id },
+                        )
                         modelPickerOpen = false
                     },
                 )
                 ModelParamRow(
                     model = models.firstOrNull { it.id == modelId },
                     params = modelParams,
-                    onParams = { modelParams = it },
+                    onParams = {
+                        modelParams = it
+                        if (modelId.isNotBlank()) container.modelPicker.saveParams(modelId, it)
+                    },
                 )
 
                 ChoiceRow {

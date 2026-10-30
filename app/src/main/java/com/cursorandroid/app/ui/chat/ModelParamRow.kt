@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelParam
+import com.cursorandroid.app.data.api.modelParamChipLabel
 import com.cursorandroid.app.data.api.namedVariants
 import com.cursorandroid.app.data.api.setParam
 
@@ -49,7 +50,9 @@ fun ModelParamRow(
                 FilterChip(
                     selected = params.firstOrNull { it.id == parameter.id }?.value == option.value,
                     onClick = { onParams(model.setParam(params, parameter.id, option.value)) },
-                    label = { Text(option.displayName ?: option.value) },
+                    label = {
+                        Text(modelParamChipLabel(parameter.id, option.value, option.displayName))
+                    },
                 )
             }
         }
