@@ -1,5 +1,6 @@
 package com.cursorandroid.app.data.repo
 
+import com.cursorandroid.app.data.api.ModelParam
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -30,6 +31,17 @@ class SettingsSnapshotTest {
         assertEquals(0, snap.hideFinishedDays)
         assertTrue(snap.forges.isEmpty())
         assertTrue(snap.repoDefaults.isEmpty())
+    }
+
+    @Test
+    fun modelPickerFieldsRoundTrip() {
+        val snap = SettingsSnapshot(
+            modelsHiddenFromPicker = listOf("gpt-5"),
+            modelParamPrefs = mapOf("auto-smart" to listOf(ModelParam("optimize_for", "cost"))),
+        )
+        val again = json.decodeFromString<SettingsSnapshot>(json.encodeToString(SettingsSnapshot.serializer(), snap))
+        assertEquals(listOf("gpt-5"), again.modelsHiddenFromPicker)
+        assertEquals("cost", again.modelParamPrefs["auto-smart"]?.single()?.value)
     }
 
     @Test

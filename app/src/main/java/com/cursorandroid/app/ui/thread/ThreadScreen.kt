@@ -1527,7 +1527,10 @@ fun ThreadScreen(
         attaches = saved.toItems()
         models = runCatching { container.repo.models() }.getOrDefault(emptyList())
         if (vm.followParams.isEmpty() && vm.followModel.isNotBlank()) {
-            vm.followParams = models.firstOrNull { it.id == vm.followModel }?.defaultParams().orEmpty()
+            vm.followParams = container.modelPicker.paramsFor(
+                vm.followModel,
+                models.firstOrNull { it.id == vm.followModel },
+            )
         }
         draftReady = true
     }
@@ -1873,7 +1876,10 @@ fun ThreadScreen(
             ModelParamRow(
                 model = models.firstOrNull { it.id == vm.followModel },
                 params = vm.followParams,
-                onParams = { vm.followParams = it },
+                onParams = {
+                    vm.followParams = it
+                    if (vm.followModel.isNotBlank()) container.modelPicker.saveParams(vm.followModel, it)
+                },
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
             if (showFollowEnv) {
@@ -1961,11 +1967,10 @@ fun ThreadScreen(
         onDismiss = { modelPickerOpen = false },
         onPick = { id ->
             vm.followModel = id
-            vm.followParams = if (id.isBlank()) {
-                emptyList()
-            } else {
-                models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
-            }
+            vm.followParams = container.modelPicker.paramsFor(
+                id,
+                models.firstOrNull { it.id == id },
+            )
             modelPickerOpen = false
         },
     )

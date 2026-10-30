@@ -2,6 +2,7 @@ package com.cursorandroid.app.ui.thread
 
 import com.cursorandroid.app.data.api.ModelItem
 import com.cursorandroid.app.data.api.ModelSelection
+import com.cursorandroid.app.data.api.routerOptimizeLabel
 import com.cursorandroid.app.data.repo.RunModelBook
 import com.cursorandroid.app.data.repo.TranscriptLine
 
@@ -32,7 +33,9 @@ internal fun modelEffort(selection: ModelSelection?, catalog: List<ModelItem>): 
 internal fun modelLabel(selection: ModelSelection?, catalog: List<ModelItem>): String? {
     val name = modelName(selection, catalog) ?: return null
     val effort = modelEffort(selection, catalog)
-    return if (effort == null) name else "$name · $effort"
+    val router = routerOptimizeLabel(selection, catalog)
+    val tail = listOfNotNull(router, effort).distinct().joinToString(" · ").takeIf { it.isNotBlank() }
+    return if (tail == null) name else "$name · $tail"
 }
 
 internal fun senderLabel(model: String?): String = if (model.isNullOrBlank()) "Agent" else "Agent · $model"

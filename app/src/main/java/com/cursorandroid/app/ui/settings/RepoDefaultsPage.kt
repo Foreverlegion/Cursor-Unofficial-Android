@@ -188,11 +188,10 @@ fun RepoDefaultsPage(
             onPick = { id ->
                 editing = item.copy(
                     modelId = id,
-                    modelParams = if (id.isBlank()) {
-                        emptyList()
-                    } else {
-                        models.firstOrNull { it.id == id }?.defaultParams().orEmpty()
-                    },
+                    modelParams = container.modelPicker.paramsFor(
+                        id,
+                        models.firstOrNull { it.id == id },
+                    ),
                 )
                 modelMenu = false
             },
@@ -200,7 +199,11 @@ fun RepoDefaultsPage(
         ModelParamRow(
             model = models.firstOrNull { it.id == item.modelId },
             params = item.modelParams,
-            onParams = { editing = item.copy(modelParams = it) },
+            onParams = {
+                val next = item.copy(modelParams = it)
+                editing = next
+                if (item.modelId.isNotBlank()) container.modelPicker.saveParams(item.modelId, it)
+            },
             modifier = Modifier.padding(horizontal = 16.dp),
         )
         OutlinedTextField(
