@@ -1,3 +1,7 @@
+# 1.0.37
+
+- First launch (and Settings, Connections, Link handling) warns when Grok Bot is installed and owns cursor.com links, with steps to turn off Grok Bot Open supported links and enable cursor.com for this app. Remind me, Don't show again, and Take me there open the right system settings; returning from settings re-checks and confirms when agent links open here.
+
 # 1.0.36
 
 - Agent list and chat header status pills always show the agent's live run state (Running, Needs approval, Done, Failed). A running agent no longer shows Failed because an older run or PR CI failed.

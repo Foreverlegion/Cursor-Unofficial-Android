@@ -59,7 +59,12 @@ import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.CreateAgentResponse
 import com.cursorandroid.app.data.repo.ProfileRule
 import com.cursorandroid.app.data.repo.TranscriptLine
+import com.cursorandroid.app.data.links.LinkOwnershipDialogKind
+import com.cursorandroid.app.data.links.LinkOwnershipIntents
+import com.cursorandroid.app.data.links.LinkOwnershipPolicy
+import com.cursorandroid.app.data.links.LinkOwnershipProbe
 import com.cursorandroid.app.ui.settings.FeedbackNoticePrompt
+import com.cursorandroid.app.ui.settings.LinkOwnershipDialog
 import com.cursorandroid.app.ui.settings.ProfileRulePrompt
 import com.cursorandroid.app.ui.settings.SettingsScreen
 import com.cursorandroid.app.ui.signIn.SignInScreen
@@ -232,6 +237,63 @@ private fun CursorAppContent(
         }
         return
     }
+    val linkProbe = remember(context) { LinkOwnershipProbe.from(context) }
+    var linkDialog by remember { mutableStateOf(LinkOwnershipDialogKind.None) }
+    var linkHandlingSummary by remember { mutableStateOf("") }
+    var linkManualCheck by remember { mutableStateOf(false) }
+    var linkSuccessPending by remember { mutableStateOf(false) }
+    var linkResumeTick by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        linkResumeTick += 1
+    }
+    fun applyLinkDecision(manual: Boolean) {
+        val snap = linkProbe.snapshot()
+        val decision = LinkOwnershipPolicy.decide(
+            snap = snap,
+            dismissed = container.store.linkOwnershipDismissed,
+            pendingGrok = container.store.linkOwnershipPendingGrok,
+            pendingOwn = container.store.linkOwnershipPendingOwn,
+            manual = manual,
+        )
+        linkHandlingSummary = decision.settingsSummary
+        if (decision.clearPendingGrok) container.store.linkOwnershipPendingGrok = false
+        if (decision.clearPendingOwn) container.store.linkOwnershipPendingOwn = false
+        linkDialog = decision.dialog
+        linkSuccessPending = decision.showSuccessSnackbar
+    }
+    LaunchedEffect(linkResumeTick, linkManualCheck) {
+        applyLinkDecision(manual = linkManualCheck)
+        linkManualCheck = false
+    }
+    if (linkDialog != LinkOwnershipDialogKind.None) {
+        LinkOwnershipDialog(
+            kind = linkDialog,
+            onTakeMeThere = {
+                when (linkDialog) {
+                    LinkOwnershipDialogKind.EnableOwnLinks -> {
+                        container.store.linkOwnershipPendingOwn = true
+                        LinkOwnershipIntents.openOwnOpenByDefault(context)
+                    }
+                    LinkOwnershipDialogKind.GrokConflict,
+                    LinkOwnershipDialogKind.GrokStillConflict,
+                    -> {
+                        container.store.linkOwnershipPendingGrok = true
+                        LinkOwnershipIntents.openGrokOpenByDefault(context)
+                    }
+                    LinkOwnershipDialogKind.None -> Unit
+                }
+                linkDialog = LinkOwnershipDialogKind.None
+            },
+            onRemindMe = { linkDialog = LinkOwnershipDialogKind.None },
+            onDontShowAgain = {
+                container.store.linkOwnershipDismissed = true
+                container.store.linkOwnershipPendingGrok = false
+                container.store.linkOwnershipPendingOwn = false
+                linkDialog = LinkOwnershipDialogKind.None
+            },
+        )
+        return
+    }
     var whatsNew by remember {
         mutableStateOf(
             WhatsNewPolicy.shouldShow(
@@ -261,6 +323,12 @@ private fun CursorAppContent(
     val sessionExpired = !demo && rejectedKey != null && rejectedKey == container.store.apiKey?.trim()
     val profileScope = rememberCoroutineScope()
     val profileSnack = remember { SnackbarHostState() }
+    LaunchedEffect(linkSuccessPending) {
+        if (linkSuccessPending) {
+            profileSnack.showSnackbar(LinkOwnershipPolicy.SUCCESS)
+            linkSuccessPending = false
+        }
+    }
     var profileStarting by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         if (demo) {
@@ -323,6 +391,8 @@ private fun CursorAppContent(
                             onSessionChanged = { demo = container.store.demoMode },
                             onAppearanceChanged = refreshSettings,
                             openAccountTick = accountTick,
+                            linkHandlingSummary = linkHandlingSummary,
+                            onLinkHandlingCheck = { linkManualCheck = true },
                             onUserRuleAgent = { created, text ->
                                 openLaunchedAgent(container, context, created, text)
                                 selectedId = created.agent.id
@@ -365,6 +435,8 @@ private fun CursorAppContent(
                     onSessionChanged = { demo = container.store.demoMode },
                     onAppearanceChanged = refreshSettings,
                     openAccountTick = accountTick,
+                    linkHandlingSummary = linkHandlingSummary,
+                    onLinkHandlingCheck = { linkManualCheck = true },
                     onUserRuleAgent = { created, text ->
                         openLaunchedAgent(container, context, created, text)
                         selectedId = created.agent.id
