@@ -9,7 +9,7 @@ class InboxStagingTest {
     @Test
     fun stagedAgentShowsBeforeListReturnsIt() {
         val hub = InboxStagingHub()
-        val existing = listOf(agent("old"))
+        val existing = listOf(agent("old", "IDLE"))
         hub.stage(agent("new", "RUNNING"))
         val merged = hub.merge(existing, emptyList())
         assertEquals(listOf("new", "old"), merged.map { it.id })

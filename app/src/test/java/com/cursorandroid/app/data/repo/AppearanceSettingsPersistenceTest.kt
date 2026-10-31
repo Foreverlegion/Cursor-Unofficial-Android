@@ -38,7 +38,7 @@ class AppearanceSettingsPersistenceTest {
     @Test
     fun builtInFolderIconsStillAccepted() {
         val ui = UiPrefsStore.open(LegacyUiPrefs(), file).also { open += it }
-        val folders = LocalFolderStore(ui) { "fld-1" }
+        val folders = LocalFolderStore(ui, newId = { "fld-1" })
         val created = folders.create("Demo")!!
         LocalFolderStore.ICON_CHOICES.forEach { icon ->
             assertTrue("missing built-in icon $icon", icon in LocalFolderStore.ICON_IDS)
@@ -50,7 +50,7 @@ class AppearanceSettingsPersistenceTest {
     @Test
     fun customFolderIconRefPersists() {
         val ui = UiPrefsStore.open(LegacyUiPrefs(), file).also { open += it }
-        val folders = LocalFolderStore(ui) { "fld-1" }
+        val folders = LocalFolderStore(ui, newId = { "fld-1" })
         val created = folders.create("Custom")!!
         folders.setIcon(created.id, "${CUSTOM_FOLDER_ICON_PREFIX}fld-1.webp")
         ui.flush()

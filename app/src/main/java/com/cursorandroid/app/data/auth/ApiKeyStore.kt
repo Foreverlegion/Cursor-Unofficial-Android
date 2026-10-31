@@ -168,6 +168,24 @@ class ApiKeyStore internal constructor(
             notifyPrefs.edit(commit = true) { putBoolean(BATTERY_KNOWN_EXEMPT, value) }
         }
 
+    var linkOwnershipDismissed: Boolean
+        get() = notifyPrefs.getBoolean(LINK_OWNERSHIP_DISMISSED, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(LINK_OWNERSHIP_DISMISSED, value) }
+        }
+
+    var linkOwnershipPendingGrok: Boolean
+        get() = notifyPrefs.getBoolean(LINK_OWNERSHIP_PENDING_GROK, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(LINK_OWNERSHIP_PENDING_GROK, value) }
+        }
+
+    var linkOwnershipPendingOwn: Boolean
+        get() = notifyPrefs.getBoolean(LINK_OWNERSHIP_PENDING_OWN, false)
+        set(value) {
+            notifyPrefs.edit { putBoolean(LINK_OWNERSHIP_PENDING_OWN, value) }
+        }
+
     /** versionCode whose What's new popup was last shown or skipped; -1 when never recorded. */
     var whatsNewSeenCode: Int
         get() = notifyPrefs.getInt(WHATS_NEW_SEEN, -1)
@@ -449,6 +467,9 @@ class ApiKeyStore internal constructor(
         private const val BATTERY_KNOWN_EXEMPT = "battery_known_exempt"
         private const val FEEDBACK_NOTICE = "feedback_notice_seen"
         private const val PROFILE_RULE_SEEN = "profile_rule_seen"
+        private const val LINK_OWNERSHIP_DISMISSED = "link_ownership_dismissed"
+        private const val LINK_OWNERSHIP_PENDING_GROK = "link_ownership_pending_grok"
+        private const val LINK_OWNERSHIP_PENDING_OWN = "link_ownership_pending_own"
         private const val WHATS_NEW_SEEN = "whats_new_seen_code"
         private const val DEMO_MODE = "demo_mode"
         const val DEFAULT_THEME_COLOR = 0xFFF54E00.toInt()

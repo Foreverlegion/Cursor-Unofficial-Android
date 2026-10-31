@@ -15,6 +15,7 @@
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
+        <package android:name="ai.x.grok.bot" />
     </queries>
 
     <application

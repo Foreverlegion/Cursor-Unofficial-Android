@@ -82,9 +82,11 @@ import com.cursorandroid.app.data.repo.MachineMarkState
 import com.cursorandroid.app.data.repo.FeedbackPolicy
 import com.cursorandroid.app.data.api.ApiException
 import com.cursorandroid.app.data.api.CreateAgentResponse
+import com.cursorandroid.app.data.links.LinkOwnershipPolicy
+import com.cursorandroid.app.data.links.LinkOwnershipProbe
 import com.cursorandroid.app.data.repo.GithubRepos
-import com.cursorandroid.app.data.repo.UserRuleSync
 import com.cursorandroid.app.data.repo.SafeLinks
+import com.cursorandroid.app.data.repo.UserRuleSync
 import com.cursorandroid.app.data.repo.displayTotal
 import com.cursorandroid.app.ui.AppInsets
 import com.cursorandroid.app.ui.inbox.HideFinishedAge
@@ -111,8 +113,6 @@ internal enum class SettingsPage(val title: String, val summary: String) {
     About("About & account", "Stats, usage, and sign out"),
 }
 
-private const val LINK_INFO =
-    "https://cursor.com/agents links are not verified, so Android shows a chooser until you allow them under Open by default."
 private const val INBOX_TAB_INFO =
     "Cloud always stays. Hide Pool or Remote if you do not use them. Hidden tabs fold back into Cloud."
 private const val BATTERY_INFO =
@@ -141,6 +141,8 @@ fun SettingsScreen(
     onSessionChanged: () -> Unit = {},
     onAppearanceChanged: () -> Unit = {},
     openAccountTick: Int = 0,
+    linkHandlingSummary: String = "",
+    onLinkHandlingCheck: () -> Unit = {},
     onUserRuleAgent: (CreateAgentResponse, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
@@ -152,6 +154,8 @@ fun SettingsScreen(
         onSessionChanged = onSessionChanged,
         onAppearanceChanged = onAppearanceChanged,
         openAccountTick = openAccountTick,
+        linkHandlingSummary = linkHandlingSummary,
+        onLinkHandlingCheck = onLinkHandlingCheck,
         onUserRuleAgent = onUserRuleAgent,
         modifier = modifier,
     )
@@ -167,6 +171,8 @@ internal fun SettingsScreenContent(
     onSessionChanged: () -> Unit = {},
     onAppearanceChanged: () -> Unit = {},
     openAccountTick: Int = 0,
+    linkHandlingSummary: String = "",
+    onLinkHandlingCheck: () -> Unit = {},
     onUserRuleAgent: (CreateAgentResponse, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     initialPage: SettingsPage = SettingsPage.Home,
@@ -634,12 +640,15 @@ internal fun SettingsScreenContent(
                         )
                     }
                     SettingsPage.Connections -> {
+                        val linkSummary = linkHandlingSummary.ifBlank {
+                            LinkOwnershipPolicy.settingsSummary(LinkOwnershipProbe.from(context).snapshot())
+                        }
                         SettingsLinkRow(
-                            title = "Open Cursor agent links",
-                            summary = "Allow this app under Open by default",
-                            info = LINK_INFO,
+                            title = stringResource(R.string.settings_link_handling),
+                            summary = linkSummary,
+                            info = stringResource(R.string.settings_link_handling_info),
                             onInfo = { info = it },
-                            onClick = { SafeLinks.openSupportedLinks(context) },
+                            onClick = onLinkHandlingCheck,
                         )
                         SettingsLinkRow(
                             title = "Remote Control",
